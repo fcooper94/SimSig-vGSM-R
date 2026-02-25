@@ -7,55 +7,7 @@
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 
-try {
-    $root = [System.Windows.Automation.AutomationElement]::RootElement
-
-    # Find the "Telephone Calls" window
-    $condition = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::NameProperty,
-        "Telephone Calls"
-    )
-    $window = $root.FindFirst(
-        [System.Windows.Automation.TreeScope]::Children,
-        $condition
-    )
-
-    if ($null -eq $window) {
-        # Try by class name as fallback
-        $classCond = New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-            "TTelephoneForm"
-        )
-        $window = $root.FindFirst(
-            [System.Windows.Automation.TreeScope]::Children,
-            $classCond
-        )
-    }
-
-    if ($null -eq $window) {
-        Write-Output "[]"
-        exit 0
-    }
-
-    # Find the TListBox control
-    $listBoxCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-        "TListBox"
-    )
-    $listBox = $window.FindFirst(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $listBoxCond
-    )
-
-    if ($null -eq $listBox) {
-        Write-Output "[]"
-        exit 0
-    }
-
-    $handle = $listBox.Current.NativeWindowHandle
-
-    # Define Win32 SendMessage for ListBox
-    Add-Type @"
+Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -85,35 +37,87 @@ public class SimSigListBox {
 }
 "@
 
-    $hwnd = [IntPtr]$handle
-    $count = [SimSigListBox]::GetCount($hwnd)
-
-    if ($count -le 0) {
-        Write-Output "[]"
-        exit 0
-    }
-
+try {
+    $root = [System.Windows.Automation.AutomationElement]::RootElement
     $calls = @()
-    for ($i = 0; $i -lt $count; $i++) {
-        $text = [SimSigListBox]::GetText($hwnd, $i)
-        if ($text) {
-            $call = @{
-                train  = $text
-                status = "Unanswered"
-            }
-            $calls += $call
+    $simName = ""
+
+    # Read sim name from TMainForm/TSimForm window title first
+    $mainCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+        "TMainForm"
+    )
+    $mainWin = $root.FindFirst(
+        [System.Windows.Automation.TreeScope]::Children,
+        $mainCond
+    )
+    if ($null -eq $mainWin) {
+        $simCond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+            "TSimForm"
+        )
+        $mainWin = $root.FindFirst(
+            [System.Windows.Automation.TreeScope]::Children,
+            $simCond
+        )
+    }
+    if ($null -ne $mainWin) {
+        $title = $mainWin.Current.Name
+        if ($title -match "^SimSig\s*-\s*(.+?)\s*\(") {
+            $simName = $Matches[1].Trim()
+        } elseif ($title -match "^SimSig\s*-\s*(.+)$") {
+            $simName = $Matches[1].Trim()
         }
     }
 
-    if ($calls.Count -eq 0) {
-        Write-Output "[]"
-    } elseif ($calls.Count -eq 1) {
-        $json = $calls[0] | ConvertTo-Json -Compress
-        Write-Output "[$json]"
-    } else {
-        $json = $calls | ConvertTo-Json -Compress
-        Write-Output $json
+    # Find the "Telephone Calls" window
+    $condition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::NameProperty,
+        "Telephone Calls"
+    )
+    $window = $root.FindFirst(
+        [System.Windows.Automation.TreeScope]::Children,
+        $condition
+    )
+    if ($null -eq $window) {
+        $classCond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+            "TTelephoneForm"
+        )
+        $window = $root.FindFirst(
+            [System.Windows.Automation.TreeScope]::Children,
+            $classCond
+        )
     }
+
+    # Read calls from listbox if telephone window is open
+    if ($null -ne $window) {
+        $listBoxCond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+            "TListBox"
+        )
+        $listBox = $window.FindFirst(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $listBoxCond
+        )
+        if ($null -ne $listBox) {
+            $hwnd = [IntPtr]$listBox.Current.NativeWindowHandle
+            $count = [SimSigListBox]::GetCount($hwnd)
+            for ($i = 0; $i -lt $count; $i++) {
+                $text = [SimSigListBox]::GetText($hwnd, $i)
+                if ($text) {
+                    $calls += @{ train = $text; status = "Unanswered" }
+                }
+            }
+        }
+    }
+
+    $result = @{ calls = $calls; simName = $simName }
+    if ($calls.Count -eq 0) {
+        $result.calls = @()
+    }
+    $json = $result | ConvertTo-Json -Compress -Depth 3
+    Write-Output $json
 } catch {
-    Write-Output "[]"
+    Write-Output '{"calls":[],"simName":""}'
 }

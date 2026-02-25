@@ -47,7 +47,7 @@ const PTTUI = {
   activate() {
     this.isActive = true;
     this.pttBtn.classList.add('active');
-    this.pttStatus.textContent = 'PTT: ON';
+    this.pttStatus.textContent = 'ON';
     this.pttStatus.classList.add('active');
 
     if (typeof AudioPipeline !== 'undefined') {
@@ -58,7 +58,7 @@ const PTTUI = {
   deactivate() {
     this.isActive = false;
     this.pttBtn.classList.remove('active');
-    this.pttStatus.textContent = 'PTT: OFF';
+    this.pttStatus.textContent = 'OFF';
     this.pttStatus.classList.remove('active');
 
     if (typeof AudioPipeline !== 'undefined') {

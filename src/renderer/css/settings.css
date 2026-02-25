@@ -4,7 +4,7 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -17,8 +17,8 @@
 
 .modal-content {
   background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 2px solid var(--border);
+  border-radius: 4px;
   padding: 24px;
   width: 480px;
   max-height: 80vh;
@@ -27,7 +27,7 @@
 
 .modal-content h2 {
   margin-bottom: 16px;
-  color: var(--text);
+  color: var(--text-light);
   font-size: 18px;
 }
 
@@ -39,7 +39,7 @@ fieldset {
 }
 
 legend {
-  color: var(--accent);
+  color: var(--warning);
   font-size: 13px;
   font-weight: bold;
   padding: 0 8px;
@@ -51,7 +51,7 @@ label {
   justify-content: space-between;
   margin-bottom: 8px;
   font-size: 13px;
-  color: var(--text);
+  color: var(--text-light);
 }
 
 label input, label select {
@@ -82,14 +82,14 @@ label input[type="range"] {
 label input[type="range"] + span {
   min-width: 36px;
   text-align: right;
-  color: var(--text-dim);
+  color: var(--border-light);
   font-size: 12px;
   margin-left: 8px;
 }
 
 #ptt-rebind-btn {
   background: var(--bg-panel);
-  color: var(--text-dim);
+  color: var(--text);
   border: 1px solid var(--border);
   padding: 6px 12px;
   border-radius: 4px;
@@ -101,12 +101,11 @@ label input[type="range"] + span {
 
 #ptt-rebind-btn:hover {
   border-color: var(--accent);
-  color: var(--text);
 }
 
 #ptt-rebind-btn.listening {
-  border-color: var(--warning);
-  color: var(--warning);
+  border-color: #ffd600;
+  color: #ffd600;
   animation: pulse 1s infinite;
 }
 
@@ -128,14 +127,72 @@ label input[type="range"] + span {
 }
 
 .modal-actions button:hover {
-  background: var(--accent-dim);
+  background: #b0b0b0;
 }
 
 #settings-save {
   background: var(--accent) !important;
-  border-color: var(--accent) !important;
+  color: var(--text-light) !important;
+  border-color: var(--accent-dim) !important;
 }
 
 #settings-save:hover {
   background: var(--accent-dim) !important;
+}
+
+/* Confirmation modal */
+.confirm-content {
+  background: var(--tab-bg);
+  border: 2px solid var(--border);
+  border-radius: 4px;
+  padding: 24px;
+  min-width: 320px;
+  text-align: center;
+  color: var(--text);
+}
+
+.confirm-content h3 {
+  margin-bottom: 12px;
+  color: var(--accent);
+  font-size: 16px;
+}
+
+.confirm-content p {
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.confirm-actions button {
+  padding: 6px 24px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: bold;
+}
+
+#confirm-yes {
+  background: var(--accent);
+  color: var(--text-light);
+  border-color: var(--accent-dim);
+}
+
+#confirm-yes:hover {
+  background: var(--accent-dim);
+}
+
+#confirm-no {
+  background: var(--tab-bg);
+  color: var(--text);
+}
+
+#confirm-no:hover {
+  background: #b0b0b0;
 }

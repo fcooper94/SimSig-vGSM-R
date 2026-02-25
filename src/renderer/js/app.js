@@ -19,14 +19,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     PhoneCallsUI.update(calls);
   });
 
-  // Signal commands
-  document.getElementById('all-danger-btn').addEventListener('click', async () => {
+  // Auto-populate panel name from SimSig window title
+  window.simsigAPI.sim.onName((name) => {
+    document.getElementById('panel-name-tab').textContent = name;
+  });
+
+  // Emergency button — shows confirmation modal
+  document.getElementById('emrg-btn').addEventListener('click', () => {
+    document.getElementById('confirm-modal').classList.remove('hidden');
+  });
+
+  document.getElementById('confirm-yes').addEventListener('click', async () => {
+    document.getElementById('confirm-modal').classList.add('hidden');
     const count = await window.simsigAPI.commands.allSignalsToDanger();
     console.log(`Sent bpull for ${count} signals`);
+  });
+
+  document.getElementById('confirm-no').addEventListener('click', () => {
+    document.getElementById('confirm-modal').classList.add('hidden');
   });
 
   // Open message log window
   document.getElementById('msglog-btn').addEventListener('click', () => {
     window.simsigAPI.commands.openMessageLog();
   });
+
+  // msglog-btn handler is above; panel name is set via sim.onName listener
 });

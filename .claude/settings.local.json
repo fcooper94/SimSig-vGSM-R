@@ -17,7 +17,8 @@
       "Bash(node_modules/electron/dist/electron.exe:*)",
       "WebFetch(domain:www.electronjs.org)",
       "Bash(powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File:*)",
-      "Bash(powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \":*)"
+      "Bash(powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \":*)",
+      "WebFetch(domain:elevenlabs.io)"
     ]
   }
 }

@@ -4,10 +4,12 @@ const path = require('path');
 const SCRIPT_PATH = path.join(__dirname, 'read-phone-calls.ps1');
 
 class PhoneReader {
-  constructor(onChange) {
+  constructor(onChange, onSimName) {
     this.onChange = onChange;
+    this.onSimName = onSimName;
     this.intervalId = null;
     this.lastJson = '[]';
+    this.simNameSent = false;
     this.polling = false;
   }
 
@@ -47,15 +49,25 @@ class PhoneReader {
       const output = (stdout || '').trim();
       if (!output) return;
 
-      // Only notify renderer when the data actually changes
-      if (output !== this.lastJson) {
-        this.lastJson = output;
-        try {
-          const calls = JSON.parse(output);
+      try {
+        const data = JSON.parse(output);
+        // New format: { calls: [...], simName: "..." }
+        const calls = data.calls || [];
+        const callsJson = JSON.stringify(calls);
+
+        // Only notify renderer when calls actually change
+        if (callsJson !== this.lastJson) {
+          this.lastJson = callsJson;
           this.onChange(calls);
-        } catch (parseErr) {
-          console.warn('[PhoneReader] Failed to parse JSON:', parseErr.message);
         }
+
+        // Send sim name once
+        if (!this.simNameSent && data.simName && this.onSimName) {
+          this.simNameSent = true;
+          this.onSimName(data.simName);
+        }
+      } catch (parseErr) {
+        console.warn('[PhoneReader] Failed to parse JSON:', parseErr.message);
       }
     });
   }

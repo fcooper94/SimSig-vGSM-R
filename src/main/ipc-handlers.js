@@ -10,6 +10,9 @@ const PhoneReader = require('./phone-reader');
 const ANSWER_SCRIPT = require('path').join(__dirname, 'answer-phone-call.ps1');
 const REPLY_SCRIPT = require('path').join(__dirname, 'reply-phone-call.ps1');
 const RECOGNIZE_SCRIPT = require('path').join(__dirname, 'speech-recognize.ps1');
+const TOGGLE_PAUSE_SCRIPT = require('path').join(__dirname, 'toggle-pause.ps1');
+
+const ELEVENLABS_API_KEY = '3998465c5e3d9716316d59035e326752511cb408fb6bb94e37bf7d1df273dc54';
 
 let stompManager = null;
 let phoneReader = null;
@@ -27,6 +30,7 @@ function sendToMainWindow(channel, data) {
     wins[0].webContents.send(channel, data);
   }
 }
+
 
 function registerIpcHandlers() {
   // Settings
@@ -54,23 +58,26 @@ function registerIpcHandlers() {
         onMessage: (msg) => {
           const prevClock = getClockState().clockSeconds;
 
-          // Handle clock messages (pause/speed changes)
+          // Handle clock messages (pause/speed changes) — always forward to renderer
           if (msg.type === 'clock_msg') {
             updateClock(msg.data);
+            const clockState = getClockState();
+            sendToMainWindow(channels.CLOCK_UPDATE, {
+              ...clockState,
+              formatted: formatTime(clockState.clockSeconds),
+            });
           }
 
           // Extract game time from any message that has a time field
           if (msg.data && msg.data.time != null) {
             updateClockTime(msg.data.time);
-          }
-
-          // Only push clock update to renderer when the time changes
-          const clockState = getClockState();
-          if (clockState.clockSeconds > 0 && clockState.clockSeconds !== prevClock) {
-            sendToMainWindow(channels.CLOCK_UPDATE, {
-              ...clockState,
-              formatted: formatTime(clockState.clockSeconds),
-            });
+            const clockState = getClockState();
+            if (clockState.clockSeconds > 0 && clockState.clockSeconds !== prevClock) {
+              sendToMainWindow(channels.CLOCK_UPDATE, {
+                ...clockState,
+                formatted: formatTime(clockState.clockSeconds),
+              });
+            }
           }
 
           // Send messages to all windows (main + message log)
@@ -87,12 +94,28 @@ function registerIpcHandlers() {
 
       stompManager.connect();
 
+      // Briefly pause/unpause SimSig to trigger a clock_msg so the clock starts
+      setTimeout(() => {
+        execFile('powershell', [
+          '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+          '-File', TOGGLE_PAUSE_SCRIPT,
+        ], { timeout: 5000 }, (err, stdout, stderr) => {
+          if (err) console.error('[TogglePause] Error:', err.message);
+          if (stdout) console.log('[TogglePause]', stdout.trim());
+          if (stderr) console.error('[TogglePause] stderr:', stderr.trim());
+        });
+      }, 2000);
+
       // Start polling for phone calls from the SimSig window
       if (phoneReader) phoneReader.stopPolling();
-      phoneReader = new PhoneReader((calls) => {
-        sendToMainWindow(channels.PHONE_CALLS_UPDATE, calls);
-      });
+      phoneReader = new PhoneReader(
+        (calls) => sendToMainWindow(channels.PHONE_CALLS_UPDATE, calls),
+        (simName) => sendToMainWindow(channels.SIM_NAME, simName),
+      );
       phoneReader.startPolling(2000);
+
+      // Pre-fetch ElevenLabs voices in background so first TTS is instant
+      prefetchVoices().catch(() => {});
     } catch (err) {
       console.error('[Gateway] Connection failed:', err);
       sendToMainWindow(channels.CONNECTION_STATUS, { status: 'error', error: err.message });
@@ -190,75 +213,113 @@ function registerIpcHandlers() {
     createMessageLogWindow();
   });
 
-  // TTS — ElevenLabs
-  ipcMain.handle(channels.TTS_GET_VOICES, () => {
-    const apiKey = settings.get('tts.apiKey');
-    if (!apiKey) return [];
-    if (ttsVoicesCache) return ttsVoicesCache;
-
+  // TTS — ElevenLabs (account voices + shared library for more British voices)
+  function fetchJSON(url, apiKey) {
     return new Promise((resolve) => {
-      const req = https.request('https://api.elevenlabs.io/v1/voices', {
+      const req = https.request(url, {
         method: 'GET',
         headers: { 'xi-api-key': apiKey },
       }, (res) => {
         const chunks = [];
         res.on('data', (chunk) => chunks.push(chunk));
         res.on('end', () => {
-          try {
-            const data = JSON.parse(Buffer.concat(chunks).toString());
-            const voices = (data.voices || [])
-              .filter((v) => {
-                const accent = (v.labels?.accent || '').toLowerCase();
-                return accent.includes('british') || accent.includes('english');
-              })
-              .map((v) => ({
-                id: v.voice_id,
-                name: v.name,
-                accent: v.labels?.accent || '',
-                gender: v.labels?.gender || '',
-              }));
-            ttsVoicesCache = voices;
-            console.log(`[TTS] Found ${voices.length} British voices`);
-            resolve(voices);
-          } catch {
-            resolve([]);
+          if (res.statusCode !== 200) {
+            console.error(`[TTS] API error ${res.statusCode} for ${url}: ${Buffer.concat(chunks).toString().slice(0, 200)}`);
+            resolve(null);
+            return;
           }
+          try { resolve(JSON.parse(Buffer.concat(chunks).toString())); }
+          catch { resolve(null); }
         });
       });
-      req.on('error', () => resolve([]));
+      req.on('error', () => resolve(null));
       req.end();
     });
-  });
+  }
+
+  async function prefetchVoices() {
+    if (ttsVoicesCache) return ttsVoicesCache;
+
+    const mapVoice = (v) => ({
+      id: v.voice_id,
+      name: v.name,
+      accent: v.labels?.accent || v.accent || '',
+      gender: v.labels?.gender || v.gender || '',
+    });
+    const isBritish = (v) => {
+      const accent = (v.labels?.accent || v.accent || '').toLowerCase();
+      return accent.includes('british') || accent.includes('english');
+    };
+
+    // Fetch account + shared voices in PARALLEL
+    const sharedUrlMale = 'https://api.elevenlabs.io/v1/shared-voices?accent=british&language=en&gender=male&category=professional&page_size=20&sort=usage_character_count_1y&sort_direction=desc';
+    const [accountData, sharedData] = await Promise.all([
+      fetchJSON('https://api.elevenlabs.io/v1/voices', ELEVENLABS_API_KEY),
+      fetchJSON(sharedUrlMale, ELEVENLABS_API_KEY),
+    ]);
+
+    const accountVoices = (accountData?.voices || []).filter(isBritish).map(mapVoice);
+    const sharedVoices = (sharedData?.voices || []).map((v) => ({
+      id: v.voice_id,
+      name: v.name,
+      accent: v.accent || '',
+      gender: v.gender || '',
+    }));
+
+    // Combine, dedup by voice_id, account voices first
+    const seen = new Set();
+    const combined = [];
+    for (const v of [...accountVoices, ...sharedVoices]) {
+      if (!seen.has(v.id)) {
+        seen.add(v.id);
+        combined.push(v);
+      }
+    }
+
+    if (combined.length === 0 && accountData?.voices?.length > 0) {
+      const fallback = accountData.voices.map(mapVoice);
+      ttsVoicesCache = fallback;
+      console.warn(`[TTS] No British voices, using all ${fallback.length} account voices`);
+      return fallback;
+    }
+
+    ttsVoicesCache = combined;
+    console.log(`[TTS] ${accountVoices.length} account + ${sharedVoices.length} shared = ${combined.length} voices ready`);
+    return combined;
+  }
+
+  ipcMain.handle(channels.TTS_GET_VOICES, () => prefetchVoices());
 
   ipcMain.handle(channels.TTS_SPEAK, (_event, text, voiceId) => {
-    const apiKey = settings.get('tts.apiKey');
-    if (!apiKey || !voiceId) return null;
+    if (!voiceId) return null;
 
     const body = JSON.stringify({
       text,
-      model_id: 'eleven_multilingual_v2',
-      voice_settings: { stability: 0.7, similarity_boost: 0.75 },
-      speed: 2.2,
+      model_id: 'eleven_flash_v2_5',
+      voice_settings: { stability: 0.3, similarity_boost: 0.85 },
+      speed: 3.0,
     });
 
+    // Use streaming endpoint with max latency optimization and smaller format
+    const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?optimize_streaming_latency=4&output_format=mp3_22050_32`;
+
     return new Promise((resolve) => {
-      const req = https.request(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      const req = https.request(url, {
         method: 'POST',
         headers: {
-          'xi-api-key': apiKey,
+          'xi-api-key': ELEVENLABS_API_KEY,
           'Content-Type': 'application/json',
-          'Accept': 'audio/mpeg',
         },
       }, (res) => {
         const chunks = [];
         res.on('data', (chunk) => chunks.push(chunk));
         res.on('end', () => {
           if (res.statusCode !== 200) {
-            console.error(`[TTS] API error ${res.statusCode}`);
+            const errBody = Buffer.concat(chunks).toString().slice(0, 200);
+            console.error(`[TTS] API error ${res.statusCode}: ${errBody}`);
             resolve(null);
             return;
           }
-          // Return raw buffer as array of bytes for renderer
           resolve(Array.from(Buffer.concat(chunks)));
         });
       });
@@ -271,10 +332,83 @@ function registerIpcHandlers() {
     });
   });
 
-  // STT — Windows Speech Recognition (free, no API key needed)
-  ipcMain.handle(channels.STT_TRANSCRIBE, () => {
+  // STT — ElevenLabs Scribe (preferred) or Windows Speech Recognition (fallback)
+  ipcMain.handle(channels.STT_TRANSCRIBE, (_event, audioData) => {
+    // Use ElevenLabs STT if audio data provided
+    if (audioData && audioData.length > 0) {
+      return new Promise((resolve) => {
+        console.log(`[STT] Using ElevenLabs Scribe (${audioData.length} bytes)...`);
+
+        const boundary = '----ElevenLabsBoundary' + Date.now();
+        const audioBuffer = Buffer.from(audioData);
+
+        // Build multipart form data — each part as a separate Buffer
+        const CRLF = '\r\n';
+        const bodyParts = [];
+        // model_id field
+        bodyParts.push(Buffer.from(
+          `--${boundary}${CRLF}` +
+          `Content-Disposition: form-data; name="model_id"${CRLF}${CRLF}` +
+          `scribe_v1${CRLF}`
+        ));
+        // language_code field
+        bodyParts.push(Buffer.from(
+          `--${boundary}${CRLF}` +
+          `Content-Disposition: form-data; name="language_code"${CRLF}${CRLF}` +
+          `en${CRLF}`
+        ));
+        // file field header
+        bodyParts.push(Buffer.from(
+          `--${boundary}${CRLF}` +
+          `Content-Disposition: form-data; name="file"; filename="audio.webm"${CRLF}` +
+          `Content-Type: audio/webm${CRLF}${CRLF}`
+        ));
+        // file binary data
+        bodyParts.push(audioBuffer);
+        // closing boundary
+        bodyParts.push(Buffer.from(`${CRLF}--${boundary}--${CRLF}`));
+        const body = Buffer.concat(bodyParts);
+
+        const req = https.request('https://api.elevenlabs.io/v1/speech-to-text', {
+          method: 'POST',
+          headers: {
+            'xi-api-key': ELEVENLABS_API_KEY,
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            'Content-Length': body.length,
+          },
+        }, (res) => {
+          const chunks = [];
+          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('end', () => {
+            const responseText = Buffer.concat(chunks).toString();
+            if (res.statusCode !== 200) {
+              console.error(`[STT] ElevenLabs API error ${res.statusCode}: ${responseText.slice(0, 200)}`);
+              resolve({ error: `API error ${res.statusCode}` });
+              return;
+            }
+            try {
+              const data = JSON.parse(responseText);
+              const text = (data.text || '').trim();
+              console.log(`[STT] ElevenLabs result: "${text}"`);
+              resolve(text);
+            } catch (parseErr) {
+              console.error('[STT] Parse error:', parseErr.message);
+              resolve({ error: 'Failed to parse STT response' });
+            }
+          });
+        });
+        req.on('error', (err) => {
+          console.error('[STT] ElevenLabs request error:', err.message);
+          resolve({ error: err.message });
+        });
+        req.write(body);
+        req.end();
+      });
+    }
+
+    // Fallback: Windows Speech Recognition
     return new Promise((resolve) => {
-      console.log('[STT] Starting Windows Speech Recognition...');
+      console.log('[STT] Using Windows Speech Recognition fallback...');
       execFile('powershell', [
         '-NoProfile', '-ExecutionPolicy', 'Bypass',
         '-File', RECOGNIZE_SCRIPT, '-TimeoutSeconds', '5',

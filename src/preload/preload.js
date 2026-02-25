@@ -19,6 +19,7 @@ const channels = {
   TTS_GET_VOICES: 'tts:get-voices',
   TTS_SPEAK: 'tts:speak',
   STT_TRANSCRIBE: 'stt:transcribe',
+  SIM_NAME: 'sim:name',
 };
 
 contextBridge.exposeInMainWorld('simsigAPI', {
@@ -56,6 +57,14 @@ contextBridge.exposeInMainWorld('simsigAPI', {
       const listener = (_event, data) => callback(data);
       ipcRenderer.on(channels.CLOCK_UPDATE, listener);
       return () => ipcRenderer.removeListener(channels.CLOCK_UPDATE, listener);
+    },
+  },
+
+  sim: {
+    onName: (callback) => {
+      const listener = (_event, name) => callback(name);
+      ipcRenderer.on(channels.SIM_NAME, listener);
+      return () => ipcRenderer.removeListener(channels.SIM_NAME, listener);
     },
   },
 

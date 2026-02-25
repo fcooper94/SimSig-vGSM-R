@@ -44,10 +44,6 @@ const SettingsUI = {
     document.getElementById('setting-username').value = settings.credentials?.username || '';
     document.getElementById('setting-password').value = settings.credentials?.password || '';
     document.getElementById('setting-ptt-keybind').value = settings.ptt?.keybind || 'Space';
-    document.getElementById('setting-panel-name').value = settings.signaller?.panelName || '';
-    document.getElementById('setting-tts-key').value = settings.tts?.apiKey || '';
-    document.getElementById('setting-stt-key').value = settings.stt?.apiKey || '';
-
     const micVol = settings.audio?.micVolume ?? 50;
     const outVol = settings.audio?.outputVolume ?? 50;
     document.getElementById('setting-mic-volume').value = micVol;
@@ -74,17 +70,6 @@ const SettingsUI = {
 
     const keybind = document.getElementById('setting-ptt-keybind').value;
     await window.simsigAPI.settings.set('ptt.keybind', keybind);
-
-    await window.simsigAPI.settings.set('signaller.panelName', document.getElementById('setting-panel-name').value);
-
-    const ttsKey = document.getElementById('setting-tts-key').value;
-    await window.simsigAPI.settings.set('tts.apiKey', ttsKey);
-    await window.simsigAPI.settings.set('stt.apiKey', document.getElementById('setting-stt-key').value);
-    // Clear cached voices so new key takes effect
-    if (typeof PhoneCallsUI !== 'undefined') {
-      PhoneCallsUI.elevenVoices = null;
-      PhoneCallsUI.voiceCache = {};
-    }
 
     // Update PTT keybind in real-time
     if (typeof PTTUI !== 'undefined') {

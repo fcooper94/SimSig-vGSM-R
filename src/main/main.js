@@ -11,7 +11,7 @@ function createWindow() {
     minWidth: 700,
     minHeight: 400,
     title: 'SimSig GSM-R Comms',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#505050',
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
@@ -43,7 +43,7 @@ function createMessageLogWindow() {
     minWidth: 400,
     minHeight: 300,
     title: 'Message Log - SimSig GSM-R',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#505050',
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload-msglog.js'),
       contextIsolation: true,

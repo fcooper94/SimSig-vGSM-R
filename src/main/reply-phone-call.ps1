@@ -88,6 +88,27 @@ public class Win32Reply {
         return result;
     }
 
+    // Find a visible top-level window titled "Message" or "Confirmation" with an Ok/OK button
+    public static IntPtr FindMessageDialog(string[] buttonTexts) {
+        IntPtr result = IntPtr.Zero;
+        EnumWindows((hWnd, lParam) => {
+            if (!IsWindowVisible(hWnd)) return true;
+            var sb = new System.Text.StringBuilder(256);
+            GetWindowText(hWnd, sb, 256);
+            string title = sb.ToString();
+            if (title == "Message" || title.Contains("onfirmation")) {
+                // Verify it has a matching button
+                IntPtr btn = FindButtonByText(hWnd, buttonTexts);
+                if (btn != IntPtr.Zero) {
+                    result = hWnd;
+                    return false;
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+        return result;
+    }
+
     // Find a visible top-level window that has a TEdit child and "onfirmation" in its title
     public static IntPtr FindConfirmationDialog() {
         IntPtr result = IntPtr.Zero;
@@ -151,6 +172,9 @@ try {
         Write-Output '{"error":"Answer dialog not found"}'
         exit 0
     }
+
+    # Save SimSig's process ID so we can send F6 later if needed
+    $simsigPid = $dialog.Current.ProcessId
 
     # Find the TListBox (reply options)
     $listBoxCond = New-Object System.Windows.Automation.PropertyCondition(
@@ -221,17 +245,11 @@ try {
     }
 
     # Wait for any subsequent OK/Close dialog and dismiss it
-    # SimSig shows a confirmation popup after the reply is processed
+    # SimSig shows a "Message" popup after the reply is processed
     Start-Sleep -Milliseconds 500
-    for ($attempt = 0; $attempt -lt 10; $attempt++) {
-        # Try known SimSig dialog class names
-        $popupHwnd = [Win32Reply]::FindWindow("TMessageForm", $null)
-        if ($popupHwnd -eq [IntPtr]::Zero) {
-            $popupHwnd = [Win32Reply]::FindWindow("#32770", $null)
-        }
-        if ($popupHwnd -eq [IntPtr]::Zero) {
-            $popupHwnd = [Win32Reply]::FindWindow("TForm", $null)
-        }
+    for ($attempt = 0; $attempt -lt 15; $attempt++) {
+        # Use EnumWindows to find a "Message" or "Confirmation" dialog with an Ok button
+        $popupHwnd = [Win32Reply]::FindMessageDialog($okTexts)
 
         if ($popupHwnd -ne [IntPtr]::Zero) {
             $okHwnd = [Win32Reply]::FindButtonByText($popupHwnd, $okTexts)
@@ -241,17 +259,32 @@ try {
             }
         }
 
-        # Also check foreground window as fallback
-        $fgHwnd = [Win32Reply]::GetForegroundWindow()
-        if ($fgHwnd -ne [IntPtr]::Zero) {
-            $okHwnd = [Win32Reply]::FindButtonByText($fgHwnd, $okTexts)
-            if ($okHwnd -ne [IntPtr]::Zero) {
-                [Win32Reply]::ClickButton($okHwnd)
-                break
-            }
-        }
-
         Start-Sleep -Milliseconds 200
+    }
+
+    # Check if the Telephone Calls window is still open
+    Start-Sleep -Milliseconds 300
+    $telFormCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+        "TTelephoneForm"
+    )
+    $telWindow = $root.FindFirst(
+        [System.Windows.Automation.TreeScope]::Children,
+        $telFormCond
+    )
+
+    if ($null -eq $telWindow -and $simsigPid -gt 0) {
+        # Window closed — send F6 to SimSig's main window to reopen it
+        try {
+            $proc = Get-Process -Id $simsigPid -ErrorAction Stop
+            $mainHwnd = $proc.MainWindowHandle
+            if ($mainHwnd -ne [IntPtr]::Zero) {
+                # WM_KEYDOWN=0x0100, VK_F6=0x75
+                [Win32Reply]::PostMessage($mainHwnd, 0x0100, [IntPtr]0x75, [IntPtr]::Zero) | Out-Null
+                Start-Sleep -Milliseconds 50
+                [Win32Reply]::PostMessage($mainHwnd, 0x0101, [IntPtr]0x75, [IntPtr]::Zero) | Out-Null
+            }
+        } catch {}
     }
 
     Write-Output '{"success":true}'

@@ -11,6 +11,7 @@
 </head>
 <body>
   <header id="top-bar">
+    <div id="panel-name-tab">Panel</div>
     <div id="connection-area">
       <span id="status-indicator" class="disconnected"></span>
       <span id="status-text">Disconnected</span>
@@ -22,41 +23,108 @@
   </header>
 
   <main id="app-content">
+    <!-- LEFT: Incoming calls table + placeholder grids -->
     <div id="left-panel">
-      <section id="radio-panel">
-        <div id="radio-display">
-          <div class="display-line" id="display-line-1">GSM-R COMMS</div>
-          <div class="display-line" id="display-line-2">Ready</div>
-          <div class="display-line" id="display-line-3"></div>
-          <div class="display-line" id="display-line-4"></div>
-        </div>
-        <div id="radio-controls">
-          <button id="ptt-btn" class="ptt-button">PTT</button>
-          <div id="ptt-status">PTT: OFF</div>
-        </div>
-        <div id="signal-controls">
-          <button id="all-danger-btn" class="danger-button">All Signals to Danger</button>
-        </div>
-      </section>
-
       <section id="phone-calls">
         <div id="phone-calls-header">
           <span>Incoming Calls</span>
           <span id="phone-calls-count" class="hidden">0</span>
         </div>
-        <div id="phone-calls-list">
-          <div class="no-calls">No outstanding calls</div>
+        <div id="calls-table-wrapper">
+          <table id="calls-table">
+            <thead>
+              <tr>
+                <th class="col-train">Train</th>
+                <th class="col-signal">Signal</th>
+                <th class="col-action">Action</th>
+              </tr>
+            </thead>
+            <tbody id="phone-calls-list"></tbody>
+          </table>
         </div>
+        <div id="no-calls-message" class="no-calls">No outstanding calls</div>
+      </section>
+      <section class="placeholder-grid">
+        <div class="placeholder-grid-inner"></div>
+      </section>
+      <section class="placeholder-grid">
+        <div class="placeholder-grid-inner"></div>
       </section>
     </div>
 
-    <div id="chat-panel">
+    <!-- RIGHT: Driver Comms chat + notification -->
+    <div id="right-panel">
       <div id="chat-header">
         <span>Driver Comms</span>
       </div>
       <div id="chat-messages"></div>
     </div>
   </main>
+
+  <!-- TAB BAR -->
+  <div id="tab-bar">
+    <span class="tab-item active">Area</span>
+    <span class="tab-item">FTs</span>
+    <span class="tab-item">Other</span>
+    <span class="tab-item">&nbsp;&nbsp;&nbsp;</span>
+    <span class="tab-item">Log</span>
+    <span class="tab-item">Trains Mobiles</span>
+    <span class="tab-item highlight" id="tab-incoming">Incoming (0)</span>
+  </div>
+
+  <!-- BOTTOM TOOLBAR -->
+  <footer id="bottom-bar">
+    <div id="radio-display">
+      <div class="display-line" id="display-line-1">GSM-R</div>
+      <div class="display-line" id="display-line-2">Ready</div>
+    </div>
+    <div class="toolbar-separator"></div>
+    <button class="toolbar-btn ptt-toolbar" id="ptt-btn">
+      <div class="toolbar-icon">&#9743;</div>
+      <span>PTT</span>
+    </button>
+    <div id="ptt-status" class="toolbar-ptt-status">OFF</div>
+    <div class="toolbar-separator"></div>
+    <button class="toolbar-btn emrg" id="emrg-btn">
+      <div class="toolbar-icon">&#9888;</div>
+      <span>Emrg.</span>
+    </button>
+    <button class="toolbar-btn" disabled>
+      <div class="toolbar-icon">&#8943;</div>
+      <span>More</span>
+    </button>
+    <button class="toolbar-btn" disabled>
+      <div class="toolbar-icon">&#128266;</div>
+      <span>Broadc.</span>
+    </button>
+    <button class="toolbar-btn" disabled>
+      <div class="toolbar-icon">&#128214;</div>
+      <span>PhoneBk</span>
+    </button>
+    <button class="toolbar-btn" disabled>
+      <div class="toolbar-icon">&#128222;</div>
+      <span>Dial</span>
+    </button>
+    <button class="toolbar-btn" disabled>
+      <div class="toolbar-icon">&#128101;</div>
+      <span>Conf.</span>
+    </button>
+    <button class="toolbar-btn" disabled>
+      <div class="toolbar-icon">&#10145;</div>
+      <span>Forward</span>
+    </button>
+    <button class="toolbar-btn" disabled>
+      <div class="toolbar-icon">&#9208;</div>
+      <span>Hold</span>
+    </button>
+    <button id="silence-btn" class="silence-btn hidden" title="Silence ring">&#128264;</button>
+    <div id="incoming-notification">
+      <div id="notification-train"></div>
+      <div id="notification-icon">&#128643;</div>
+      <div id="notification-signal"></div>
+      <button id="notification-answer-btn">[Answer]</button>
+    </div>
+  </footer>
 
   <div id="settings-modal" class="modal hidden">
     <div class="modal-content">
@@ -84,23 +152,22 @@
           <label>Keybind <input type="text" id="setting-ptt-keybind" readonly></label>
           <button type="button" id="ptt-rebind-btn">Press to rebind...</button>
         </fieldset>
-        <fieldset>
-          <legend>Signaller Identity</legend>
-          <label>Panel Name <input type="text" id="setting-panel-name" placeholder="e.g. Slough"></label>
-        </fieldset>
-        <fieldset>
-          <legend>Driver Voice (ElevenLabs)</legend>
-          <label>API Key <input type="password" id="setting-tts-key" placeholder="Paste your ElevenLabs API key"></label>
-        </fieldset>
-        <fieldset>
-          <legend>Speech Recognition (OpenAI)</legend>
-          <label>API Key <input type="password" id="setting-stt-key" placeholder="Paste your OpenAI API key"></label>
-        </fieldset>
         <div class="modal-actions">
           <button type="button" id="settings-save">Save</button>
           <button type="button" id="settings-cancel">Cancel</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="confirm-modal" class="modal hidden">
+    <div class="confirm-content">
+      <h3>All Signals to Danger</h3>
+      <p>Are you sure you want to set all signals to danger?</p>
+      <div class="confirm-actions">
+        <button id="confirm-yes">Yes</button>
+        <button id="confirm-no">No</button>
+      </div>
     </div>
   </div>
 

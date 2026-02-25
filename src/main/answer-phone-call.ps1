@@ -126,7 +126,7 @@ try {
 
     # Select the call in the listbox
     [Win32Auto]::SelectItem($listBoxHwnd, $Index)
-    Start-Sleep -Milliseconds 100
+    Start-Sleep -Milliseconds 50
 
     # Find and click the "Answer call" button
     $answerBtnCond = New-Object System.Windows.Automation.PropertyCondition(
@@ -151,8 +151,8 @@ try {
     $dialogTitle = ""
     $answerDialog = $null
 
-    for ($attempt = 0; $attempt -lt 15; $attempt++) {
-        Start-Sleep -Milliseconds 200
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        Start-Sleep -Milliseconds 100
 
         # Look for TAnswerCallForm
         $answerFormCond = New-Object System.Windows.Automation.PropertyCondition(

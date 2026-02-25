@@ -39,11 +39,5 @@ module.exports = {
     signaller: {
       panelName: '',
     },
-    tts: {
-      apiKey: '',
-    },
-    stt: {
-      apiKey: '',
-    },
   },
 };

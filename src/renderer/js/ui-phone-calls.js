@@ -14,13 +14,55 @@ const PhoneCallsUI = {
     this.listEl = document.getElementById('phone-calls-list');
     this.countEl = document.getElementById('phone-calls-count');
     this.chatEl = document.getElementById('chat-messages');
+    this.notificationEl = document.getElementById('incoming-notification');
+    this.notificationTrainEl = document.getElementById('notification-train');
+    this.notificationSignalEl = document.getElementById('notification-signal');
+    this.notificationAnswerBtn = document.getElementById('notification-answer-btn');
+    this.noCallsEl = document.getElementById('no-calls-message');
+    this.tabIncomingEl = document.getElementById('tab-incoming');
+    this.silenceBtn = document.getElementById('silence-btn');
+    this.silenced = false;
 
     this.ringingAudio = new Audio('../../sounds/ringing.wav');
     this.ringingAudio.loop = true;
 
+    // Silence ring for this call only
+    this.silenceBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.silenced = true;
+      this.ringingAudio.pause();
+      this.ringingAudio.currentTime = 0;
+      this.silenceBtn.classList.add('hidden');
+    });
+
+    // Click the notification box to answer the latest call or end the current call
+    this.notificationEl.addEventListener('click', () => {
+      if (this.inCall) {
+        this.hangUp();
+      } else if (this.calls.length > 0) {
+        this.answerCall(this.calls.length - 1);
+      }
+    });
+
+    // Gapless background noise via Web Audio API — alternate between two clips
+    this.bgCtx = new AudioContext();
+    this.bgBuffers = [];
+    this.bgBufferIndex = 0;
+    this.bgSource = null;
+    this.bgGain = this.bgCtx.createGain();
+    this.bgGain.connect(this.bgCtx.destination);
+    this.bgGain.gain.value = 0.5;
+    const bgFiles = ['../../sounds/background.wav', '../../sounds/background2.wav'];
+    Promise.all(bgFiles.map((f) =>
+      fetch(f).then((r) => r.arrayBuffer()).then((buf) => this.bgCtx.decodeAudioData(buf))
+    )).then((buffers) => { this.bgBuffers = buffers; }).catch(() => {});
+
     // Pre-warm local voices as fallback
     speechSynthesis.getVoices();
     speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+
+    // Pre-fetch ElevenLabs voices so first TTS is instant
+    this.getElevenVoices();
 
     this.renderChat();
   },
@@ -41,12 +83,16 @@ const PhoneCallsUI = {
 
   startRinging() {
     this.wasRinging = true;
+    this.silenced = false;
+    this.silenceBtn.classList.remove('hidden');
     this.ringingAudio.currentTime = 0;
     this.ringingAudio.play().catch(() => {});
   },
 
   stopRinging() {
     this.wasRinging = false;
+    this.silenced = false;
+    this.silenceBtn.classList.add('hidden');
     this.ringingAudio.pause();
     this.ringingAudio.currentTime = 0;
   },
@@ -116,25 +162,57 @@ const PhoneCallsUI = {
     return voice.id;
   },
 
-  // Speak via ElevenLabs API (main process handles the HTTP call)
-  async speakElevenLabs(text, voiceId) {
+  // Fetch TTS audio from ElevenLabs (returns audioData bytes, does NOT play)
+  async fetchElevenLabsAudio(text, voiceId) {
     const audioData = await window.simsigAPI.tts.speak(text, voiceId);
-    if (!audioData) return false;
+    return audioData || null;
+  },
 
+  // Start cab background noise (gapless via Web Audio API, alternates clips)
+  startBgNoise() {
+    if (!this.bgBuffers.length) return;
+    if (this.bgSource) { try { this.bgSource.stop(); } catch {} }
+    this.bgGain.gain.cancelScheduledValues(this.bgCtx.currentTime);
+    this.bgGain.gain.value = 0.5;
+    const buffer = this.bgBuffers[this.bgBufferIndex % this.bgBuffers.length];
+    this.bgBufferIndex++;
+    const source = this.bgCtx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    source.connect(this.bgGain);
+    source.start();
+    this.bgSource = source;
+  },
+
+  // Fade out and stop cab background noise
+  stopBgNoise() {
+    if (!this.bgSource) return;
+    const now = this.bgCtx.currentTime;
+    this.bgGain.gain.setValueAtTime(this.bgGain.gain.value, now);
+    this.bgGain.gain.linearRampToValueAtTime(0, now + 0.5);
+    const src = this.bgSource;
+    this.bgSource = null;
+    setTimeout(() => { try { src.stop(); } catch {} }, 600);
+  },
+
+  // Play pre-fetched audio data
+  playAudioData(audioData) {
+    if (!audioData) return Promise.resolve(false);
     return new Promise((resolve) => {
       const blob = new Blob([new Uint8Array(audioData)], { type: 'audio/mpeg' });
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        resolve(true);
-      };
-      audio.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve(false);
-      };
-      audio.play().catch(() => resolve(false));
+      audio.onended = () => { URL.revokeObjectURL(url); this.stopBgNoise(); resolve(true); };
+      audio.onerror = () => { URL.revokeObjectURL(url); this.stopBgNoise(); resolve(false); };
+      this.startBgNoise();
+      audio.play().catch(() => { this.stopBgNoise(); resolve(false); });
     });
+  },
+
+  // Speak via ElevenLabs API (main process handles the HTTP call)
+  async speakElevenLabs(text, voiceId) {
+    const audioData = await this.fetchElevenLabsAudio(text, voiceId);
+    return this.playAudioData(audioData);
   },
 
   // Fallback: local browser TTS with varied voice
@@ -142,17 +220,22 @@ const PhoneCallsUI = {
     return new Promise((resolve) => {
       const voices = speechSynthesis.getVoices();
       const gbVoices = voices.filter((v) => v.lang.startsWith('en-GB'));
-      const pool = gbVoices.length > 0 ? gbVoices : voices;
+      // Prefer newer "Online" neural voices over legacy SAPI5 voices
+      const onlineVoices = gbVoices.filter((v) => v.name.includes('Online'));
+      const pool = onlineVoices.length > 0 ? onlineVoices
+        : gbVoices.length > 0 ? gbVoices
+        : voices;
       const hash = this.hashString(caller);
 
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'en-GB';
       utterance.voice = pool[hash % pool.length] || null;
       utterance.pitch = 0.7 + ((hash >> 4) % 100) / 100 * 0.6;
-      utterance.rate = 1.6 + ((hash >> 8) % 100) / 100 * 0.3;
+      utterance.rate = 2.0 + ((hash >> 8) % 100) / 100 * 0.3;
 
-      utterance.onend = resolve;
-      utterance.onerror = resolve;
+      this.startBgNoise();
+      utterance.onend = () => { this.stopBgNoise(); resolve(); };
+      utterance.onerror = () => { this.stopBgNoise(); resolve(); };
       speechSynthesis.speak(utterance);
     });
   },
@@ -161,8 +244,8 @@ const PhoneCallsUI = {
   // Order matters — more specific patterns first
   REPLY_MATCHERS: [
     { pattern: /pass.*examine|authoris[ez].*pass.*examine|authoris[ez].*examine/, fragment: 'pass signal at stop and examine' },
-    { pattern: /(?:15|fifteen|one\s*five)\s*min/, fragment: 'wait 15 minute' },
-    { pattern: /(?<!\d)(?:0?2|two)\s*min/, fragment: 'wait 2 minute' },
+    { pattern: /(?:15|fifteen|one[\s-]*five|1[\s-]*5)\s*min/, fragment: 'wait 15 minute' },
+    { pattern: /(?<!\d)(?:0?2|two|to)\s*min/, fragment: 'wait 2 minute' },
     { pattern: /(?<!\d)(?:0?5|five)\s*min/, fragment: 'wait 5 minute' },
     { pattern: /authoris[ez].*pass|pass.*signal|pass\s*at\s*(?:stop|danger)/, fragment: 'authorise driver to pass' },
     { pattern: /examine.*line|examine\s*the/, fragment: 'examine the line' },
@@ -180,15 +263,85 @@ const PhoneCallsUI = {
     return -1;
   },
 
-  // Use Windows Speech Recognition with constrained grammar (via PowerShell)
+  // Wait for PTT press, then record audio until PTT release, then transcribe
   async recordAndTranscribe() {
-    const result = await window.simsigAPI.stt.transcribe();
-    console.log('[STT] Result:', result);
-    if (result && typeof result === 'object' && result.error) {
-      console.error('[STT] Error:', result.error);
+    try {
+      // Wait for PTT press to start
+      await this.waitForPTTPress();
+
+      const settingsAll = await window.simsigAPI.settings.getAll();
+      const deviceId = settingsAll.audio?.inputDeviceId;
+      const constraints = deviceId && deviceId !== 'default'
+        ? { audio: { deviceId: { exact: deviceId } } }
+        : { audio: true };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // Record while PTT is held
+      const audioData = await new Promise((resolve) => {
+        const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+        const chunks = [];
+        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+        recorder.onstop = async () => {
+          stream.getTracks().forEach((t) => t.stop());
+          const blob = new Blob(chunks, { type: 'audio/webm' });
+          const buffer = await blob.arrayBuffer();
+          resolve(Array.from(new Uint8Array(buffer)));
+        };
+
+        recorder.start(100);
+
+        // Stop when PTT is released
+        this.waitForPTTRelease().then(() => {
+          if (recorder.state === 'recording') recorder.stop();
+        });
+      });
+
+      if (audioData.length < 500) return ''; // too short, nothing said
+
+      console.log(`[STT] Recorded ${audioData.length} bytes, sending for transcription...`);
+      const result = await window.simsigAPI.stt.transcribe(audioData);
+      console.log('[STT] Result:', result);
+      if (result && typeof result === 'object' && result.error) {
+        console.error('[STT] Error:', result.error);
+        return '';
+      }
+      return result || '';
+    } catch (err) {
+      console.error('[STT] Recording error:', err);
       return '';
     }
-    return result || '';
+  },
+
+  // Returns a promise that resolves when PTT is pressed
+  waitForPTTPress() {
+    return new Promise((resolve) => {
+      if (typeof PTTUI !== 'undefined' && PTTUI.isActive) {
+        resolve();
+        return;
+      }
+      const check = () => {
+        if (typeof PTTUI !== 'undefined' && PTTUI.isActive) {
+          resolve();
+        } else {
+          requestAnimationFrame(check);
+        }
+      };
+      requestAnimationFrame(check);
+    });
+  },
+
+  // Returns a promise that resolves when PTT is released
+  waitForPTTRelease() {
+    return new Promise((resolve) => {
+      const check = () => {
+        if (typeof PTTUI === 'undefined' || !PTTUI.isActive) {
+          resolve();
+        } else {
+          requestAnimationFrame(check);
+        }
+      };
+      requestAnimationFrame(check);
+    });
   },
 
   // Build driver readback confirmation for a reply
@@ -215,7 +368,7 @@ const PhoneCallsUI = {
 
     const MAX_ATTEMPTS = 3;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      this.addMessage({ type: 'greeting', text: 'Speak your reply...' });
+      this.addMessage({ type: 'greeting', text: 'Hold PTT and speak your reply...' });
       const transcript = await this.recordAndTranscribe();
 
       if (transcript) {
@@ -241,18 +394,8 @@ const PhoneCallsUI = {
     await this.waitForReplyButton(replies, caller);
   },
 
-  // Show a large hang up button at the bottom of the chat
-  showHangUpInChat() {
-    const btn = document.createElement('button');
-    btn.className = 'chat-hang-up-btn';
-    btn.textContent = 'Hang Up';
-    btn.addEventListener('click', () => {
-      btn.remove();
-      this.hangUp();
-    });
-    this.chatEl.appendChild(btn);
-    this.chatEl.scrollTop = this.chatEl.scrollHeight;
-  },
+  // End-call is handled via the notification box — no chat button needed
+  showHangUpInChat() {},
 
   // Fallback: show clickable buttons for reply options
   waitForReplyButton(replies, caller) {
@@ -287,97 +430,39 @@ const PhoneCallsUI = {
       const voiceId = this.getElevenVoiceId(caller, voices);
       const ok = await this.speakElevenLabs(spoken, voiceId);
       if (ok) return;
+      console.warn('[TTS] ElevenLabs speak failed, falling back to local TTS');
+    } else {
+      console.warn('[TTS] No ElevenLabs voices available, using local TTS');
     }
     await this.speakLocal(spoken, caller);
   },
 
-  // Listen on mic, wait for user to speak then go silent
-  waitForUserSpeech() {
-    return new Promise(async (resolve) => {
-      let stream;
-      try {
-        const settings = await window.simsigAPI.settings.getAll();
-        const deviceId = settings.audio?.inputDeviceId;
-        const constraints = deviceId && deviceId !== 'default'
-          ? { audio: { deviceId: { exact: deviceId } } }
-          : { audio: true };
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch {
-        setTimeout(resolve, 2000);
-        return;
-      }
-
-      const ctx = new AudioContext();
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      source.connect(analyser);
-
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      const SPEECH_THRESHOLD = 30;
-      const SILENCE_DURATION = 1200;
-
-      let speaking = false;
-      let silenceSince = 0;
-
-      const check = () => {
-        analyser.getByteFrequencyData(data);
-        let sum = 0;
-        for (let i = 0; i < data.length; i++) sum += data[i];
-        const avg = sum / data.length;
-
-        if (avg > SPEECH_THRESHOLD) {
-          speaking = true;
-          silenceSince = 0;
-        } else if (speaking) {
-          if (!silenceSince) {
-            silenceSince = Date.now();
-          } else if (Date.now() - silenceSince > SILENCE_DURATION) {
-            stream.getTracks().forEach((t) => t.stop());
-            ctx.close();
-            resolve();
-            return;
-          }
-        }
-
-        requestAnimationFrame(check);
-      };
-
-      check();
-    });
+  // Wait for user to press and release PTT (signaller speaking)
+  async waitForUserSpeech() {
+    await this.waitForPTTPress();
+    await this.waitForPTTRelease();
   },
 
   hangUp() {
     this.inCall = false;
     this.messages = [];
     this.renderChat();
-    this.renderHangUpButton();
-    // If there are waiting calls, start ringing again
+    this.hideNotification();
+    // If there are waiting calls, show the next one and start ringing
     if (this.calls.length > 0) {
+      const nextCall = this.calls[this.calls.length - 1];
+      this.showNotification(nextCall.train || '');
       this.startRinging();
-    }
-  },
-
-  renderHangUpButton() {
-    const existing = document.getElementById('hang-up-btn');
-    if (existing) existing.remove();
-
-    if (this.inCall) {
-      const btn = document.createElement('button');
-      btn.id = 'hang-up-btn';
-      btn.textContent = 'Hang Up';
-      btn.addEventListener('click', () => this.hangUp());
-      document.getElementById('chat-header').appendChild(btn);
     }
   },
 
   async answerCall(index) {
     this.inCall = true;
     this.stopRinging();
-    this.renderHangUpButton();
 
     const call = this.calls[index];
     const train = call ? call.train : '';
+    this.showInCallNotification(train);
 
     const btn = this.listEl.querySelector(`.call-answer-btn[data-index="${index}"]`);
     if (btn) {
@@ -385,31 +470,55 @@ const PhoneCallsUI = {
       btn.disabled = true;
     }
 
-    const result = await window.simsigAPI.phone.answerCall(index, train);
+    this.addMessage({ type: 'system', text: 'Answering...' });
+
+    // Fetch settings + voices IN PARALLEL with the PowerShell answer script
+    // so they're ready the instant the answer result comes back
+    const [result, settingsAll, voices] = await Promise.all([
+      window.simsigAPI.phone.answerCall(index, train),
+      window.simsigAPI.settings.getAll(),
+      this.getElevenVoices(),
+    ]);
 
     if (result.error) {
       this.addMessage({ type: 'error', text: result.error });
       return;
     }
 
-    // Build greeting
-    const settings = await window.simsigAPI.settings.getAll();
-    const panelName = settings.signaller?.panelName || 'Panel';
+    // Build greeting and driver message — settings + voices already loaded
+    const panelName = settingsAll.signaller?.panelName || 'Panel';
     const position = this.extractPosition(result.title);
     const greeting = `Hello, ${panelName} Signaller${position ? ', ' + position : ''}, Go ahead`;
-
-    // Show the greeting prompt and wait for user to say it
-    this.addMessage({ type: 'greeting', text: greeting });
-    await this.waitForUserSpeech();
-
-    // After user finishes speaking, show and speak the driver's message
     const caller = (result.title || '').replace(/^Answer call from\s*/i, '') || result.train || '';
     const driverMsg = result.message || '';
+    const spokenMsg = `Hello, ${panelName} Signaller${position ? ', ' + position : ''}, this is ${driverMsg}`;
+
+    // Pre-generate TTS audio IN PARALLEL while user speaks the greeting
+    let prefetchedAudio = null;
+    let voiceId = null;
+    if (voices && voices.length > 0) {
+      voiceId = this.getElevenVoiceId(caller, voices);
+      // Start fetching audio immediately — don't wait for user to finish speaking
+      const audioPromise = this.fetchElevenLabsAudio(this.phoneticize(spokenMsg), voiceId);
+
+      // Show greeting and wait for user speech AT THE SAME TIME as audio generates
+      this.addMessage({ type: 'greeting', text: greeting });
+      const [audio] = await Promise.all([audioPromise, this.waitForUserSpeech()]);
+      prefetchedAudio = audio;
+    } else {
+      this.addMessage({ type: 'greeting', text: greeting });
+      await this.waitForUserSpeech();
+    }
+
+    // Show driver message and play pre-fetched audio instantly
     this.addMessage({ type: 'driver', caller, text: driverMsg });
 
-    // Build full radio call for speech: driver addresses signaller then gives message
-    const spokenMsg = `Hello, ${panelName} Signaller${position ? ', ' + position : ''}, this is ${driverMsg}`;
-    await this.speakAsDriver(spokenMsg, caller);
+    if (prefetchedAudio) {
+      const ok = await this.playAudioData(prefetchedAudio);
+      if (!ok) await this.speakLocal(this.phoneticize(spokenMsg), caller);
+    } else {
+      await this.speakLocal(this.phoneticize(spokenMsg), caller);
+    }
 
     // Extract signal ID from driver's message for use in confirmations
     const sigMatch = driverMsg.match(/signal\s+([A-Z0-9]+)/i);
@@ -438,24 +547,40 @@ const PhoneCallsUI = {
   },
 
   renderCalls() {
-    let html = '';
+    // Update tab bar count
+    if (this.tabIncomingEl) {
+      this.tabIncomingEl.textContent = `Incoming (${this.calls.length})`;
+    }
 
     if (this.calls.length === 0) {
-      html = '<div class="no-calls">No outstanding calls</div>';
       this.countEl.classList.add('hidden');
+      this.noCallsEl.classList.remove('hidden');
+      this.listEl.innerHTML = '';
+      this.hideNotification();
     } else {
       this.countEl.textContent = this.calls.length;
       this.countEl.classList.remove('hidden');
+      this.noCallsEl.classList.add('hidden');
 
-      html = this.calls.map((call, i) => {
-        return `<div class="phone-call-entry unanswered">
-          <span class="call-train">${this.escapeHtml(call.train || '')}</span>
-          <button class="call-answer-btn" data-index="${i}">Answer</button>
-        </div>`;
+      this.listEl.innerHTML = this.calls.map((call, i) => {
+        const trainText = this.escapeHtml(call.train || '');
+        const headMatch = trainText.match(/([0-9][A-Z][0-9]{2})/i);
+        const headcode = headMatch ? headMatch[1].toUpperCase() : trainText;
+        return `<tr>
+          <td class="col-train">${headcode}</td>
+          <td class="col-signal"></td>
+          <td class="col-action">
+            <button class="call-answer-btn" data-index="${i}">Answer</button>
+          </td>
+        </tr>`;
       }).join('');
-    }
 
-    this.listEl.innerHTML = html;
+      // Only flash notification for new calls if not already in a call
+      if (!this.inCall) {
+        const latestCall = this.calls[this.calls.length - 1];
+        this.showNotification(latestCall.train || '');
+      }
+    }
 
     this.listEl.querySelectorAll('.call-answer-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -463,6 +588,35 @@ const PhoneCallsUI = {
         this.answerCall(idx);
       });
     });
+  },
+
+  showInCallNotification(trainText) {
+    if (!this.notificationEl) return;
+    const match = (trainText || '').match(/([0-9][A-Z][0-9]{2})/i);
+    const headcode = match ? match[1].toUpperCase() : trainText || '';
+    this.notificationEl.classList.remove('flashing');
+    this.notificationEl.classList.add('in-call');
+    this.notificationTrainEl.textContent = headcode;
+    if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
+    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[End Call]';
+  },
+
+  showNotification(trainText) {
+    if (!this.notificationEl) return;
+    const match = trainText.match(/([0-9][A-Z][0-9]{2})/i);
+    const headcode = match ? match[1].toUpperCase() : trainText;
+    this.notificationTrainEl.textContent = headcode;
+    if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
+    this.notificationEl.classList.add('flashing');
+  },
+
+  hideNotification() {
+    if (!this.notificationEl) return;
+    this.notificationEl.classList.remove('flashing');
+    this.notificationEl.classList.remove('in-call');
+    this.notificationTrainEl.textContent = '';
+    if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
+    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[Answer]';
   },
 
   renderChat() {
