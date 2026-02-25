@@ -19,9 +19,22 @@ public class SimSigListBox {
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, StringBuilder lParam);
 
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
     public const int LB_GETCOUNT = 0x018B;
     public const int LB_GETTEXT = 0x0189;
     public const int LB_GETTEXTLEN = 0x018A;
+    public const uint WM_KEYDOWN = 0x0100;
+    public const uint WM_KEYUP = 0x0101;
+    public const int VK_F6 = 0x75;
 
     public static int GetCount(IntPtr hWnd) {
         return (int)SendMessage(hWnd, LB_GETCOUNT, IntPtr.Zero, IntPtr.Zero);
@@ -33,6 +46,27 @@ public class SimSigListBox {
         StringBuilder sb = new StringBuilder(len + 1);
         SendMessage(hWnd, LB_GETTEXT, (IntPtr)index, sb);
         return sb.ToString();
+    }
+
+    public static IntPtr simsigHwnd = IntPtr.Zero;
+    private static EnumWindowsProc _callback;
+    public static void FindSimSig() {
+        simsigHwnd = IntPtr.Zero;
+        _callback = (hWnd, lParam) => {
+            StringBuilder sb = new StringBuilder(256);
+            GetWindowText(hWnd, sb, 256);
+            if (sb.ToString().StartsWith("SimSig -")) {
+                simsigHwnd = hWnd;
+                return false;
+            }
+            return true;
+        };
+        EnumWindows(_callback, IntPtr.Zero);
+    }
+
+    public static void SendF6(IntPtr hWnd) {
+        PostMessage(hWnd, WM_KEYDOWN, (IntPtr)VK_F6, IntPtr.Zero);
+        PostMessage(hWnd, WM_KEYUP, (IntPtr)VK_F6, IntPtr.Zero);
     }
 }
 "@
@@ -88,6 +122,15 @@ try {
             [System.Windows.Automation.TreeScope]::Children,
             $classCond
         )
+    }
+
+    # If telephone window is not open, send F6 to SimSig to open it
+    if ($null -eq $window) {
+        [SimSigListBox]::FindSimSig()
+        $simHwnd = [SimSigListBox]::simsigHwnd
+        if ($simHwnd -ne [IntPtr]::Zero) {
+            [SimSigListBox]::SendF6($simHwnd)
+        }
     }
 
     # Read calls from listbox if telephone window is open
