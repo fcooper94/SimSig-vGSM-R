@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm init:*)",
+      "WebFetch(domain:chatgpt.com)",
+      "WebFetch(domain:www.simsig.co.uk)",
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(npm install:*)",
+      "Bash(tasklist:*)",
+      "Bash(npx electron:*)",
+      "Bash(node -e:*)",
+      "Bash(ls:*)",
+      "Bash(node_modules/.bin/electron:*)",
+      "Bash(node_modules/electron/dist/electron.exe .)",
+      "Bash(node_modules/electron/dist/electron.exe:*)",
+      "WebFetch(domain:www.electronjs.org)",
+      "Bash(powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File:*)",
+      "Bash(powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \":*)"
+    ]
+  }
+}

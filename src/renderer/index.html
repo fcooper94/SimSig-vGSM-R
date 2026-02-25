@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; media-src 'self' blob:">
+  <title>SimSig GSM-R Comms</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/radio.css">
+  <link rel="stylesheet" href="css/settings.css">
+</head>
+<body>
+  <header id="top-bar">
+    <div id="connection-area">
+      <span id="status-indicator" class="disconnected"></span>
+      <span id="status-text">Disconnected</span>
+      <button id="connect-btn">Connect</button>
+    </div>
+    <div id="clock-display">--:--:--</div>
+    <button id="msglog-btn" title="Message Log">&#9776;</button>
+    <button id="settings-btn" title="Settings">&#9881;</button>
+  </header>
+
+  <main id="app-content">
+    <div id="left-panel">
+      <section id="radio-panel">
+        <div id="radio-display">
+          <div class="display-line" id="display-line-1">GSM-R COMMS</div>
+          <div class="display-line" id="display-line-2">Ready</div>
+          <div class="display-line" id="display-line-3"></div>
+          <div class="display-line" id="display-line-4"></div>
+        </div>
+        <div id="radio-controls">
+          <button id="ptt-btn" class="ptt-button">PTT</button>
+          <div id="ptt-status">PTT: OFF</div>
+        </div>
+        <div id="signal-controls">
+          <button id="all-danger-btn" class="danger-button">All Signals to Danger</button>
+        </div>
+      </section>
+
+      <section id="phone-calls">
+        <div id="phone-calls-header">
+          <span>Incoming Calls</span>
+          <span id="phone-calls-count" class="hidden">0</span>
+        </div>
+        <div id="phone-calls-list">
+          <div class="no-calls">No outstanding calls</div>
+        </div>
+      </section>
+    </div>
+
+    <div id="chat-panel">
+      <div id="chat-header">
+        <span>Driver Comms</span>
+      </div>
+      <div id="chat-messages"></div>
+    </div>
+  </main>
+
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-content">
+      <h2>Settings</h2>
+      <form id="settings-form">
+        <fieldset>
+          <legend>Gateway Connection</legend>
+          <label>Host <input type="text" id="setting-host"></label>
+          <label>Port <input type="number" id="setting-port"></label>
+        </fieldset>
+        <fieldset>
+          <legend>Credentials</legend>
+          <label>Username <input type="text" id="setting-username"></label>
+          <label>Password <input type="password" id="setting-password"></label>
+        </fieldset>
+        <fieldset>
+          <legend>Audio Devices</legend>
+          <label>Input <select id="setting-audio-input"></select></label>
+          <label>Mic Volume <input type="range" id="setting-mic-volume" min="0" max="100" value="50"><span id="mic-volume-val">50%</span></label>
+          <label>Output <select id="setting-audio-output"></select></label>
+          <label>Output Volume <input type="range" id="setting-output-volume" min="0" max="100" value="50"><span id="output-volume-val">50%</span></label>
+        </fieldset>
+        <fieldset>
+          <legend>Push-To-Talk</legend>
+          <label>Keybind <input type="text" id="setting-ptt-keybind" readonly></label>
+          <button type="button" id="ptt-rebind-btn">Press to rebind...</button>
+        </fieldset>
+        <fieldset>
+          <legend>Signaller Identity</legend>
+          <label>Panel Name <input type="text" id="setting-panel-name" placeholder="e.g. Slough"></label>
+        </fieldset>
+        <fieldset>
+          <legend>Driver Voice (ElevenLabs)</legend>
+          <label>API Key <input type="password" id="setting-tts-key" placeholder="Paste your ElevenLabs API key"></label>
+        </fieldset>
+        <fieldset>
+          <legend>Speech Recognition (OpenAI)</legend>
+          <label>API Key <input type="password" id="setting-stt-key" placeholder="Paste your OpenAI API key"></label>
+        </fieldset>
+        <div class="modal-actions">
+          <button type="button" id="settings-save">Save</button>
+          <button type="button" id="settings-cancel">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/time-utils.js"></script>
+  <script src="js/ui-connection.js"></script>
+  <script src="js/ui-settings.js"></script>
+  <script src="js/ui-ptt.js"></script>
+  <script src="js/ui-phone-calls.js"></script>
+  <script src="js/audio-pipeline.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
