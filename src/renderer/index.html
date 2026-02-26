@@ -18,14 +18,13 @@
       <button id="connect-btn">Connect</button>
     </div>
     <div id="clock-display">--:--:--</div>
-    <button id="msglog-btn" title="Message Log">&#9776;</button>
     <button id="settings-btn" title="Settings">&#9881;</button>
   </header>
 
   <main id="app-content">
     <!-- LEFT: Incoming calls table + placeholder grids -->
     <div id="left-panel">
-      <section id="phone-calls">
+      <section id="phone-calls" class="tab-view active-view">
         <div id="phone-calls-header">
           <span>Incoming Calls</span>
           <span id="phone-calls-count" class="hidden">0</span>
@@ -44,11 +43,57 @@
         </div>
         <div id="no-calls-message" class="no-calls">No outstanding calls</div>
       </section>
-      <section class="placeholder-grid">
-        <div class="placeholder-grid-inner"></div>
+      <section id="trains-mobiles" class="tab-view">
+        <div id="trains-header">
+          <span>Trains in Area</span>
+        </div>
+        <div id="trains-table-wrapper">
+          <table id="trains-table">
+            <thead>
+              <tr>
+                <th class="col-headcode">Headcode</th>
+                <th class="col-track">Track</th>
+                <th class="col-status">Status</th>
+              </tr>
+            </thead>
+            <tbody id="trains-list"></tbody>
+          </table>
+        </div>
+        <div id="no-trains-message">No trains in area</div>
       </section>
-      <section class="placeholder-grid">
-        <div class="placeholder-grid-inner"></div>
+      <section id="emergency-view" class="tab-view">
+        <div id="emrg-panel-header">
+          <span>Emergency</span>
+        </div>
+        <div id="emrg-panel-body">
+          <button id="emrg-stop-all">Stop All Trains</button>
+          <div id="emrg-feedback"></div>
+        </div>
+      </section>
+      <section id="phonebook-view" class="tab-view">
+        <div id="phonebook-header">
+          <span>Phone Book</span>
+          <button id="phonebook-refresh">Refresh</button>
+        </div>
+        <div id="phonebook-list"></div>
+        <div id="phonebook-status"></div>
+      </section>
+      <section id="message-log" class="tab-view">
+        <div id="feed-header">
+          <span>Message Log</span>
+          <select id="feed-filter">
+            <option value="all">All Messages</option>
+            <option value="CA_MSG">TD: Berth Step</option>
+            <option value="CB_MSG">TD: Cancel</option>
+            <option value="CC_MSG">TD: Interpose</option>
+            <option value="SG_MSG">Signalling</option>
+            <option value="train_location">Train Location</option>
+            <option value="train_delay">Train Delay</option>
+            <option value="clock_msg">Clock</option>
+          </select>
+          <button id="feed-clear">Clear</button>
+        </div>
+        <div id="feed-log"></div>
       </section>
     </div>
 
@@ -67,8 +112,8 @@
     <span class="tab-item">FTs</span>
     <span class="tab-item">Other</span>
     <span class="tab-item">&nbsp;&nbsp;&nbsp;</span>
-    <span class="tab-item">Log</span>
-    <span class="tab-item">Trains Mobiles</span>
+    <span class="tab-item" id="tab-log">Log</span>
+    <span class="tab-item" id="tab-trains">Trains Mobiles (0)</span>
     <span class="tab-item highlight" id="tab-incoming">Incoming (0)</span>
   </div>
 
@@ -97,7 +142,7 @@
       <div class="toolbar-icon">&#128266;</div>
       <span>Broadc.</span>
     </button>
-    <button class="toolbar-btn" disabled>
+    <button class="toolbar-btn" id="phonebook-btn">
       <div class="toolbar-icon">&#128214;</div>
       <span>PhoneBk</span>
     </button>
@@ -118,7 +163,7 @@
       <span>Hold</span>
     </button>
     <button id="silence-btn" class="silence-btn hidden" title="Silence ring">&#128264;</button>
-    <div id="incoming-notification">
+    <div id="incoming-notification" class="hidden">
       <div id="notification-train"></div>
       <div id="notification-icon">&#128643;</div>
       <div id="notification-signal"></div>
@@ -160,20 +205,20 @@
     </div>
   </div>
 
+  <div id="emrg-confirm-modal" class="modal hidden">
+    <div class="confirm-content">
+      <h3>Stop All Trains</h3>
+      <p>This will pull every signal in the simulation.</p>
+      <div class="confirm-actions">
+        <button id="emrg-confirm-yes">Yes</button>
+        <button id="emrg-confirm-no">No</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Sim Paused overlay — covers everything except settings/log buttons -->
   <div id="paused-overlay" class="hidden">
     <div id="paused-text">SIM PAUSED</div>
-  </div>
-
-  <div id="confirm-modal" class="modal hidden">
-    <div class="confirm-content">
-      <h3>All Signals to Danger</h3>
-      <p>Are you sure you want to set all signals to danger?</p>
-      <div class="confirm-actions">
-        <button id="confirm-yes">Yes</button>
-        <button id="confirm-no">No</button>
-      </div>
-    </div>
   </div>
 
   <script src="js/time-utils.js"></script>
@@ -181,6 +226,8 @@
   <script src="js/ui-settings.js"></script>
   <script src="js/ui-ptt.js"></script>
   <script src="js/ui-phone-calls.js"></script>
+  <script src="js/ui-train-tracker.js"></script>
+  <script src="js/ui-message-feed.js"></script>
   <script src="js/audio-pipeline.js"></script>
   <script src="js/app.js"></script>
 </body>

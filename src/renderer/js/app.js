@@ -5,6 +5,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   await PTTUI.init();
   AudioPipeline.init();
   PhoneCallsUI.init();
+  TrainTracker.init();
+  MessageFeed.init();
 
   // Register event listeners from main process
   window.simsigAPI.connection.onStatusChange((status) => {
@@ -27,30 +29,137 @@ document.addEventListener('DOMContentLoaded', async () => {
     PhoneCallsUI.update(calls);
   });
 
+  // Feed STOMP messages to TrainTracker and MessageFeed
+  window.simsigAPI.messages.onMessage((msg) => {
+    TrainTracker.handleMessage(msg);
+    MessageFeed.handleMessage(msg);
+  });
+
+  // Tab switching: Incoming / Trains Mobiles / Log / Emergency
+  const tabs = {
+    incoming:  { tab: document.getElementById('tab-incoming'), view: document.getElementById('phone-calls') },
+    trains:    { tab: document.getElementById('tab-trains'),   view: document.getElementById('trains-mobiles') },
+    log:       { tab: document.getElementById('tab-log'),      view: document.getElementById('message-log') },
+    emergency: { tab: null,                                    view: document.getElementById('emergency-view') },
+    phonebook: { tab: null,                                    view: document.getElementById('phonebook-view') },
+  };
+
+  function switchTab(name) {
+    for (const [key, { tab, view }] of Object.entries(tabs)) {
+      if (key === name) {
+        view.classList.add('active-view');
+        if (tab) tab.classList.add('active');
+      } else {
+        view.classList.remove('active-view');
+        if (tab) tab.classList.remove('active');
+      }
+    }
+  }
+
+  tabs.incoming.tab.addEventListener('click', () => switchTab('incoming'));
+  tabs.trains.tab.addEventListener('click', () => switchTab('trains'));
+  tabs.log.tab.addEventListener('click', () => switchTab('log'));
+
   // Auto-populate panel name from SimSig window title
   window.simsigAPI.sim.onName((name) => {
-    document.getElementById('panel-name-tab').textContent = name;
+    const ascIdx = name.toUpperCase().indexOf('ASC');
+    const trimmed = ascIdx !== -1 ? name.substring(0, ascIdx + 3).trim() : name;
+    document.getElementById('panel-name-tab').textContent = trimmed;
   });
 
-  // Emergency button — shows confirmation modal
+  // Emergency view
+  const emrgFeedback = document.getElementById('emrg-feedback');
+  const emrgConfirmModal = document.getElementById('emrg-confirm-modal');
+
   document.getElementById('emrg-btn').addEventListener('click', () => {
-    document.getElementById('confirm-modal').classList.remove('hidden');
+    emrgFeedback.textContent = '';
+    switchTab('emergency');
   });
 
-  document.getElementById('confirm-yes').addEventListener('click', async () => {
-    document.getElementById('confirm-modal').classList.add('hidden');
+  document.getElementById('emrg-stop-all').addEventListener('click', () => {
+    emrgConfirmModal.classList.remove('hidden');
+  });
+
+  document.getElementById('emrg-confirm-yes').addEventListener('click', async () => {
+    emrgConfirmModal.classList.add('hidden');
     const count = await window.simsigAPI.commands.allSignalsToDanger();
-    console.log(`Sent bpull for ${count} signals`);
+    emrgFeedback.textContent = `${count} signals set to danger`;
+    setTimeout(() => {
+      switchTab('incoming');
+    }, 2000);
   });
 
-  document.getElementById('confirm-no').addEventListener('click', () => {
-    document.getElementById('confirm-modal').classList.add('hidden');
+  document.getElementById('emrg-confirm-no').addEventListener('click', () => {
+    emrgConfirmModal.classList.add('hidden');
   });
 
-  // Open message log window
-  document.getElementById('msglog-btn').addEventListener('click', () => {
-    window.simsigAPI.commands.openMessageLog();
+  // Phone Book view
+  const phonebookList = document.getElementById('phonebook-list');
+  const phonebookStatus = document.getElementById('phonebook-status');
+  let phonebookContacts = [];
+
+  async function loadPhoneBook() {
+    phonebookStatus.textContent = 'Loading...';
+    phonebookList.innerHTML = '';
+    const result = await window.simsigAPI.phone.readPhoneBook();
+    if (result.error) {
+      phonebookStatus.textContent = result.error;
+      return;
+    }
+    phonebookContacts = result.contacts || [];
+    if (phonebookContacts.length === 0) {
+      phonebookStatus.textContent = 'No contacts found';
+      return;
+    }
+    phonebookStatus.textContent = '';
+    phonebookContacts.forEach((name, idx) => {
+      const row = document.createElement('div');
+      row.className = 'phonebook-item';
+
+      const avatar = document.createElement('div');
+      avatar.className = 'phonebook-avatar';
+      avatar.textContent = name.charAt(0).toUpperCase();
+      row.appendChild(avatar);
+
+      const label = document.createElement('div');
+      label.className = 'phonebook-name';
+      label.textContent = name;
+      row.appendChild(label);
+
+      const dialIcon = document.createElement('div');
+      dialIcon.className = 'phonebook-dial-icon';
+      dialIcon.innerHTML = '&#128222;';
+      row.appendChild(dialIcon);
+
+      row.addEventListener('click', async () => {
+        if (PhoneCallsUI.calls.length > 0) {
+          phonebookStatus.textContent = 'Cannot dial while incoming calls are waiting';
+          return;
+        }
+        row.classList.add('dialing');
+        const res = await window.simsigAPI.phone.dialPhoneBook(idx);
+        row.classList.remove('dialing');
+        if (res.error) {
+          phonebookStatus.textContent = res.error;
+        } else {
+          phonebookStatus.textContent = `Dialing ${name}...`;
+          setTimeout(() => {
+            phonebookStatus.textContent = '';
+            switchTab('incoming');
+          }, 1500);
+        }
+      });
+      phonebookList.appendChild(row);
+    });
+  }
+
+  document.getElementById('phonebook-btn').addEventListener('click', () => {
+    switchTab('phonebook');
+    loadPhoneBook();
   });
 
-  // msglog-btn handler is above; panel name is set via sim.onName listener
+  document.getElementById('phonebook-refresh').addEventListener('click', () => {
+    loadPhoneBook();
+  });
+
 });

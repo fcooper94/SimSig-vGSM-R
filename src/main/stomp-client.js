@@ -25,8 +25,8 @@ class StompConnectionManager {
       this.client = new Client({
         webSocketFactory: () => new TCPWrapper(this.host, this.port),
         connectHeaders: {
-          login: this.username,
-          passcode: this.password,
+          ...(this.username ? { login: this.username } : {}),
+          ...(this.password ? { passcode: this.password } : {}),
         },
         reconnectDelay: 5000,
         heartbeatIncoming: 10000,

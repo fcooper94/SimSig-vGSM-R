@@ -11,6 +11,7 @@ function createWindow() {
     minWidth: 700,
     minHeight: 400,
     title: 'SimSig GSM-R Comms',
+    icon: path.join(__dirname, '../../images/icon.png'),
     backgroundColor: '#505050',
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
@@ -19,7 +20,7 @@ function createWindow() {
     },
   });
 
-  mainWindow.setAlwaysOnTop(true, 'screen-saver');
+  mainWindow.setAlwaysOnTop(true, 'floating');
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 
   if (process.argv.includes('--dev')) {
@@ -77,51 +78,25 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('window-all-closed', () => {
-  app.quit();
-});
+// Restore SimSig dialogs to visible positions on quit
+// Uses 'start' via cmd.exe so the PowerShell process is fully independent
+let restoreDone = false;
+function restoreTelephoneWindow() {
+  if (restoreDone) return;
+  restoreDone = true;
+  const { exec } = require('child_process');
+  const restoreScript = path.join(__dirname, 'restore-telephone.ps1');
+  const cmd = `start "" /B powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${restoreScript}"`;
+  exec(cmd, { windowsHide: true });
+  console.log('[Quit] Launched restore script');
+}
 
-// Restore the Telephone Calls window to a visible position on quit
-app.on('will-quit', () => {
-  const { execFileSync } = require('child_process');
-  const restoreScript = `
-    Add-Type -AssemblyName UIAutomationClient
-    Add-Type -AssemblyName UIAutomationTypes
-    Add-Type @"
-    using System;
-    using System.Runtime.InteropServices;
-    public class WinRestore {
-      [DllImport("user32.dll")]
-      public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-    }
-"@
-    $root = [System.Windows.Automation.AutomationElement]::RootElement
-    $cond = New-Object System.Windows.Automation.PropertyCondition(
-      [System.Windows.Automation.AutomationElement]::ClassNameProperty, "TTelephoneForm"
-    )
-    # Restore Telephone Calls window
-    $win = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $cond)
-    if ($win) {
-      $hwnd = [IntPtr]$win.Current.NativeWindowHandle
-      # SWP_NOSIZE (0x01) | SWP_NOACTIVATE (0x10) — move to (100,100)
-      [WinRestore]::SetWindowPos($hwnd, [IntPtr]::Zero, 100, 100, 0, 0, 0x0001 -bor 0x0010)
-    }
-    # Restore Answer Call dialog
-    $aCond = New-Object System.Windows.Automation.PropertyCondition(
-      [System.Windows.Automation.AutomationElement]::ClassNameProperty, "TAnswerCallForm"
-    )
-    $aWin = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $aCond)
-    if ($aWin) {
-      $aHwnd = [IntPtr]$aWin.Current.NativeWindowHandle
-      [WinRestore]::SetWindowPos($aHwnd, [IntPtr]::Zero, 150, 150, 0, 0, 0x0001 -bor 0x0010)
-    }
-  `;
-  try {
-    execFileSync('powershell', [
-      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-      '-Command', restoreScript,
-    ], { timeout: 3000 });
-  } catch {}
+app.on('before-quit', restoreTelephoneWindow);
+app.on('will-quit', restoreTelephoneWindow);
+
+app.on('window-all-closed', () => {
+  restoreTelephoneWindow();
+  app.quit();
 });
 
 module.exports = { createMessageLogWindow, getMessageLogWindow };

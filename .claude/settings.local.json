@@ -18,7 +18,15 @@
       "WebFetch(domain:www.electronjs.org)",
       "Bash(powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File:*)",
       "Bash(powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \":*)",
-      "WebFetch(domain:elevenlabs.io)"
+      "WebFetch(domain:elevenlabs.io)",
+      "Bash(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"c:/dev/SimSig-Comms/src/main/restore-telephone.ps1\")",
+      "Bash(magick --version)",
+      "Bash(convert --version)",
+      "Bash(pip show Pillow)",
+      "Bash(pip install Pillow)",
+      "Bash(python -c \":*)",
+      "Bash(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File restore-telephone.ps1)",
+      "Bash(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"& { try { Add-Type @'':*)"
     ]
   }
 }

@@ -11,6 +11,8 @@ const ANSWER_SCRIPT = require('path').join(__dirname, 'answer-phone-call.ps1');
 const REPLY_SCRIPT = require('path').join(__dirname, 'reply-phone-call.ps1');
 const RECOGNIZE_SCRIPT = require('path').join(__dirname, 'speech-recognize.ps1');
 const TOGGLE_PAUSE_SCRIPT = require('path').join(__dirname, 'toggle-pause.ps1');
+const READ_PHONE_BOOK_SCRIPT = require('path').join(__dirname, 'read-phone-book.ps1');
+const DIAL_PHONE_BOOK_SCRIPT = require('path').join(__dirname, 'dial-phone-book.ps1');
 
 const ELEVENLABS_API_KEY = '3998465c5e3d9716316d59035e326752511cb408fb6bb94e37bf7d1df273dc54';
 
@@ -163,7 +165,7 @@ function registerIpcHandlers() {
         // Re-raise our window after PowerShell touched SimSig
         const win = BrowserWindow.getAllWindows()[0];
         if (win) {
-          win.setAlwaysOnTop(true, 'screen-saver');
+          win.setAlwaysOnTop(true, 'floating');
           win.moveTop();
         }
 
@@ -198,7 +200,7 @@ function registerIpcHandlers() {
         // Re-raise our window after PowerShell touched SimSig
         const win = BrowserWindow.getAllWindows()[0];
         if (win) {
-          win.setAlwaysOnTop(true, 'screen-saver');
+          win.setAlwaysOnTop(true, 'floating');
           win.moveTop();
         }
 
@@ -214,6 +216,66 @@ function registerIpcHandlers() {
           const jsonLine = lines[lines.length - 1] || '{}';
           resolve(JSON.parse(jsonLine));
         } catch (parseErr) {
+          resolve({ error: 'Failed to parse response' });
+        }
+      });
+    });
+  });
+
+  // Phone Book — read contacts
+  ipcMain.handle(channels.PHONE_BOOK_READ, () => {
+    if (getClockState().paused) {
+      return { error: 'Cannot open phone book while sim is paused', contacts: [] };
+    }
+    const args = [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', READ_PHONE_BOOK_SCRIPT,
+    ];
+    return new Promise((resolve) => {
+      execFile('powershell', args, { timeout: 15000 }, (err, stdout, stderr) => {
+        if (stderr) console.error('[PhoneBook] stderr:', stderr.trim());
+        console.log('[PhoneBook] stdout:', (stdout || '').trim());
+        if (err) {
+          console.error('[PhoneBook] Error:', err.message);
+          resolve({ error: err.message, contacts: [] });
+          return;
+        }
+        try {
+          const lines = (stdout || '').trim().split(/\r?\n/).filter(Boolean);
+          const jsonLine = lines[lines.length - 1] || '{}';
+          resolve(JSON.parse(jsonLine));
+        } catch (parseErr) {
+          console.error('[PhoneBook] Parse error, raw output:', stdout);
+          resolve({ error: 'Failed to parse response', contacts: [] });
+        }
+      });
+    });
+  });
+
+  // Phone Book — dial a contact by index
+  ipcMain.handle(channels.PHONE_BOOK_DIAL, (_event, index) => {
+    if (getClockState().paused) {
+      return { error: 'Cannot dial while sim is paused' };
+    }
+    const args = [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', DIAL_PHONE_BOOK_SCRIPT, '-Index', String(index || 0),
+    ];
+    return new Promise((resolve) => {
+      execFile('powershell', args, { timeout: 15000 }, (err, stdout, stderr) => {
+        if (stderr) console.error('[PhoneBookDial] stderr:', stderr.trim());
+        console.log('[PhoneBookDial] stdout:', (stdout || '').trim());
+        if (err) {
+          console.error('[PhoneBookDial] Error:', err.message);
+          resolve({ error: err.message });
+          return;
+        }
+        try {
+          const lines = (stdout || '').trim().split(/\r?\n/).filter(Boolean);
+          const jsonLine = lines[lines.length - 1] || '{}';
+          resolve(JSON.parse(jsonLine));
+        } catch (parseErr) {
+          console.error('[PhoneBookDial] Parse error, raw output:', stdout);
           resolve({ error: 'Failed to parse response' });
         }
       });
@@ -296,7 +358,7 @@ function registerIpcHandlers() {
     const body = JSON.stringify({
       text,
       model_id: 'eleven_flash_v2_5',
-      voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      voice_settings: { stability: 0.75, similarity_boost: 0.75, speed: 1.0 },
     });
 
     const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?optimize_streaming_latency=4&output_format=mp3_22050_32`;

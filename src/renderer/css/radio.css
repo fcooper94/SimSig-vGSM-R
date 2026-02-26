@@ -19,9 +19,8 @@
   white-space: nowrap;
 }
 
-/* Phone calls section — left panel */
+/* Phone calls section — left panel (display controlled by .tab-view) */
 #phone-calls {
-  display: flex;
   flex-direction: column;
   overflow: hidden;
 }
@@ -203,6 +202,10 @@
   gap: 2px;
   margin-left: auto;
   cursor: pointer;
+}
+
+#incoming-notification.hidden {
+  display: none;
 }
 
 #incoming-notification.flashing {
@@ -527,15 +530,16 @@
   padding: 8px;
   font-size: 12px;
   line-height: 1.6;
+  background: #1a1a1a;
 }
 
 .feed-entry {
   padding: 2px 4px;
-  border-bottom: 1px solid rgba(150, 150, 150, 0.3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .feed-entry .msg-time {
-  color: var(--text-dim);
+  color: #999;
   margin-right: 8px;
 }
 
@@ -560,5 +564,94 @@
 .feed-entry .msg-type.error { background: #6b1a1a; color: #ff4444; }
 
 .feed-entry .msg-body {
-  color: var(--text-light);
+  color: #ddd;
 }
+
+/* Tab view switching */
+.tab-view { display: none; flex-direction: column; overflow: hidden; }
+.tab-view.active-view { display: flex; }
+
+/* Clickable tabs */
+#tab-trains, #tab-incoming, #tab-log { cursor: pointer; }
+#tab-trains:hover, #tab-incoming:hover, #tab-log:hover { background: #e8e8e0; }
+
+/* Trains Mobiles section */
+#trains-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--text);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+#trains-table-wrapper { flex: 1; overflow-y: auto; }
+
+#trains-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  background: #ffffff;
+  color: #000;
+}
+
+#trains-table thead { background: #d0d0d0; position: sticky; top: 0; }
+
+#trains-table th {
+  padding: 4px 8px;
+  text-align: left;
+  font-weight: bold;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 2px solid #999;
+  border-right: 1px solid #bbb;
+  color: #333;
+}
+
+#trains-table th:last-child { border-right: none; }
+
+#trains-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #ccc;
+  border-right: 1px solid #ddd;
+}
+
+#trains-table td:last-child { border-right: none; }
+
+#trains-table .col-headcode {
+  width: 25%;
+  font-weight: bold;
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+#trains-table .col-track {
+  width: 35%;
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+#trains-table .col-status {
+  width: 40%;
+  font-size: 11px;
+}
+
+#trains-table .at-signal {
+  color: #cc0000;
+  font-weight: bold;
+}
+
+#trains-table tbody tr:hover { background: #e0e8ff; }
+
+#no-trains-message {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-style: italic;
+  padding: 12px;
+  text-align: center;
+}
+
+#no-trains-message.hidden { display: none; }

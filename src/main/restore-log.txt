@@ -1,0 +1,6 @@
+﻿SimSig hwnd: 1903130  PID: 60224
+Monitor: (0,0)-(2560,1392)
+Restore target: (1080, 546)
+Found 2 off-screen SimSig window(s)
+Restored [TDialForm] 'Place Call' at (1080, 546)
+Restored [TTelephoneForm] 'Telephone Calls' at (1110, 576)

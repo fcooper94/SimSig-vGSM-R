@@ -16,6 +16,8 @@ const channels = {
   PHONE_CALLS_UPDATE: 'phone:calls-update',
   PHONE_ANSWER_CALL: 'phone:answer-call',
   PHONE_REPLY_CALL: 'phone:reply-call',
+  PHONE_BOOK_READ: 'phone:book-read',
+  PHONE_BOOK_DIAL: 'phone:book-dial',
   TTS_GET_VOICES: 'tts:get-voices',
   TTS_SPEAK: 'tts:speak',
   STT_TRANSCRIBE: 'stt:transcribe',
@@ -76,6 +78,8 @@ contextBridge.exposeInMainWorld('simsigAPI', {
     },
     answerCall: (index, train) => ipcRenderer.invoke(channels.PHONE_ANSWER_CALL, index, train),
     replyCall: (replyIndex, headCode) => ipcRenderer.invoke(channels.PHONE_REPLY_CALL, replyIndex, headCode),
+    readPhoneBook: () => ipcRenderer.invoke(channels.PHONE_BOOK_READ),
+    dialPhoneBook: (index) => ipcRenderer.invoke(channels.PHONE_BOOK_DIAL, index),
   },
 
   tts: {

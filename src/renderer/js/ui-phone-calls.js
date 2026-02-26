@@ -9,6 +9,7 @@ const PhoneCallsUI = {
   inCall: false,
   voiceCache: {},       // caller → voice ID (ElevenLabs) or local profile
   elevenVoices: null,   // cached list of British voices from ElevenLabs
+  trainSignalCache: {}, // headcode → last known signal ID
 
   init() {
     this.listEl = document.getElementById('phone-calls-list');
@@ -297,7 +298,9 @@ const PhoneCallsUI = {
   // Keyword patterns for matching user speech to SimSig reply options
   // Order matters — more specific patterns first
   REPLY_MATCHERS: [
-    { pattern: /pass.*examine|authoris[ez].*pass.*examine|authoris[ez].*examine/, fragment: 'pass signal at stop and examine' },
+    { pattern: /no\s*obstruction|continue\s*normally/, fragment: 'no obstruction' },
+    { pattern: /pass.*examine|authoris[ez].*pass.*examine|authoris[ez].*examine/, fragment: 'pass signal' },
+    { pattern: /continue\s*examin/, fragment: 'continue examining' },
     { pattern: /(?:15|fifteen|one[\s-]*five|1[\s-]*5)\s*min/, fragment: '15 minute' },
     { pattern: /(?<!\d)(?:0?2|two|to)\s*min/, fragment: '2 minute' },
     { pattern: /(?<!\d)(?:0?5|five)\s*min/, fragment: '5 minute' },
@@ -409,15 +412,23 @@ const PhoneCallsUI = {
     const sigRef = sig ? ` signal ${sig}` : '';
     const panelRef = panel ? ` the ${panel} signaller` : ' the signaller';
 
-    // Pass signal at danger AND examine the line
-    if (/pass.*signal.*at\s*stop.*examine|authoris[ez].*pass.*examine|ask.*pass.*examine/i.test(raw)) {
-      return `Driver of ${hc}, this is${panelRef}. I am authorising you to pass${sigRef} at danger. I also require you to examine the line. Proceed at caution to the next signal and be prepared to stop short of any obstruction`;
+    // "Ok, no obstruction found" — acknowledge and continue normally
+    if (/ok.*no\s*obstruction/i.test(raw)) {
+      return `${hc}, Thank you. No obstructions found. Continue normally`;
+    }
+    // Pass signal at danger AND continue examining the line
+    if (/pass.*signal.*at\s*stop.*examine|pass.*signal.*danger.*examine|authoris[ez].*pass.*examine|ask.*pass.*examine/i.test(raw)) {
+      return `Driver of ${hc}, this is${panelRef}. I am authorising you to pass${sigRef} at danger. Proceed at caution to the next signal and be prepared to stop short of any obstruction. Please continue to examine the line and report further`;
     }
     // Pass signal at danger only
     if (/authoris[ez].*pass.*signal|ask.*pass.*signal|pass.*signal.*at\s*stop/i.test(raw)) {
       return `Driver of ${hc}, this is${panelRef}. I am authorising you to pass${sigRef} at danger. Proceed at caution to the next signal and be prepared to stop short of any obstruction`;
     }
-    // Examine the line only
+    // Continue examining the line (no pass at danger)
+    if (/continue\s*examin/i.test(raw)) {
+      return `${hc}, Thank you. No obstructions found. Driver, please continue to examine the line and report any obstructions`;
+    }
+    // Examine the line only (initial request)
     if (/ask.*examine|examine\s*the\s*line/i.test(raw)) {
       return `${hc}, I need you to examine the line between${sigRef} and the next signal. Proceed at caution and report any obstructions`;
     }
@@ -452,41 +463,49 @@ const PhoneCallsUI = {
     const sigRef = sig ? ` signal ${sig}` : '';
     const trainRef = hc ? `, ${hc}` : '';
 
-    // Pass signal at danger + examine the line
-    if (/pass.*signal.*at\s*(stop|danger).*examine/i.test(lower)) {
-      return `Authorised to pass${sigRef} at danger, examine the line to the next signal, proceed at caution${trainRef}. Over`;
+    // "No obstructions found, continue normally"
+    if (/no\s*obstruction.*continue\s*normally/i.test(lower)) {
+      return `Understood, continue normally${trainRef}`;
+    }
+    // Pass signal at danger + continue examining the line
+    if (/pass.*signal.*at\s*(stop|danger).*examine/i.test(lower) || /pass.*at\s*danger.*continue.*examine/i.test(lower)) {
+      return `Authorised to pass${sigRef} at danger, continue to examine the line, proceed at caution${trainRef}`;
     }
     // Pass signal at danger only
     if (/pass.*signal.*at\s*(stop|danger)/i.test(lower)) {
-      return `Authorised to pass${sigRef} at danger, proceed at caution to the next signal${trainRef}. Over`;
+      return `Authorised to pass${sigRef} at danger, proceed at caution to the next signal${trainRef}`;
     }
-    // Examine the line only
+    // Continue examining the line
+    if (/continue.*examine/i.test(lower)) {
+      return `Understood, continue to examine the line and report${trainRef}`;
+    }
+    // Examine the line only (initial request)
     if (/examine\s*the\s*line/i.test(lower)) {
-      return `Examine the line from${sigRef} to the next signal, proceed at caution and report${trainRef}. Over`;
+      return `Examine the line from${sigRef} to the next signal, proceed at caution and report${trainRef}`;
     }
     // Wait N minutes — no formal readback required, just acknowledge
     const waitMatch = lower.match(/wait\s+(\d+)\s*min/);
     if (waitMatch) {
       const n = parseInt(waitMatch[1], 10);
       const word = this.NUMBERS[n] || waitMatch[1];
-      return `Understood, remain at${sigRef} and wait ${word} minutes${trainRef}. Over`;
+      return `Understood, remain at${sigRef} and wait ${word} minutes${trainRef}`;
     }
     // Call back in N minutes
     const callBackMatch = lower.match(/call\s*back\s+in\s+(\d+)\s*min/);
     if (callBackMatch) {
       const n = parseInt(callBackMatch[1], 10);
       const word = this.NUMBERS[n] || callBackMatch[1];
-      return `Ok, I will call back in ${word} minutes${trainRef}. Over`;
+      return `Ok, I will call back in ${word} minutes${trainRef}`;
     }
     // Continue after speaking to control
     if (/continue\s+after\s+speaking/i.test(lower) || /continue.*obey/i.test(lower)) {
-      return `Understood, I will continue to obey all other aspects${trainRef}. Over`;
+      return `Understood, I will continue to obey all other aspects${trainRef}`;
     }
     // Permission granted to enter
     if (/permission\s+granted/i.test(lower)) {
-      return 'Thank you, entering now. Over';
+      return 'Thank you, entering now';
     }
-    return `Understood${trainRef}. Over`;
+    return `Understood${trainRef}`;
   },
 
   // Send a reply by index — shared by speech, click, and fallback button paths
@@ -675,6 +694,7 @@ const PhoneCallsUI = {
     const voices = await this.getElevenVoices();
     if (voices && voices.length > 0) {
       const voiceId = this.getElevenVoiceId(caller, voices);
+      console.log(`[TTS] Using ElevenLabs voice ${voiceId} for "${caller}"`);
       const ok = await this.speakElevenLabs(spoken, voiceId);
       if (ok) return;
       console.warn('[TTS] ElevenLabs speak failed, falling back to local TTS');
@@ -746,26 +766,42 @@ const PhoneCallsUI = {
 
     // Extract signal and headcode EARLY so formatReplyOption can use them
     const sigMatch = driverMsg.match(/signal\s+([A-Z0-9]+)/i);
-    this.currentSignalId = sigMatch ? sigMatch[1] : null;
     const titleMatch = (result.title || '').match(/([0-9][A-Z][0-9]{2})/i);
     const trainMatch = (result.train || train).match(/([0-9][A-Z][0-9]{2})/i);
     this.currentHeadCode = titleMatch ? titleMatch[1].toUpperCase()
       : trainMatch ? trainMatch[1].toUpperCase()
       : (result.train || train).trim();
+    // Use signal from message, or fall back to cached signal for this train
+    if (sigMatch) {
+      this.currentSignalId = sigMatch[1];
+      this.trainSignalCache[this.currentHeadCode] = sigMatch[1];
+    } else {
+      this.currentSignalId = this.trainSignalCache[this.currentHeadCode] || null;
+    }
     this.currentPanelName = panelName;
 
     // Build display and spoken messages based on call type
+    const isExamineResult = /examining the line.*no obstruction|no obstruction.*found/i.test(driverMsg);
     let displayMsg, spokenMsg;
     if (csd) {
       displayMsg = `${csd.headcode} is ready at entry point ${csd.entryPoint} (${csd.signal}). Permission required to enter.`;
       spokenMsg = this.buildCsdSpokenMessage(panelName, position, csd);
+    } else if (isExamineResult && this.currentHeadCode) {
+      // Examine line result — driver reporting back after examining the line
+      const sigPart = this.currentSignalId ? ` at ${this.currentSignalId}` : '';
+      displayMsg = `${this.currentHeadCode} is stopped${sigPart} after examining the line. No obstructions found.`;
+      spokenMsg = `Hello Signaller. This is driver of ${this.currentHeadCode} standing at${this.currentSignalId ? ` ${this.currentSignalId} signal indicating danger` : ' signal indicating danger'}. After examining the line, no obstruction was found.`;
     } else if (this.currentSignalId) {
       // Red signal / waiting at signal scenario
       displayMsg = `${this.currentHeadCode} waiting at red signal ${this.currentSignalId}`;
       spokenMsg = `Hello Signaller, this is driver of ${this.currentHeadCode}. I am at signal ${this.currentSignalId} displaying red`;
-    } else {
+    } else if (driverMsg) {
       displayMsg = driverMsg;
       spokenMsg = `Hello, ${panelName} Signaller${position ? ', ' + position : ''}, this is ${driverMsg}`;
+    } else {
+      // Non-train caller (Technician, Shunter, etc.) with no message body
+      displayMsg = `${caller} is calling`;
+      spokenMsg = `Hello, ${panelName} Signaller. This is ${caller}.`;
     }
 
     // Pre-generate TTS audio IN PARALLEL while user speaks the greeting
@@ -855,6 +891,7 @@ const PhoneCallsUI = {
 
   showInCallNotification(trainText) {
     if (!this.notificationEl) return;
+    this.notificationEl.classList.remove('hidden');
     const match = (trainText || '').match(/([0-9][A-Z][0-9]{2})/i);
     const headcode = match ? match[1].toUpperCase() : trainText || '';
     this.notificationEl.classList.remove('flashing');
@@ -862,24 +899,34 @@ const PhoneCallsUI = {
     this.notificationTrainEl.textContent = headcode;
     if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
     if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[End Call]';
+    const icon = this.notificationEl.querySelector('#notification-icon');
+    if (icon) icon.innerHTML = '&#128643;';
   },
 
   showNotification(trainText) {
     if (!this.notificationEl) return;
+    this.notificationEl.classList.remove('hidden');
     const match = trainText.match(/([0-9][A-Z][0-9]{2})/i);
     const headcode = match ? match[1].toUpperCase() : trainText;
     this.notificationTrainEl.textContent = headcode;
     if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
+    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[Answer]';
+    const icon = this.notificationEl.querySelector('#notification-icon');
+    if (icon) icon.innerHTML = '&#128643;';
     this.notificationEl.classList.add('flashing');
   },
 
   hideNotification() {
     if (!this.notificationEl) return;
+    this.notificationEl.classList.add('hidden');
     this.notificationEl.classList.remove('flashing');
     this.notificationEl.classList.remove('in-call');
     this.notificationTrainEl.textContent = '';
     if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
-    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[Answer]';
+    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '';
+    if (this.notificationEl.querySelector('#notification-icon')) {
+      this.notificationEl.querySelector('#notification-icon').textContent = '';
+    }
   },
 
   renderChat() {
@@ -918,12 +965,18 @@ const PhoneCallsUI = {
         // Group wait options into one line, keep others separate
         const waitIndices = [];
         const waitMins = [];
+        const callBackIndices = [];
+        const callBackMins = [];
         const otherReplies = [];
         replies.forEach((r, i) => {
           const wm = r.match(/wait\s+(\d+)\s*min/i);
+          const cbm = r.match(/call\s*back\s+in\s+(\d+)\s*min/i);
           if (wm) {
             waitIndices.push(i);
             waitMins.push(wm[1]);
+          } else if (cbm) {
+            callBackIndices.push(i);
+            callBackMins.push(cbm[1]);
           } else {
             otherReplies.push({ raw: r, index: i });
           }
@@ -934,7 +987,13 @@ const PhoneCallsUI = {
           const timeParts = waitMins.map((m) =>
             `<span class="wait-time-choice" data-index="${waitIndices[waitMins.indexOf(m)]}">${m}</span>`
           ).join(' / ');
-          items.push({ html: `${this.escapeHtml(hc)}, correct. Remain at${this.escapeHtml(sigRef)}. Standby for ${timeParts} minutes before phoning back`, replyIndex: -1 });
+          items.push({ html: `Driver, Correct. Remain at${this.escapeHtml(sigRef)} and wait ${timeParts} minutes before phoning back.`, replyIndex: -1 });
+        }
+        if (callBackMins.length > 0) {
+          const timeParts = callBackMins.map((m) =>
+            `<span class="wait-time-choice" data-index="${callBackIndices[callBackMins.indexOf(m)]}">${m}</span>`
+          ).join(' / ');
+          items.push({ html: `Driver. Please call back in ${timeParts} minutes.`, replyIndex: -1 });
         }
         otherReplies.forEach((o) => {
           items.push({ html: this.escapeHtml(this.formatReplyOption(o.raw)), replyIndex: o.index });

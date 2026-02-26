@@ -25,6 +25,8 @@ module.exports = {
   PHONE_CALLS_UPDATE: 'phone:calls-update',
   PHONE_ANSWER_CALL: 'phone:answer-call',
   PHONE_REPLY_CALL: 'phone:reply-call',
+  PHONE_BOOK_READ: 'phone:book-read',
+  PHONE_BOOK_DIAL: 'phone:book-dial',
 
   // TTS
   TTS_GET_VOICES: 'tts:get-voices',

@@ -68,9 +68,9 @@ public class SimSigListBox {
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
     public static void HideOffScreen(IntPtr hWnd) {
-        // Move window far off-screen and push to bottom of Z-order
-        // SWP_NOSIZE (0x01) | SWP_NOACTIVATE (0x10)
-        SetWindowPos(hWnd, (IntPtr)1, -32000, -32000, 0, 0, 0x0001 | 0x0010);
+        // Move window far off-screen without changing Z-order
+        // SWP_NOSIZE (0x01) | SWP_NOZORDER (0x04) | SWP_NOACTIVATE (0x10)
+        SetWindowPos(hWnd, IntPtr.Zero, -32000, -32000, 0, 0, 0x0001 | 0x0004 | 0x0010);
     }
 
     public static void SendF6(IntPtr hWnd) {
