@@ -175,10 +175,11 @@ body {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 4px 8px;
+  padding: 6px 8px;
   background: var(--toolbar-bg);
   border-top: 2px solid var(--border);
   flex-shrink: 0;
+  min-height: 98px;
 }
 
 .toolbar-btn {

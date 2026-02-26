@@ -162,11 +162,12 @@ function registerIpcHandlers() {
 
     return new Promise((resolve) => {
       execFile('powershell', args, { timeout: 10000 }, (err, stdout, stderr) => {
-        // Re-raise our window after PowerShell touched SimSig
+        // Re-raise our window and grab keyboard focus after PowerShell touched SimSig
         const win = BrowserWindow.getAllWindows()[0];
         if (win) {
           win.setAlwaysOnTop(true, 'floating');
           win.moveTop();
+          win.focus();
         }
 
         if (stderr) console.error('[PhoneAnswer] stderr:', stderr.trim());
@@ -197,11 +198,12 @@ function registerIpcHandlers() {
     }
     return new Promise((resolve) => {
       execFile('powershell', args, { timeout: 30000 }, (err, stdout, stderr) => {
-        // Re-raise our window after PowerShell touched SimSig
+        // Re-raise our window and grab keyboard focus after PowerShell touched SimSig
         const win = BrowserWindow.getAllWindows()[0];
         if (win) {
           win.setAlwaysOnTop(true, 'floating');
           win.moveTop();
+          win.focus();
         }
 
         if (stderr) console.error('[PhoneReply] stderr:', stderr.trim());

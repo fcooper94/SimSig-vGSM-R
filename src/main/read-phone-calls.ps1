@@ -34,6 +34,7 @@ public class SimSigListBox {
     public const int LB_GETTEXTLEN = 0x018A;
     public const uint WM_KEYDOWN = 0x0100;
     public const uint WM_KEYUP = 0x0101;
+    public const uint WM_CLOSE = 0x0010;
     public const int VK_F6 = 0x75;
 
     public static int GetCount(IntPtr hWnd) {
@@ -152,6 +153,22 @@ try {
                     $calls += @{ train = $text; status = "Unanswered" }
                 }
             }
+        }
+    }
+
+    # Also hide the TAnswerCallForm if it's on-screen (our app manages it)
+    $answerFormCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+        "TAnswerCallForm"
+    )
+    $answerForm = $root.FindFirst(
+        [System.Windows.Automation.TreeScope]::Children,
+        $answerFormCond
+    )
+    if ($null -ne $answerForm) {
+        $answerHwnd = [IntPtr]$answerForm.Current.NativeWindowHandle
+        if ($answerHwnd -ne [IntPtr]::Zero) {
+            [SimSigListBox]::HideOffScreen($answerHwnd)
         }
     }
 

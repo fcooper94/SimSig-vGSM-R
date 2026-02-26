@@ -117,6 +117,11 @@ try {
 
         $log += "Found $($offScreenWindows.Count) off-screen SimSig window(s)"
 
+        # Only restore the Telephone Calls window; close answer dialogs (stale)
+        $restoreClasses = @("TTelephoneForm")
+        # WM_CLOSE = 0x0010
+        $WM_CLOSE = 0x0010
+
         $offset = 0
         foreach ($wnd in $offScreenWindows) {
             $clsSb = New-Object System.Text.StringBuilder 256
@@ -130,14 +135,21 @@ try {
             # Skip the main SimSig window itself
             if ($wnd -eq $simsigHwnd) { continue }
 
-            [void][WinRestore2]::ShowWindow($wnd, 9)  # SW_RESTORE
-            [void][WinRestore2]::SetWindowPos($wnd, [WinRestore2]::HWND_TOPMOST, ($centerX + $offset), ($centerY + $offset), 0, 0, $flags)
-            [void][WinRestore2]::SetForegroundWindow($wnd)
-            $log += "Restored [$cls] '$title' at ($($centerX + $offset), $($centerY + $offset))"
-            $offset += 30
+            if ($restoreClasses -contains $cls) {
+                # Restore user-facing dialogs to center of SimSig monitor
+                [void][WinRestore2]::ShowWindow($wnd, 9)  # SW_RESTORE
+                [void][WinRestore2]::SetWindowPos($wnd, [WinRestore2]::HWND_TOPMOST, ($centerX + $offset), ($centerY + $offset), 0, 0, $flags)
+                [void][WinRestore2]::SetForegroundWindow($wnd)
+                $log += "Restored [$cls] '$title' at ($($centerX + $offset), $($centerY + $offset))"
+                $offset += 30
 
-            if ($cls -eq "TTelephoneForm") {
-                $script:restoredTelephone = $true
+                if ($cls -eq "TTelephoneForm") {
+                    $script:restoredTelephone = $true
+                }
+            } else {
+                # Close dialogs our app opened (Place Call, confirmations, etc.)
+                [void][WinRestore2]::PostMessage($wnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+                $log += "Closed [$cls] '$title'"
             }
         }
     }

@@ -262,6 +262,22 @@ try {
         Start-Sleep -Milliseconds 200
     }
 
+    # Hide the TAnswerCallForm off-screen (it may still be open after reply)
+    $answerFormCond2 = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+        "TAnswerCallForm"
+    )
+    $answerForm2 = $root.FindFirst(
+        [System.Windows.Automation.TreeScope]::Children,
+        $answerFormCond2
+    )
+    if ($null -ne $answerForm2) {
+        $aHwnd = [IntPtr]$answerForm2.Current.NativeWindowHandle
+        if ($aHwnd -ne [IntPtr]::Zero) {
+            [Win32Reply]::SetWindowPos($aHwnd, [IntPtr]::Zero, -32000, -32000, 0, 0, 0x0001 -bor 0x0004 -bor 0x0010)
+        }
+    }
+
     # Check if the Telephone Calls window is still open
     Start-Sleep -Milliseconds 300
     $telFormCond = New-Object System.Windows.Automation.PropertyCondition(
@@ -283,8 +299,26 @@ try {
                 [Win32Reply]::PostMessage($mainHwnd, 0x0100, [IntPtr]0x75, [IntPtr]::Zero) | Out-Null
                 Start-Sleep -Milliseconds 50
                 [Win32Reply]::PostMessage($mainHwnd, 0x0101, [IntPtr]0x75, [IntPtr]::Zero) | Out-Null
+                # Wait for it to open, then hide off-screen
+                Start-Sleep -Milliseconds 500
+                $telWindow = $root.FindFirst(
+                    [System.Windows.Automation.TreeScope]::Children,
+                    $telFormCond
+                )
+                if ($null -ne $telWindow) {
+                    $tHwnd = [IntPtr]$telWindow.Current.NativeWindowHandle
+                    if ($tHwnd -ne [IntPtr]::Zero) {
+                        [Win32Reply]::SetWindowPos($tHwnd, [IntPtr]::Zero, -32000, -32000, 0, 0, 0x0001 -bor 0x0004 -bor 0x0010)
+                    }
+                }
             }
         } catch {}
+    } elseif ($null -ne $telWindow) {
+        # Window exists — make sure it's hidden off-screen
+        $tHwnd = [IntPtr]$telWindow.Current.NativeWindowHandle
+        if ($tHwnd -ne [IntPtr]::Zero) {
+            [Win32Reply]::SetWindowPos($tHwnd, [IntPtr]::Zero, -32000, -32000, 0, 0, 0x0001 -bor 0x0004 -bor 0x0010)
+        }
     }
 
     Write-Output '{"success":true}'

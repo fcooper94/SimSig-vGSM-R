@@ -149,6 +149,12 @@
   cursor: default;
 }
 
+#calls-table .call-answer-btn.in-call {
+  background: #2266cc;
+  border-color: #1a4f99;
+  opacity: 1;
+}
+
 /* No calls message */
 #no-calls-message {
   color: var(--text-dim);
@@ -186,20 +192,21 @@
   display: none;
 }
 
-/* Incoming notification — always visible in bottom-right of toolbar */
+/* Incoming notification — compact square in bottom toolbar */
 #incoming-notification {
-  width: 130px;
-  min-height: 50px;
-  padding: 4px 8px;
+  width: 100px;
+  height: 90px;
+  padding: 4px;
+  box-sizing: border-box;
   background: #c0c0c0;
   border: 2px solid #888;
-  color: var(--text);
+  color: #000;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 2px;
+  justify-content: space-between;
+  gap: 0;
   margin-left: auto;
   cursor: pointer;
 }
@@ -223,33 +230,29 @@
 }
 
 #notification-train {
-  font-size: 20px;
+  font-size: 14px;
   font-weight: bold;
   color: #000;
   text-align: center;
-  width: 100%;
+  line-height: 1;
 }
 
 #notification-icon {
-  font-size: 24px;
+  font-size: 22px;
   line-height: 1;
 }
 
 #notification-signal {
-  font-size: 18px;
-  font-weight: bold;
-  color: #000;
-  text-align: center;
+  display: none;
 }
 
 #notification-answer-btn {
-  align-self: flex-end;
   background: transparent;
   color: #000;
   border: none;
-  padding: 2px 4px;
+  padding: 0;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 10px;
   font-weight: bold;
   cursor: pointer;
 }

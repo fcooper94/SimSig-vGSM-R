@@ -39,17 +39,26 @@ const PhoneCallsUI = {
     // Click the notification box to answer the latest call or end the current call
     this.notificationEl.addEventListener('click', () => {
       if (this.inCall) {
+        if (this._hasReplyOptions && !this._replySent) return; // must reply first
         this.hangUp();
       } else if (this.calls.length > 0) {
         this.answerCall(this.calls.length - 1);
       }
     });
 
+    // Prevent PTT key from triggering button clicks on notification elements
+    this.notificationEl.addEventListener('keydown', (e) => {
+      if (typeof PTTUI !== 'undefined' && e.code === PTTUI.keybind) e.preventDefault();
+    });
+
     // Gapless background noise via Web Audio API — alternate between two clips
     this.bgCtx = new AudioContext();
     this.bgBuffers = [];
     this.bgBufferIndex = 0;
+    this.bgSignallerBuffer = null;
+    this.bgYardBuffer = null;
     this.bgSource = null;
+    this.bgCallerType = 'train'; // 'train' | 'signaller' | 'yard'
     this.bgGain = this.bgCtx.createGain();
     this.bgGain.connect(this.bgCtx.destination);
     this.bgGain.gain.value = 0.5;
@@ -57,6 +66,16 @@ const PhoneCallsUI = {
     Promise.all(bgFiles.map((f) =>
       fetch(f).then((r) => r.arrayBuffer()).then((buf) => this.bgCtx.decodeAudioData(buf))
     )).then((buffers) => { this.bgBuffers = buffers; }).catch(() => {});
+    fetch('../../sounds/signaller-background.wav')
+      .then((r) => r.arrayBuffer())
+      .then((buf) => this.bgCtx.decodeAudioData(buf))
+      .then((buffer) => { this.bgSignallerBuffer = buffer; })
+      .catch(() => {});
+    fetch('../../sounds/yard-background.wav')
+      .then((r) => r.arrayBuffer())
+      .then((buf) => this.bgCtx.decodeAudioData(buf))
+      .then((buffer) => { this.bgYardBuffer = buffer; })
+      .catch(() => {});
 
     // Pre-warm local voices as fallback
     speechSynthesis.getVoices();
@@ -70,6 +89,14 @@ const PhoneCallsUI = {
 
   update(calls) {
     this.calls = calls || [];
+
+    // Keep the active call in the list even if SimSig removed it
+    if (this.inCall && this._activeCallTrain) {
+      const stillInList = this.calls.some((c) => c.train === this._activeCallTrain);
+      if (!stillInList) {
+        this.calls.unshift({ train: this._activeCallTrain, status: 'In Call' });
+      }
+    }
 
     if (this.calls.length > 0 && !this.wasRinging && !this.inCall) {
       this.startRinging();
@@ -188,14 +215,22 @@ const PhoneCallsUI = {
     return audioData || null;
   },
 
-  // Start cab background noise (gapless via Web Audio API, alternates clips)
+  // Start background noise (cab for trains, office for signallers, yard for shunters/CSD)
   startBgNoise() {
-    if (!this.bgBuffers.length) return;
+    let buffer;
+    if (this.bgCallerType === 'yard' && this.bgYardBuffer) {
+      buffer = this.bgYardBuffer;
+    } else if (this.bgCallerType === 'signaller' && this.bgSignallerBuffer) {
+      buffer = this.bgSignallerBuffer;
+    } else if (this.bgBuffers.length) {
+      buffer = this.bgBuffers[this.bgBufferIndex % this.bgBuffers.length];
+      this.bgBufferIndex++;
+    } else {
+      return;
+    }
     if (this.bgSource) { try { this.bgSource.stop(); } catch {} }
     this.bgGain.gain.cancelScheduledValues(this.bgCtx.currentTime);
     this.bgGain.gain.value = 0.5;
-    const buffer = this.bgBuffers[this.bgBufferIndex % this.bgBuffers.length];
-    this.bgBufferIndex++;
     const source = this.bgCtx.createBufferSource();
     source.buffer = buffer;
     source.loop = true;
@@ -222,10 +257,9 @@ const PhoneCallsUI = {
       const blob = new Blob([new Uint8Array(audioData)], { type: 'audio/mpeg' });
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
-      audio.onended = () => { URL.revokeObjectURL(url); this.stopBgNoise(); resolve(true); };
-      audio.onerror = () => { URL.revokeObjectURL(url); this.stopBgNoise(); resolve(false); };
-      this.startBgNoise();
-      audio.play().catch(() => { this.stopBgNoise(); resolve(false); });
+      audio.onended = () => { URL.revokeObjectURL(url); resolve(true); };
+      audio.onerror = () => { URL.revokeObjectURL(url); resolve(false); };
+      audio.play().catch(() => { resolve(false); });
     });
   },
 
@@ -253,9 +287,8 @@ const PhoneCallsUI = {
       utterance.pitch = 0.7 + ((hash >> 4) % 100) / 100 * 0.6;
       utterance.rate = 2.0 + ((hash >> 8) % 100) / 100 * 0.3;
 
-      this.startBgNoise();
-      utterance.onend = () => { this.stopBgNoise(); resolve(); };
-      utterance.onerror = () => { this.stopBgNoise(); resolve(); };
+      utterance.onend = () => { resolve(); };
+      utterance.onerror = () => { resolve(); };
       speechSynthesis.speak(utterance);
     });
   },
@@ -284,15 +317,72 @@ const PhoneCallsUI = {
     return { headcode, entryPoint, signal, nextStop, platform };
   },
 
+  // Add "the" before Up/Down signal names, but not standard codes like "23" or "WK203"
+  signalArticle(signal) {
+    if (/^(up|down)\b/i.test(signal)) return `the ${signal}`;
+    return signal;
+  },
+
   // Build spoken message for CSD entry permission calls
-  buildCsdSpokenMessage(panelName, position, csd) {
+  buildCsdSpokenMessage(panelName, position, csd, caller) {
+    const isShunter = caller && /shunter/i.test(caller);
+    const sigRef = `${this.signalArticle(csd.signal)} signal`;
+    if (isShunter) {
+      let msg = `Hello, ${panelName} Signaller, this is the Shunter within ${csd.entryPoint}. I have ${csd.headcode} at ${sigRef}. Request permission to enter`;
+      if (csd.nextStop) {
+        msg += `. Their next stop will be ${csd.nextStop}`;
+        if (csd.platform) msg += ` Platform ${csd.platform}`;
+      }
+      return msg;
+    }
     const posStr = position ? `, ${position}` : '';
-    let msg = `Hello, ${panelName} Signaller${posStr}, this is driver of ${csd.headcode} at ${csd.signal} signal within ${csd.entryPoint}. Request permission to enter`;
+    let msg = `Hello, ${panelName} Signaller${posStr}, this is driver of ${csd.headcode} at ${sigRef} within ${csd.entryPoint}. Request permission to enter`;
     if (csd.nextStop) {
       msg += `, next stop will be ${csd.nextStop}`;
       if (csd.platform) msg += ` Platform ${csd.platform}`;
     }
     return msg;
+  },
+
+  // Shorten a caller name to at most 4 words, stripping parenthesised suffixes
+  shortenCaller(name) {
+    const short = name.replace(/\s*\([^)]*\)\s*/g, '').replace(/\s*\/.*$/, '').trim();
+    const words = short.split(/\s+/);
+    return words.slice(0, 4).join(' ');
+  },
+
+  // Determine caller type for background audio selection
+  // Returns 'yard' for shunters/CSD/sidings/yard/goods/depot,
+  // 'signaller' for other signallers, or 'train' for train drivers
+  getCallerType(caller, driverMsg) {
+    if (!caller) return 'train';
+    // Shunter is always yard
+    if (/shunter/i.test(caller)) return 'yard';
+    // CSD / sidings / yard / goods / depot in caller name or message
+    if (/\b(CSD|siding|yard|goods|depot)\b/i.test(caller)) return 'yard';
+    if (driverMsg && /\b(CSD|siding|yard|goods|depot)\b/i.test(driverMsg)) return 'yard';
+    // Train calls have a headcode pattern (digit-letter-digits)
+    if (/[0-9][A-Z][0-9]{2}/i.test(caller)) return 'train';
+    // Technician — treat as train (cab-like environment)
+    if (/technician/i.test(caller)) return 'train';
+    // Everything else is a signaller
+    return 'signaller';
+  },
+
+  // Parse "early running" advisory messages from other signallers
+  // "I have 4022 running early via Aynho Junction (Up Main).\nIt can be in your area at about 05:00 if I let it continue.\nDo you want me to hold it until its booked time of 05:22?"
+  parseEarlyRunningMessage(msg) {
+    const earlyMatch = msg.match(/I have (\w+) running early via (.+?)[\.\n]/i);
+    if (!earlyMatch) return null;
+
+    const headcode = earlyMatch[1];
+    const via = earlyMatch[2].replace(/\s*\([^)]*\)\s*$/, '').trim();
+    const estimateMatch = msg.match(/in your area at about (\d{2}:\d{2})/i);
+    const bookedMatch = msg.match(/booked time of (\d{2}:\d{2})/i);
+    const estimate = estimateMatch ? estimateMatch[1] : '';
+    const booked = bookedMatch ? bookedMatch[1] : '';
+
+    return { headcode, via, estimate, booked };
   },
 
   // Keyword patterns for matching user speech to SimSig reply options
@@ -308,6 +398,8 @@ const PhoneCallsUI = {
     { pattern: /examine.*line|examine\s*the/, fragment: 'examine the line' },
     { pattern: /permission|granted|enter|proceed/, fragment: 'permission granted' },
     { pattern: /understood|continue|obey|speaking.*control/, fragment: 'continue after speaking' },
+    { pattern: /run\s*early|let.*run|let.*continue/, fragment: 'run early' },
+    { pattern: /hold.*back|hold.*booked/, fragment: 'hold' },
   ],
 
   // Match user's spoken text against available reply options
@@ -422,7 +514,7 @@ const PhoneCallsUI = {
     }
     // Pass signal at danger only
     if (/authoris[ez].*pass.*signal|ask.*pass.*signal|pass.*signal.*at\s*stop/i.test(raw)) {
-      return `Driver of ${hc}, this is${panelRef}. I am authorising you to pass${sigRef} at danger. Proceed at caution to the next signal and be prepared to stop short of any obstruction`;
+      return `Driver of ${hc}, this is${panelRef}. I am authorising you to pass${sigRef} at danger. Proceed at caution to the next signal and be prepared to stop short of any obstruction. Please examine the line and report any obstructions`;
     }
     // Continue examining the line (no pass at danger)
     if (/continue\s*examin/i.test(raw)) {
@@ -444,12 +536,23 @@ const PhoneCallsUI = {
     // "Permission granted for 5A20 to enter"
     const permMatch = raw.match(/permission\s+granted\s+for\s+(\w+)\s+to\s+enter/i);
     if (permMatch) {
-      return `Permission granted, ${permMatch[1]} you may enter`;
+      return `Permission granted, ${permMatch[1]} can enter`;
+    }
+    // "No, let 4022 run early" — allow early running train to continue
+    const runEarlyMatch = raw.match(/let\s+(\w+)\s+run\s+early/i);
+    if (runEarlyMatch) {
+      return `We can let ${runEarlyMatch[1]} run early`;
+    }
+    // "Please hold 4022 back" — hold train until booked time
+    const holdBackMatch = raw.match(/hold\s+(\w+)\s+back/i);
+    if (holdBackMatch) {
+      return `Can you hold ${holdBackMatch[1]} back until their booked time, thanks`;
     }
     // "Please call back in N minutes"
     const callBackMatch = raw.match(/call\s*back\s+in\s+(\d+)\s*min/i);
     if (callBackMatch) {
-      return `Please call back in ${callBackMatch[1]} minutes`;
+      const who = this.isShunterCall ? 'Shunter' : 'Driver';
+      return `${who}, Please call back in ${callBackMatch[1]} minutes`;
     }
     // Default: swap "at stop" → "at danger"
     return raw.replace(/\bat stop\b/gi, 'at danger');
@@ -495,7 +598,15 @@ const PhoneCallsUI = {
     if (callBackMatch) {
       const n = parseInt(callBackMatch[1], 10);
       const word = this.NUMBERS[n] || callBackMatch[1];
-      return `Ok, I will call back in ${word} minutes${trainRef}`;
+      return `Ok, will call back in ${word} minutes`;
+    }
+    // Run early — caller acknowledges
+    if (/run\s*early/i.test(lower)) {
+      return 'Ok, I will let it run early. Thanks';
+    }
+    // Hold back — caller acknowledges
+    if (/hold.*back/i.test(lower)) {
+      return 'Ok, please hold it back until booked time. Thanks';
     }
     // Continue after speaking to control
     if (/continue\s+after\s+speaking/i.test(lower) || /continue.*obey/i.test(lower)) {
@@ -503,7 +614,7 @@ const PhoneCallsUI = {
     }
     // Permission granted to enter
     if (/permission\s+granted/i.test(lower)) {
-      return 'Thank you, entering now';
+      return `Permission granted, ${hc} can enter`;
     }
     return `Understood${trainRef}`;
   },
@@ -523,6 +634,7 @@ const PhoneCallsUI = {
 
     // Send reply to SimSig while TTS generates
     await window.simsigAPI.phone.replyCall(replyIndex, this.currentHeadCode);
+    this._replySent = true;
 
     // Remove loading spinner, show confirmation text
     this.messages = this.messages.filter((m) => m.type !== 'loading');
@@ -580,6 +692,7 @@ const PhoneCallsUI = {
     // If only "Ok" is available, auto-reply and hang up
     if (replies.length === 1 && /^ok$/i.test(replies[0].trim())) {
       await window.simsigAPI.phone.replyCall(0, this.currentHeadCode);
+      this._replySent = true;
       this.showHangUpInChat();
       return;
     }
@@ -611,16 +724,16 @@ const PhoneCallsUI = {
       }
 
       // Not understood
-      const sorry = "Sorry, I didn't understand that. Can you please repeat signaller";
+      const sorry = "Can you say again please";
       this.addMessage({ type: 'driver', caller, text: sorry });
       await this.speakAsDriver(sorry, caller);
     }
 
     if (this._replyClicked) return;
 
-    // After max attempts, fall back to buttons
-    this.addMessage({ type: 'system', text: 'Could not match — use buttons below' });
-    await this.waitForReplyButton(replies, caller);
+    // After max attempts, re-show the clickable reply options
+    this.addMessage({ type: 'reply-options', replies });
+    this.setupReplyClickHandlers(replies, caller);
   },
 
   // End-call is handled via the notification box — no chat button needed
@@ -635,6 +748,7 @@ const PhoneCallsUI = {
       const makeHandler = (index, reply) => async () => {
         container.remove();
         await window.simsigAPI.phone.replyCall(index, this.currentHeadCode);
+        this._replySent = true;
         const confirmation = this.buildConfirmation(reply);
         this.addMessage({ type: 'driver', caller, text: confirmation });
         await this.speakAsDriver(confirmation, caller);
@@ -711,13 +825,27 @@ const PhoneCallsUI = {
   },
 
   hangUp() {
+    // Remove the active call from the list
+    const activeTrain = this._activeCallTrain;
+    if (activeTrain) {
+      this.calls = this.calls.filter((c) => c.train !== activeTrain);
+    }
+
     this.inCall = false;
+    this.isShunterCall = false;
+    this._replyClicked = false;
+    this._hasReplyOptions = false;
+    this._replySent = false;
+    this._activeCallTrain = '';
+    this.stopBgNoise();
+    this.bgCallerType = 'train';
     this.messages = [];
     if (this._replyDelegateHandler) {
       this.chatEl.removeEventListener('click', this._replyDelegateHandler);
       this._replyDelegateHandler = null;
     }
     this.renderChat();
+    this.renderCalls();
     this.hideNotification();
     // If there are waiting calls, show the next one and start ringing
     if (this.calls.length > 0) {
@@ -729,16 +857,26 @@ const PhoneCallsUI = {
 
   async answerCall(index) {
     this.inCall = true;
+    this._replyClicked = false;
+    this._hasReplyOptions = false;
+    this._replySent = false;
     this.stopRinging();
 
     const call = this.calls[index];
     const train = call ? call.train : '';
+    this._activeCallTrain = train;
     this.showInCallNotification(train);
+
+    // Remove focus from notification so Space (PTT) doesn't trigger a click on [End Call]
+    if (document.activeElement && this.notificationEl.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
 
     const btn = this.listEl.querySelector(`.call-answer-btn[data-index="${index}"]`);
     if (btn) {
-      btn.textContent = '...';
+      btn.textContent = 'In Call';
       btn.disabled = true;
+      btn.classList.add('in-call');
     }
 
     this.addMessage({ type: 'system', text: 'Answering...' });
@@ -752,8 +890,24 @@ const PhoneCallsUI = {
     ]);
 
     if (result.error) {
-      this.addMessage({ type: 'error', text: result.error });
+      // Call no longer exists — remove it from local list and reset state
+      this.inCall = false;
+      this.calls = this.calls.filter((c, i) => i !== index);
+      this.renderCalls();
+      if (this.calls.length > 0) {
+        this.showNotification(this.calls[this.calls.length - 1].train || '');
+        this.startRinging();
+      } else {
+        this.hideNotification();
+      }
+      this.messages = [];
+      this.renderChat();
       return;
+    }
+
+    // Lock End Call until reply is sent (if this call has reply options)
+    if (result.replies && result.replies.length > 0) {
+      this._hasReplyOptions = true;
     }
 
     // Build greeting and driver message — settings + voices already loaded
@@ -763,6 +917,13 @@ const PhoneCallsUI = {
     const caller = (result.title || '').replace(/^Answer call from\s*/i, '') || result.train || '';
     const driverMsg = result.message || '';
     const csd = this.parseCsdMessage(driverMsg);
+    const earlyRun = this.parseEarlyRunningMessage(driverMsg);
+
+    // Start background noise for the duration of the call
+    // Signaller → office ambience, shunter/CSD/yard → yard noise, train → cab noise
+    this.bgCallerType = this.getCallerType(caller, driverMsg);
+    this.isShunterCall = /shunter/i.test(caller);
+    this.startBgNoise();
 
     // Extract signal and headcode EARLY so formatReplyOption can use them
     const sigMatch = driverMsg.match(/signal\s+([A-Z0-9]+)/i);
@@ -780,12 +941,19 @@ const PhoneCallsUI = {
     }
     this.currentPanelName = panelName;
 
+    // Update notification with actual headcode from the answered call
+    this.showInCallNotification(this.currentHeadCode);
+
     // Build display and spoken messages based on call type
     const isExamineResult = /examining the line.*no obstruction|no obstruction.*found/i.test(driverMsg);
     let displayMsg, spokenMsg;
     if (csd) {
       displayMsg = `${csd.headcode} is ready at entry point ${csd.entryPoint} (${csd.signal}). Permission required to enter.`;
-      spokenMsg = this.buildCsdSpokenMessage(panelName, position, csd);
+      spokenMsg = this.buildCsdSpokenMessage(panelName, position, csd, caller);
+    } else if (earlyRun) {
+      const bookedPart = earlyRun.booked ? ` with booked time of ${earlyRun.booked}` : '';
+      displayMsg = `${caller}. ${earlyRun.headcode} is early. Estimate is ${earlyRun.estimate}${bookedPart}. Continue or hold back?`;
+      spokenMsg = `Hello ${panelName}, this is ${this.shortenCaller(caller)} Signaller. I have ${earlyRun.headcode} running early via ${earlyRun.via}. It can be in your area at about ${earlyRun.estimate}. Shall I let it continue or hold it back until its booked time of ${earlyRun.booked}?`;
     } else if (isExamineResult && this.currentHeadCode) {
       // Examine line result — driver reporting back after examining the line
       const sigPart = this.currentSignalId ? ` at ${this.currentSignalId}` : '';
@@ -800,9 +968,12 @@ const PhoneCallsUI = {
       spokenMsg = `Hello, ${panelName} Signaller${position ? ', ' + position : ''}, this is ${driverMsg}`;
     } else {
       // Non-train caller (Technician, Shunter, etc.) with no message body
-      displayMsg = `${caller} is calling`;
-      spokenMsg = `Hello, ${panelName} Signaller. This is ${caller}.`;
+      displayMsg = `${this.shortenCaller(caller)} is calling`;
+      spokenMsg = `Hello, ${panelName} Signaller. This is ${this.shortenCaller(caller)}.`;
     }
+
+    // Display text matches spoken text so user can read along with TTS
+    displayMsg = spokenMsg;
 
     // Pre-generate TTS audio IN PARALLEL while user speaks the greeting
     let prefetchedAudio = null;
@@ -822,7 +993,8 @@ const PhoneCallsUI = {
     }
 
     // Show driver message and play TTS
-    this.addMessage({ type: 'driver', caller, text: displayMsg });
+    const shortCaller = this.shortenCaller(caller);
+    this.addMessage({ type: 'driver', caller: shortCaller, text: displayMsg });
 
     if (prefetchedAudio) {
       const ok = await this.playAudioData(prefetchedAudio);
@@ -862,14 +1034,18 @@ const PhoneCallsUI = {
       this.noCallsEl.classList.add('hidden');
 
       this.listEl.innerHTML = this.calls.map((call, i) => {
-        const trainText = this.escapeHtml(call.train || '');
+        const trainText = call.train || '';
         const headMatch = trainText.match(/([0-9][A-Z][0-9]{2})/i);
-        const headcode = headMatch ? headMatch[1].toUpperCase() : trainText;
+        const headcode = headMatch ? headMatch[1].toUpperCase() : this.shortenCaller(trainText);
+        const isActive = this.inCall && trainText === this._activeCallTrain;
+        const btnClass = isActive ? 'call-answer-btn in-call' : 'call-answer-btn';
+        const btnText = isActive ? 'In Call' : 'Answer';
+        const btnDisabled = isActive ? 'disabled' : '';
         return `<tr>
-          <td class="col-train">${headcode}</td>
+          <td class="col-train">${this.escapeHtml(headcode)}</td>
           <td class="col-signal"></td>
           <td class="col-action">
-            <button class="call-answer-btn" data-index="${i}">Answer</button>
+            <button class="${btnClass}" data-index="${i}" ${btnDisabled}>${btnText}</button>
           </td>
         </tr>`;
       }).join('');
@@ -893,7 +1069,7 @@ const PhoneCallsUI = {
     if (!this.notificationEl) return;
     this.notificationEl.classList.remove('hidden');
     const match = (trainText || '').match(/([0-9][A-Z][0-9]{2})/i);
-    const headcode = match ? match[1].toUpperCase() : trainText || '';
+    const headcode = match ? match[1].toUpperCase() : this.shortenCaller(trainText || '');
     this.notificationEl.classList.remove('flashing');
     this.notificationEl.classList.add('in-call');
     this.notificationTrainEl.textContent = headcode;
@@ -907,7 +1083,7 @@ const PhoneCallsUI = {
     if (!this.notificationEl) return;
     this.notificationEl.classList.remove('hidden');
     const match = trainText.match(/([0-9][A-Z][0-9]{2})/i);
-    const headcode = match ? match[1].toUpperCase() : trainText;
+    const headcode = match ? match[1].toUpperCase() : this.shortenCaller(trainText);
     this.notificationTrainEl.textContent = headcode;
     if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
     if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[Answer]';
@@ -987,13 +1163,15 @@ const PhoneCallsUI = {
           const timeParts = waitMins.map((m) =>
             `<span class="wait-time-choice" data-index="${waitIndices[waitMins.indexOf(m)]}">${m}</span>`
           ).join(' / ');
-          items.push({ html: `Driver, Correct. Remain at${this.escapeHtml(sigRef)} and wait ${timeParts} minutes before phoning back.`, replyIndex: -1 });
+          const waitWho = this.isShunterCall ? 'Shunter' : 'Driver';
+          items.push({ html: `${waitWho}, Correct. Remain at${this.escapeHtml(sigRef)} and wait ${timeParts} minutes before phoning back.`, replyIndex: -1 });
         }
         if (callBackMins.length > 0) {
           const timeParts = callBackMins.map((m) =>
             `<span class="wait-time-choice" data-index="${callBackIndices[callBackMins.indexOf(m)]}">${m}</span>`
           ).join(' / ');
-          items.push({ html: `Driver. Please call back in ${timeParts} minutes.`, replyIndex: -1 });
+          const cbWho = this.isShunterCall ? 'Shunter' : 'Driver';
+          items.push({ html: `${cbWho}, Please call back in ${timeParts} minutes.`, replyIndex: -1 });
         }
         otherReplies.forEach((o) => {
           items.push({ html: this.escapeHtml(this.formatReplyOption(o.raw)), replyIndex: o.index });

@@ -50,6 +50,46 @@ public class Win32Auto {
         SendMessage(hWnd, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
     }
 
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    public const uint WM_CLOSE = 0x0010;
+    public const uint WM_KEYDOWN = 0x0100;
+    public const uint WM_KEYUP = 0x0101;
+    public const int VK_F6 = 0x75;
+
+    public static void CloseWindow(IntPtr hWnd) {
+        PostMessage(hWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    public static IntPtr simsigHwnd = IntPtr.Zero;
+    private static EnumWindowsProc _callback;
+    public static void FindSimSig() {
+        simsigHwnd = IntPtr.Zero;
+        _callback = (hWnd, lParam) => {
+            StringBuilder sb = new StringBuilder(256);
+            GetWindowText(hWnd, sb, 256);
+            if (sb.ToString().StartsWith("SimSig -")) {
+                simsigHwnd = hWnd;
+                return false;
+            }
+            return true;
+        };
+        EnumWindows(_callback, IntPtr.Zero);
+    }
+
+    public static void SendF6(IntPtr hWnd) {
+        PostMessage(hWnd, WM_KEYDOWN, (IntPtr)VK_F6, IntPtr.Zero);
+        PostMessage(hWnd, WM_KEYUP, (IntPtr)VK_F6, IntPtr.Zero);
+    }
+
     [DllImport("user32.dll")]
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
@@ -63,6 +103,32 @@ public class Win32Auto {
 
 try {
     $root = [System.Windows.Automation.AutomationElement]::RootElement
+
+    # Close any stale TAnswerCallForm from a previous session/call
+    # If one is already open, SimSig won't let us answer a new call until it's dismissed
+    $staleFormCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+        "TAnswerCallForm"
+    )
+    $staleForm = $root.FindFirst(
+        [System.Windows.Automation.TreeScope]::Children,
+        $staleFormCond
+    )
+    if ($null -ne $staleForm) {
+        $staleHwnd = [IntPtr]$staleForm.Current.NativeWindowHandle
+        if ($staleHwnd -ne [IntPtr]::Zero) {
+            [Win32Auto]::CloseWindow($staleHwnd)
+            Start-Sleep -Milliseconds 500
+
+            # Closing the dialog may also close the Telephone Calls window
+            # Send F6 to SimSig to ensure it's open again
+            [Win32Auto]::FindSimSig()
+            if ([Win32Auto]::simsigHwnd -ne [IntPtr]::Zero) {
+                [Win32Auto]::SendF6([Win32Auto]::simsigHwnd)
+                Start-Sleep -Milliseconds 500
+            }
+        }
+    }
 
     # Find the Telephone Calls window
     $condition = New-Object System.Windows.Automation.PropertyCondition(
@@ -88,6 +154,12 @@ try {
     if ($null -eq $window) {
         Write-Output '{"error":"Telephone Calls window not found"}'
         exit 0
+    }
+
+    # Hide the telephone window off-screen (our app manages it)
+    $teleHwnd = [IntPtr]$window.Current.NativeWindowHandle
+    if ($teleHwnd -ne [IntPtr]::Zero) {
+        [Win32Auto]::HideOffScreen($teleHwnd)
     }
 
     # Find the TListBox
