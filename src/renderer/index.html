@@ -11,7 +11,7 @@
 </head>
 <body>
   <header id="top-bar">
-    <div id="panel-name-tab">Panel</div>
+    <div id="panel-name-tab">-</div>
     <div id="connection-area">
       <span id="status-indicator" class="disconnected"></span>
       <span id="status-text">Disconnected</span>
@@ -158,6 +158,11 @@
         </div>
       </form>
     </div>
+  </div>
+
+  <!-- Sim Paused overlay — covers everything except settings/log buttons -->
+  <div id="paused-overlay" class="hidden">
+    <div id="paused-text">SIM PAUSED</div>
   </div>
 
   <div id="confirm-modal" class="modal hidden">

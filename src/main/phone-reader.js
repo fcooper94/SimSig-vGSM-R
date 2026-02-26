@@ -9,7 +9,7 @@ class PhoneReader {
     this.onSimName = onSimName;
     this.intervalId = null;
     this.lastJson = '[]';
-    this.simNameSent = false;
+    this.lastSimName = '';
     this.polling = false;
   }
 
@@ -61,9 +61,9 @@ class PhoneReader {
           this.onChange(calls);
         }
 
-        // Send sim name once
-        if (!this.simNameSent && data.simName && this.onSimName) {
-          this.simNameSent = true;
+        // Send sim name whenever it changes
+        if (data.simName && data.simName !== this.lastSimName && this.onSimName) {
+          this.lastSimName = data.simName;
           this.onSimName(data.simName);
         }
       } catch (parseErr) {

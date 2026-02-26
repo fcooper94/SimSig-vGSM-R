@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "generated_utc": "2026-02-26T09:36:49Z",
+  "notes": [
+    "Templates for a GSM-R-style training/app overlay mapped to SimSig-style responses. Wording is designed to follow UK 'safety critical communications' principles (identify, location, instruction, readback/confirmation for safety-critical authorities).",
+    "This is not an official RSSB Rule Book publication; validate against your organisation's current GE/RT8000 modules and local instructions before any real-world use.",
+    "SimSig implementations vary by simulation, era, core version, and timetable scripting; mappings here target common Loader-era reply sets (e.g., red-signal waiting menu) and otherwise map to SimSig-equivalent actions (e.g., slot buttons)."
+  ],
+  "templates": [
+    {
+      "id": "driver_waiting_at_red",
+      "action": "Stopped at red signal / waiting at signal at danger",
+      "tts_from_driver_template": "Hello Signaller, this is the driver of {train_id}. I am at signal {signal_id} displaying red.",
+      "options": [
+        {
+          "option_id": "wait_2",
+          "signaller_tts_template": "Driver of {train_id}, this is the {signaller_role}. Remain at signal {signal_id}. Stand by for two minutes; if the signal has not cleared, contact me again.",
+          "requires_driver_readback": false,
+          "simsig_reply_label": "Wait 2 minutes for signal to show proceed before phoning back"
+        },
+        {
+          "option_id": "wait_5",
+          "signaller_tts_template": "Driver of {train_id}, this is the {signaller_role}. Remain at signal {signal_id}. Stand by for five minutes; if the signal has not cleared, contact me again.",
+          "requires_driver_readback": false,
+          "simsig_reply_label": "Wait 5 minutes for signal to show proceed before phoning back"
+        },
+        {
+          "option_id": "wait_15",
+          "signaller_tts_template": "Driver of {train_id}, this is the {signaller_role}. Remain at signal {signal_id}. Stand by for fifteen minutes; if the signal has not cleared, contact me again.",
+          "requires_driver_readback": false,
+          "simsig_reply_label": "Wait 15 minutes for signal to show proceed before phoning back"
+        },
+        {
+          "option_id": "pass_at_danger",
+          "signaller_tts_template": "Driver of {train_id}, this is the {signaller_role}. I am authorising you to pass signal {signal_id} at danger. Proceed at caution to the next signal and be prepared to stop short of any obstruction. Repeat back the authority, the signal number, and your limit of movement.",
+          "requires_driver_readback": true,
+          "driver_readback_template": "Authorised to pass signal {signal_id} at danger, proceed at caution to the next signal, {train_id}.",
+          "signaller_confirm_template": "Correct. Proceed as instructed.",
+          "simsig_reply_label": "Authorise driver to pass signal at stop"
+        },
+        {
+          "option_id": "examine_line",
+          "signaller_tts_template": "Driver of {train_id}, this is the {signaller_role}. I require you to examine the line from signal {signal_id} to the next signal. Proceed at caution and report any obstruction or irregularity. Repeat back the instruction.",
+          "requires_driver_readback": true,
+          "driver_readback_template": "Examine the line from signal {signal_id} to the next signal, proceed at caution and report, {train_id}.",
+          "signaller_confirm_template": "Correct. Call me back with the result.",
+          "simsig_reply_label": "Ask driver to examine the line"
+        },
+        {
+          "option_id": "pass_and_examine",
+          "signaller_tts_template": "Driver of {train_id}, this is the {signaller_role}. I am authorising you to pass signal {signal_id} at danger. You must also examine the line to the next signal. Proceed at caution and be prepared to stop short of any obstruction. Repeat back the authority, the signal number, and the requirement to examine the line.",
+          "requires_driver_readback": true,
+          "driver_readback_template": "Authorised to pass signal {signal_id} at danger, examine the line to the next signal, proceed at caution, {train_id}.",
+          "signaller_confirm_template": "Correct. Proceed as instructed and report back.",
+          "simsig_reply_label": "Ask driver to pass signal at stop and examine the line"
+        }
+      ]
+    },
+    {
+      "id": "adverse_change_of_aspect",
+      "action": "Adverse change of aspect (ACA)",
+      "tts_from_driver_template": "Signaller, this is the driver of {train_id}. I have experienced an adverse change of aspect at signal {signal_id}.",
+      "options": [
+        {
+          "option_id": "ack_continue",
+          "signaller_tts_template": "{train_id}, understood. Continue normally unless otherwise instructed. Report any further irregularity.",
+          "requires_driver_readback": false,
+          "simsig_reply_label": "Driver, please continue after speaking to your control"
+        }
+      ]
+    }
+  ]
+}

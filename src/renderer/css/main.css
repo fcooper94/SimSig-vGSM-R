@@ -298,6 +298,40 @@ button {
   cursor: pointer;
 }
 
+/* Sim Paused overlay */
+#paused-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: all;
+}
+
+#paused-overlay.hidden {
+  display: none;
+}
+
+#paused-text {
+  font-size: 48px;
+  font-weight: bold;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 8px;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  user-select: none;
+}
+
+/* Keep settings and log buttons clickable above the overlay */
+#settings-btn, #msglog-btn {
+  position: relative;
+  z-index: 950;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
 }

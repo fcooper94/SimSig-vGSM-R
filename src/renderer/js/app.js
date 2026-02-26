@@ -13,6 +13,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.simsigAPI.clock.onUpdate((data) => {
     ConnectionUI.handleClockUpdate(data);
+    const overlay = document.getElementById('paused-overlay');
+    if (data.paused) {
+      overlay.classList.remove('hidden');
+      PhoneCallsUI.muteAll();
+    } else {
+      overlay.classList.add('hidden');
+      PhoneCallsUI.resumeRinging();
+    }
   });
 
   window.simsigAPI.phone.onCallsUpdate((calls) => {

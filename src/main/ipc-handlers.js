@@ -110,7 +110,10 @@ function registerIpcHandlers() {
       if (phoneReader) phoneReader.stopPolling();
       phoneReader = new PhoneReader(
         (calls) => sendToMainWindow(channels.PHONE_CALLS_UPDATE, calls),
-        (simName) => sendToMainWindow(channels.SIM_NAME, simName),
+        (simName) => {
+          sendToMainWindow(channels.SIM_NAME, simName);
+          settings.set('signaller.panelName', simName);
+        },
       );
       phoneReader.startPolling(2000);
 
@@ -149,14 +152,23 @@ function registerIpcHandlers() {
     if (train) {
       args.push('-Train', train);
     }
+    console.log('[PhoneAnswer] args:', JSON.stringify(args));
+
+    if (getClockState().paused) {
+      return { error: 'Cannot answer while sim is paused. Unpause SimSig first.' };
+    }
+
     return new Promise((resolve) => {
-      execFile('powershell', args, { timeout: 10000 }, (err, stdout) => {
+      execFile('powershell', args, { timeout: 10000 }, (err, stdout, stderr) => {
         // Re-raise our window after PowerShell touched SimSig
         const win = BrowserWindow.getAllWindows()[0];
         if (win) {
           win.setAlwaysOnTop(true, 'screen-saver');
           win.moveTop();
         }
+
+        if (stderr) console.error('[PhoneAnswer] stderr:', stderr.trim());
+        console.log('[PhoneAnswer] stdout:', (stdout || '').trim());
 
         if (err) {
           console.error('[PhoneAnswer] Error:', err.message);
@@ -237,6 +249,20 @@ function registerIpcHandlers() {
     });
   }
 
+  // Only use these specific voices for driver TTS
+  const ALLOWED_VOICE_NAMES = new Set([
+    'Archer',
+    'Benedict - Smooth British Narrator',
+    'Bradford - British Narrator, Storyteller',
+    'Russell - Dramatic British TV',
+    'Eastend Steve',
+    'Yowz - South London',
+    'Tom',
+    'John Smith',
+    'George',
+    'Jobi',
+  ]);
+
   async function prefetchVoices() {
     if (ttsVoicesCache) return ttsVoicesCache;
 
@@ -246,46 +272,20 @@ function registerIpcHandlers() {
       accent: v.labels?.accent || v.accent || '',
       gender: v.labels?.gender || v.gender || '',
     });
-    const isBritish = (v) => {
-      const accent = (v.labels?.accent || v.accent || '').toLowerCase();
-      return accent.includes('british') || accent.includes('english');
-    };
 
-    // Fetch account + shared voices in PARALLEL
-    const sharedUrlMale = 'https://api.elevenlabs.io/v1/shared-voices?accent=british&language=en&gender=male&category=professional&page_size=20&sort=usage_character_count_1y&sort_direction=desc';
-    const [accountData, sharedData] = await Promise.all([
-      fetchJSON('https://api.elevenlabs.io/v1/voices', ELEVENLABS_API_KEY),
-      fetchJSON(sharedUrlMale, ELEVENLABS_API_KEY),
-    ]);
+    const accountData = await fetchJSON('https://api.elevenlabs.io/v1/voices', ELEVENLABS_API_KEY);
+    const allVoices = (accountData?.voices || []).map(mapVoice);
+    const allowed = allVoices.filter((v) => ALLOWED_VOICE_NAMES.has(v.name));
 
-    const accountVoices = (accountData?.voices || []).filter(isBritish).map(mapVoice);
-    const sharedVoices = (sharedData?.voices || []).map((v) => ({
-      id: v.voice_id,
-      name: v.name,
-      accent: v.accent || '',
-      gender: v.gender || '',
-    }));
-
-    // Combine, dedup by voice_id, account voices first
-    const seen = new Set();
-    const combined = [];
-    for (const v of [...accountVoices, ...sharedVoices]) {
-      if (!seen.has(v.id)) {
-        seen.add(v.id);
-        combined.push(v);
-      }
+    if (allowed.length === 0) {
+      console.warn(`[TTS] No allowed voices found in account (${allVoices.length} total)`);
+      ttsVoicesCache = allVoices;
+      return allVoices;
     }
 
-    if (combined.length === 0 && accountData?.voices?.length > 0) {
-      const fallback = accountData.voices.map(mapVoice);
-      ttsVoicesCache = fallback;
-      console.warn(`[TTS] No British voices, using all ${fallback.length} account voices`);
-      return fallback;
-    }
-
-    ttsVoicesCache = combined;
-    console.log(`[TTS] ${accountVoices.length} account + ${sharedVoices.length} shared = ${combined.length} voices ready`);
-    return combined;
+    ttsVoicesCache = allowed;
+    console.log(`[TTS] ${allowed.length} allowed voices ready`);
+    return allowed;
   }
 
   ipcMain.handle(channels.TTS_GET_VOICES, () => prefetchVoices());
@@ -296,11 +296,9 @@ function registerIpcHandlers() {
     const body = JSON.stringify({
       text,
       model_id: 'eleven_flash_v2_5',
-      voice_settings: { stability: 0.3, similarity_boost: 0.85 },
-      speed: 3.0,
+      voice_settings: { stability: 0.5, similarity_boost: 0.75 },
     });
 
-    // Use streaming endpoint with max latency optimization and smaller format
     const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?optimize_streaming_latency=4&output_format=mp3_22050_32`;
 
     return new Promise((resolve) => {

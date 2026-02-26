@@ -64,6 +64,15 @@ public class SimSigListBox {
         EnumWindows(_callback, IntPtr.Zero);
     }
 
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+    public static void HideOffScreen(IntPtr hWnd) {
+        // Move window far off-screen and push to bottom of Z-order
+        // SWP_NOSIZE (0x01) | SWP_NOACTIVATE (0x10)
+        SetWindowPos(hWnd, (IntPtr)1, -32000, -32000, 0, 0, 0x0001 | 0x0010);
+    }
+
     public static void SendF6(IntPtr hWnd) {
         PostMessage(hWnd, WM_KEYDOWN, (IntPtr)VK_F6, IntPtr.Zero);
         PostMessage(hWnd, WM_KEYUP, (IntPtr)VK_F6, IntPtr.Zero);
@@ -76,27 +85,12 @@ try {
     $calls = @()
     $simName = ""
 
-    # Read sim name from TMainForm/TSimForm window title first
-    $mainCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-        "TMainForm"
-    )
-    $mainWin = $root.FindFirst(
-        [System.Windows.Automation.TreeScope]::Children,
-        $mainCond
-    )
-    if ($null -eq $mainWin) {
-        $simCond = New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-            "TSimForm"
-        )
-        $mainWin = $root.FindFirst(
-            [System.Windows.Automation.TreeScope]::Children,
-            $simCond
-        )
-    }
-    if ($null -ne $mainWin) {
-        $title = $mainWin.Current.Name
+    # Read sim name from SimSig window title using EnumWindows (reliable for Delphi)
+    [SimSigListBox]::FindSimSig()
+    if ([SimSigListBox]::simsigHwnd -ne [IntPtr]::Zero) {
+        $sb = New-Object System.Text.StringBuilder 256
+        [SimSigListBox]::GetWindowText([SimSigListBox]::simsigHwnd, $sb, 256) | Out-Null
+        $title = $sb.ToString()
         if ($title -match "^SimSig\s*-\s*(.+?)\s*\(") {
             $simName = $Matches[1].Trim()
         } elseif ($title -match "^SimSig\s*-\s*(.+)$") {
@@ -135,6 +129,12 @@ try {
 
     # Read calls from listbox if telephone window is open
     if ($null -ne $window) {
+        # Keep the telephone window hidden off-screen
+        $teleHwnd = [IntPtr]$window.Current.NativeWindowHandle
+        if ($teleHwnd -ne [IntPtr]::Zero) {
+            [SimSigListBox]::HideOffScreen($teleHwnd)
+        }
+
         $listBoxCond = New-Object System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::ClassNameProperty,
             "TListBox"

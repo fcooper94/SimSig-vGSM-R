@@ -81,10 +81,15 @@ const PhoneCallsUI = {
     this.renderCalls();
   },
 
+  isPaused() {
+    return !document.getElementById('paused-overlay').classList.contains('hidden');
+  },
+
   startRinging() {
     this.wasRinging = true;
     this.silenced = false;
     this.silenceBtn.classList.remove('hidden');
+    if (this.isPaused()) return;
     this.ringingAudio.currentTime = 0;
     this.ringingAudio.play().catch(() => {});
   },
@@ -95,6 +100,20 @@ const PhoneCallsUI = {
     this.silenceBtn.classList.add('hidden');
     this.ringingAudio.pause();
     this.ringingAudio.currentTime = 0;
+  },
+
+  // Silence all audio immediately (called when sim pauses)
+  muteAll() {
+    this.ringingAudio.pause();
+    this.ringingAudio.currentTime = 0;
+  },
+
+  // Resume ringing if calls are waiting (called when sim unpauses)
+  resumeRinging() {
+    if (this.calls.length > 0 && this.wasRinging && !this.inCall && !this.silenced) {
+      this.ringingAudio.currentTime = 0;
+      this.ringingAudio.play().catch(() => {});
+    }
   },
 
   extractPosition(title) {
@@ -115,7 +134,7 @@ const PhoneCallsUI = {
   NATO: {
     A: 'Alpha', B: 'Bravo', C: 'Charlie', D: 'Delta', E: 'Echo',
     F: 'Foxtrot', G: 'Golf', H: 'Hotel', I: 'India', J: 'Juliet',
-    K: 'Kilo', L: 'Lima', M: 'Mike', N: 'November', O: 'Oscar',
+    K: 'Kilo', L: 'Leema', M: 'Mike', N: 'November', O: 'Oscar',
     P: 'Papa', Q: 'Quebec', R: 'Romeo', S: 'Sierra', T: 'Tango',
     U: 'Uniform', V: 'Victor', W: 'Whiskey', X: 'X-ray', Y: 'Yankee',
     Z: 'Zulu',
@@ -240,15 +259,52 @@ const PhoneCallsUI = {
     });
   },
 
+  // Parse CSD (Carriage Sidings) entry permission messages
+  parseCsdMessage(msg) {
+    // "5A20 is ready at entry point Farnham CSD (WK440), scheduled 07:16."
+    const entryMatch = msg.match(/(\w+)\s+is ready at entry point\s+(.+?)\s*\((\w+)\)/i);
+    if (!entryMatch) return null;
+
+    const headcode = entryMatch[1];
+    const entryPoint = entryMatch[2].trim();
+    const signal = entryMatch[3];
+
+    // Route line: "07+17 Farnham CSD - Farnham (SWR 12 450)"
+    const routeMatch = msg.match(/\d{2}\+\d{2}\s+.+?\s*-\s*(.+?)\s*\(/);
+    const nextStop = routeMatch ? routeMatch[1].trim() : '';
+
+    // Platform from timetable detail line: "Farnham 07:25    07:25    1"
+    let platform = '';
+    for (const line of msg.split('\n')) {
+      const platMatch = line.match(/\d{2}:\d{2}\s+\d{2}:\d{2}\s+(\d+)/);
+      if (platMatch) { platform = platMatch[1]; break; }
+    }
+
+    return { headcode, entryPoint, signal, nextStop, platform };
+  },
+
+  // Build spoken message for CSD entry permission calls
+  buildCsdSpokenMessage(panelName, position, csd) {
+    const posStr = position ? `, ${position}` : '';
+    let msg = `Hello, ${panelName} Signaller${posStr}, this is driver of ${csd.headcode} at ${csd.signal} signal within ${csd.entryPoint}. Request permission to enter`;
+    if (csd.nextStop) {
+      msg += `, next stop will be ${csd.nextStop}`;
+      if (csd.platform) msg += ` Platform ${csd.platform}`;
+    }
+    return msg;
+  },
+
   // Keyword patterns for matching user speech to SimSig reply options
   // Order matters — more specific patterns first
   REPLY_MATCHERS: [
     { pattern: /pass.*examine|authoris[ez].*pass.*examine|authoris[ez].*examine/, fragment: 'pass signal at stop and examine' },
-    { pattern: /(?:15|fifteen|one[\s-]*five|1[\s-]*5)\s*min/, fragment: 'wait 15 minute' },
-    { pattern: /(?<!\d)(?:0?2|two|to)\s*min/, fragment: 'wait 2 minute' },
-    { pattern: /(?<!\d)(?:0?5|five)\s*min/, fragment: 'wait 5 minute' },
+    { pattern: /(?:15|fifteen|one[\s-]*five|1[\s-]*5)\s*min/, fragment: '15 minute' },
+    { pattern: /(?<!\d)(?:0?2|two|to)\s*min/, fragment: '2 minute' },
+    { pattern: /(?<!\d)(?:0?5|five)\s*min/, fragment: '5 minute' },
     { pattern: /authoris[ez].*pass|pass.*signal|pass\s*at\s*(?:stop|danger)/, fragment: 'authorise driver to pass' },
     { pattern: /examine.*line|examine\s*the/, fragment: 'examine the line' },
+    { pattern: /permission|granted|enter|proceed/, fragment: 'permission granted' },
+    { pattern: /understood|continue|obey|speaking.*control/, fragment: 'continue after speaking' },
   ],
 
   // Match user's spoken text against available reply options
@@ -314,12 +370,11 @@ const PhoneCallsUI = {
 
   // Returns a promise that resolves when PTT is pressed
   waitForPTTPress() {
-    return new Promise((resolve) => {
-      if (typeof PTTUI !== 'undefined' && PTTUI.isActive) {
-        resolve();
-        return;
-      }
+    return new Promise((resolve, reject) => {
+      if (this._replyClicked) { reject(new Error('reply_clicked')); return; }
+      if (typeof PTTUI !== 'undefined' && PTTUI.isActive) { resolve(); return; }
       const check = () => {
+        if (this._replyClicked) { reject(new Error('reply_clicked')); return; }
         if (typeof PTTUI !== 'undefined' && PTTUI.isActive) {
           resolve();
         } else {
@@ -344,15 +399,161 @@ const PhoneCallsUI = {
     });
   },
 
-  // Build driver readback confirmation for a reply
+  NUMBERS: { 1:'one', 2:'two', 3:'three', 4:'four', 5:'five', 6:'six', 7:'seven', 8:'eight', 9:'nine', 10:'ten', 11:'eleven', 12:'twelve', 13:'thirteen', 14:'fourteen', 15:'fifteen', 20:'twenty', 25:'twenty five', 30:'thirty' },
+
+  // Format raw SimSig reply option into proper signaller phrasing (GE/RT8000 style)
+  formatReplyOption(raw) {
+    const hc = this.currentHeadCode || '';
+    const sig = this.currentSignalId || '';
+    const panel = this.currentPanelName || '';
+    const sigRef = sig ? ` signal ${sig}` : '';
+    const panelRef = panel ? ` the ${panel} signaller` : ' the signaller';
+
+    // Pass signal at danger AND examine the line
+    if (/pass.*signal.*at\s*stop.*examine|authoris[ez].*pass.*examine|ask.*pass.*examine/i.test(raw)) {
+      return `Driver of ${hc}, this is${panelRef}. I am authorising you to pass${sigRef} at danger. I also require you to examine the line. Proceed at caution to the next signal and be prepared to stop short of any obstruction`;
+    }
+    // Pass signal at danger only
+    if (/authoris[ez].*pass.*signal|ask.*pass.*signal|pass.*signal.*at\s*stop/i.test(raw)) {
+      return `Driver of ${hc}, this is${panelRef}. I am authorising you to pass${sigRef} at danger. Proceed at caution to the next signal and be prepared to stop short of any obstruction`;
+    }
+    // Examine the line only
+    if (/ask.*examine|examine\s*the\s*line/i.test(raw)) {
+      return `${hc}, I need you to examine the line between${sigRef} and the next signal. Proceed at caution and report any obstructions`;
+    }
+    // Wait N minutes
+    const waitMatch = raw.match(/wait\s+(\d+)\s*min/i);
+    if (waitMatch) {
+      return `${hc}, correct. Remain at${sigRef}. Standby for ${waitMatch[1]} minutes before phoning back`;
+    }
+    // "Driver, please continue after speaking to your control"
+    if (/continue\s+after\s+speaking/i.test(raw)) {
+      return `${hc}, understood. Continue normally unless otherwise instructed`;
+    }
+    // "Permission granted for 5A20 to enter"
+    const permMatch = raw.match(/permission\s+granted\s+for\s+(\w+)\s+to\s+enter/i);
+    if (permMatch) {
+      return `Permission granted, ${permMatch[1]} you may enter`;
+    }
+    // "Please call back in N minutes"
+    const callBackMatch = raw.match(/call\s*back\s+in\s+(\d+)\s*min/i);
+    if (callBackMatch) {
+      return `Please call back in ${callBackMatch[1]} minutes`;
+    }
+    // Default: swap "at stop" → "at danger"
+    return raw.replace(/\bat stop\b/gi, 'at danger');
+  },
+
+  // Build driver readback confirmation for a reply (GE/RT8000 style)
   buildConfirmation(replyText) {
     const lower = replyText.toLowerCase();
-    const signalId = this.currentSignalId || '';
-    // "Pass signal at danger" readback with signal ID
-    if (/pass.*signal/i.test(lower) && !/examine/i.test(lower) && signalId) {
-      return `Ok, I will pass signal ${signalId} at danger. I will obey all other signals. Over`;
+    const sig = this.currentSignalId || '';
+    const hc = this.currentHeadCode || '';
+    const sigRef = sig ? ` signal ${sig}` : '';
+    const trainRef = hc ? `, ${hc}` : '';
+
+    // Pass signal at danger + examine the line
+    if (/pass.*signal.*at\s*(stop|danger).*examine/i.test(lower)) {
+      return `Authorised to pass${sigRef} at danger, examine the line to the next signal, proceed at caution${trainRef}. Over`;
     }
-    return `Ok, I will ${lower}, over`;
+    // Pass signal at danger only
+    if (/pass.*signal.*at\s*(stop|danger)/i.test(lower)) {
+      return `Authorised to pass${sigRef} at danger, proceed at caution to the next signal${trainRef}. Over`;
+    }
+    // Examine the line only
+    if (/examine\s*the\s*line/i.test(lower)) {
+      return `Examine the line from${sigRef} to the next signal, proceed at caution and report${trainRef}. Over`;
+    }
+    // Wait N minutes — no formal readback required, just acknowledge
+    const waitMatch = lower.match(/wait\s+(\d+)\s*min/);
+    if (waitMatch) {
+      const n = parseInt(waitMatch[1], 10);
+      const word = this.NUMBERS[n] || waitMatch[1];
+      return `Understood, remain at${sigRef} and wait ${word} minutes${trainRef}. Over`;
+    }
+    // Call back in N minutes
+    const callBackMatch = lower.match(/call\s*back\s+in\s+(\d+)\s*min/);
+    if (callBackMatch) {
+      const n = parseInt(callBackMatch[1], 10);
+      const word = this.NUMBERS[n] || callBackMatch[1];
+      return `Ok, I will call back in ${word} minutes${trainRef}. Over`;
+    }
+    // Continue after speaking to control
+    if (/continue\s+after\s+speaking/i.test(lower) || /continue.*obey/i.test(lower)) {
+      return `Understood, I will continue to obey all other aspects${trainRef}. Over`;
+    }
+    // Permission granted to enter
+    if (/permission\s+granted/i.test(lower)) {
+      return 'Thank you, entering now. Over';
+    }
+    return `Understood${trainRef}. Over`;
+  },
+
+  // Send a reply by index — shared by speech, click, and fallback button paths
+  async sendReply(replyIndex, replies, caller) {
+    // Show loading spinner immediately, send reply + fetch TTS in parallel
+    this.addMessage({ type: 'loading', text: 'Driver responding...' });
+    const confirmation = this.buildConfirmation(replies[replyIndex]);
+
+    const voices = await this.getElevenVoices();
+    let audioPromise = null;
+    if (voices && voices.length > 0) {
+      const voiceId = this.getElevenVoiceId(caller, voices);
+      audioPromise = this.fetchElevenLabsAudio(this.phoneticize(confirmation), voiceId);
+    }
+
+    // Send reply to SimSig while TTS generates
+    await window.simsigAPI.phone.replyCall(replyIndex, this.currentHeadCode);
+
+    // Remove loading spinner, show confirmation text
+    this.messages = this.messages.filter((m) => m.type !== 'loading');
+    this.addMessage({ type: 'driver', caller, text: confirmation });
+
+    // Play audio (already fetched or nearly done)
+    if (audioPromise) {
+      const audioData = await audioPromise;
+      const ok = await this.playAudioData(audioData);
+      if (!ok) await this.speakLocal(this.phoneticize(confirmation), caller);
+    } else {
+      await this.speakLocal(this.phoneticize(confirmation), caller);
+    }
+    this.showHangUpInChat();
+  },
+
+  // Set up delegated click handler for reply options (survives renderChat DOM rebuilds)
+  setupReplyClickHandlers(replies, caller) {
+    this._replyClicked = false;
+    this._replyReplies = replies;
+    this._replyCaller = caller;
+
+    // Remove previous delegated handler if any
+    if (this._replyDelegateHandler) {
+      this.chatEl.removeEventListener('click', this._replyDelegateHandler);
+    }
+
+    this._replyDelegateHandler = (e) => {
+      if (this._replyClicked) return;
+
+      // Check for wait time chip click
+      const chip = e.target.closest('.wait-time-choice');
+      if (chip) {
+        this._replyClicked = true;
+        const idx = parseInt(chip.dataset.index, 10);
+        this.sendReply(idx, this._replyReplies, this._replyCaller);
+        return;
+      }
+
+      // Check for <li> click with a valid reply index
+      const li = e.target.closest('.reply-options-list li');
+      if (li) {
+        const replyIdx = parseInt(li.dataset.replyIndex, 10);
+        if (replyIdx < 0) return; // wait row — use time chips
+        this._replyClicked = true;
+        this.sendReply(replyIdx, this._replyReplies, this._replyCaller);
+      }
+    };
+
+    this.chatEl.addEventListener('click', this._replyDelegateHandler);
   },
 
   // Full reply flow: show options, listen for speech, match keywords, send to SimSig
@@ -364,21 +565,28 @@ const PhoneCallsUI = {
       return;
     }
 
+    this._replyClicked = false;
     this.addMessage({ type: 'reply-options', replies });
+    this.setupReplyClickHandlers(replies, caller);
 
     const MAX_ATTEMPTS = 3;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      if (this._replyClicked) return;
       this.addMessage({ type: 'greeting', text: 'Hold PTT and speak your reply...' });
-      const transcript = await this.recordAndTranscribe();
+
+      let transcript = '';
+      try {
+        transcript = await this.recordAndTranscribe();
+      } catch (e) {
+        if (this._replyClicked) return;
+        break;
+      }
+      if (this._replyClicked) return;
 
       if (transcript) {
         const replyIndex = this.matchReply(transcript, replies);
         if (replyIndex >= 0) {
-          await window.simsigAPI.phone.replyCall(replyIndex, this.currentHeadCode);
-          const confirmation = this.buildConfirmation(replies[replyIndex]);
-          this.addMessage({ type: 'driver', caller, text: confirmation });
-          await this.speakAsDriver(confirmation, caller);
-          this.showHangUpInChat();
+          await this.sendReply(replyIndex, replies, caller);
           return;
         }
       }
@@ -388,6 +596,8 @@ const PhoneCallsUI = {
       this.addMessage({ type: 'driver', caller, text: sorry });
       await this.speakAsDriver(sorry, caller);
     }
+
+    if (this._replyClicked) return;
 
     // After max attempts, fall back to buttons
     this.addMessage({ type: 'system', text: 'Could not match — use buttons below' });
@@ -402,21 +612,57 @@ const PhoneCallsUI = {
     return new Promise((resolve) => {
       const container = document.createElement('div');
       container.className = 'reply-buttons';
+
+      const makeHandler = (index, reply) => async () => {
+        container.remove();
+        await window.simsigAPI.phone.replyCall(index, this.currentHeadCode);
+        const confirmation = this.buildConfirmation(reply);
+        this.addMessage({ type: 'driver', caller, text: confirmation });
+        await this.speakAsDriver(confirmation, caller);
+        this.showHangUpInChat();
+        resolve();
+      };
+
+      // Group wait options into one row with time buttons
+      const waitReplies = [];
+      const otherReplies = [];
       replies.forEach((reply, i) => {
+        const wm = reply.match(/wait\s+(\d+)\s*min/i);
+        if (wm) {
+          waitReplies.push({ reply, index: i, mins: wm[1] });
+        } else {
+          otherReplies.push({ reply, index: i });
+        }
+      });
+
+      if (waitReplies.length > 0) {
+        const hc = this.currentHeadCode || '';
+        const sig = this.currentSignalId || '';
+        const sigRef = sig ? ` signal ${sig}` : '';
+        const row = document.createElement('div');
+        row.className = 'reply-btn-wait-row';
+        const label = document.createElement('span');
+        label.className = 'reply-btn-wait-label';
+        label.textContent = `${hc}, correct. Remain at${sigRef}. Standby for`;
+        row.appendChild(label);
+        waitReplies.forEach((w) => {
+          const btn = document.createElement('button');
+          btn.className = 'reply-btn reply-btn-wait';
+          btn.textContent = `${w.mins} min`;
+          btn.addEventListener('click', makeHandler(w.index, w.reply));
+          row.appendChild(btn);
+        });
+        container.appendChild(row);
+      }
+
+      otherReplies.forEach((o) => {
         const btn = document.createElement('button');
         btn.className = 'reply-btn';
-        btn.textContent = reply;
-        btn.addEventListener('click', async () => {
-          container.remove();
-          await window.simsigAPI.phone.replyCall(i, this.currentHeadCode);
-          const confirmation = this.buildConfirmation(reply);
-          this.addMessage({ type: 'driver', caller, text: confirmation });
-          await this.speakAsDriver(confirmation, caller);
-          this.showHangUpInChat();
-          resolve();
-        });
+        btn.textContent = this.formatReplyOption(o.reply);
+        btn.addEventListener('click', makeHandler(o.index, o.reply));
         container.appendChild(btn);
       });
+
       this.chatEl.appendChild(container);
       this.chatEl.scrollTop = this.chatEl.scrollHeight;
     });
@@ -424,6 +670,7 @@ const PhoneCallsUI = {
 
   // Speak as driver — phoneticizes codes, tries ElevenLabs, falls back to local
   async speakAsDriver(text, caller) {
+    if (this.isPaused()) return;
     const spoken = this.phoneticize(text);
     const voices = await this.getElevenVoices();
     if (voices && voices.length > 0) {
@@ -446,6 +693,10 @@ const PhoneCallsUI = {
   hangUp() {
     this.inCall = false;
     this.messages = [];
+    if (this._replyDelegateHandler) {
+      this.chatEl.removeEventListener('click', this._replyDelegateHandler);
+      this._replyDelegateHandler = null;
+    }
     this.renderChat();
     this.hideNotification();
     // If there are waiting calls, show the next one and start ringing
@@ -491,7 +742,31 @@ const PhoneCallsUI = {
     const greeting = `Hello, ${panelName} Signaller${position ? ', ' + position : ''}, Go ahead`;
     const caller = (result.title || '').replace(/^Answer call from\s*/i, '') || result.train || '';
     const driverMsg = result.message || '';
-    const spokenMsg = `Hello, ${panelName} Signaller${position ? ', ' + position : ''}, this is ${driverMsg}`;
+    const csd = this.parseCsdMessage(driverMsg);
+
+    // Extract signal and headcode EARLY so formatReplyOption can use them
+    const sigMatch = driverMsg.match(/signal\s+([A-Z0-9]+)/i);
+    this.currentSignalId = sigMatch ? sigMatch[1] : null;
+    const titleMatch = (result.title || '').match(/([0-9][A-Z][0-9]{2})/i);
+    const trainMatch = (result.train || train).match(/([0-9][A-Z][0-9]{2})/i);
+    this.currentHeadCode = titleMatch ? titleMatch[1].toUpperCase()
+      : trainMatch ? trainMatch[1].toUpperCase()
+      : (result.train || train).trim();
+    this.currentPanelName = panelName;
+
+    // Build display and spoken messages based on call type
+    let displayMsg, spokenMsg;
+    if (csd) {
+      displayMsg = `${csd.headcode} is ready at entry point ${csd.entryPoint} (${csd.signal}). Permission required to enter.`;
+      spokenMsg = this.buildCsdSpokenMessage(panelName, position, csd);
+    } else if (this.currentSignalId) {
+      // Red signal / waiting at signal scenario
+      displayMsg = `${this.currentHeadCode} waiting at red signal ${this.currentSignalId}`;
+      spokenMsg = `Hello Signaller, this is driver of ${this.currentHeadCode}. I am at signal ${this.currentSignalId} displaying red`;
+    } else {
+      displayMsg = driverMsg;
+      spokenMsg = `Hello, ${panelName} Signaller${position ? ', ' + position : ''}, this is ${driverMsg}`;
+    }
 
     // Pre-generate TTS audio IN PARALLEL while user speaks the greeting
     let prefetchedAudio = null;
@@ -510,8 +785,8 @@ const PhoneCallsUI = {
       await this.waitForUserSpeech();
     }
 
-    // Show driver message and play pre-fetched audio instantly
-    this.addMessage({ type: 'driver', caller, text: driverMsg });
+    // Show driver message and play TTS
+    this.addMessage({ type: 'driver', caller, text: displayMsg });
 
     if (prefetchedAudio) {
       const ok = await this.playAudioData(prefetchedAudio);
@@ -519,18 +794,6 @@ const PhoneCallsUI = {
     } else {
       await this.speakLocal(this.phoneticize(spokenMsg), caller);
     }
-
-    // Extract signal ID from driver's message for use in confirmations
-    const sigMatch = driverMsg.match(/signal\s+([A-Z0-9]+)/i);
-    this.currentSignalId = sigMatch ? sigMatch[1] : null;
-
-    // Extract headcode from the dialog title (e.g. "Answer call from Train 1C33 (Cross)")
-    // This is the most reliable source — it's the actual train SimSig answered
-    const titleMatch = (result.title || '').match(/([0-9][A-Z][0-9]{2})/i);
-    const trainMatch = (result.train || train).match(/([0-9][A-Z][0-9]{2})/i);
-    this.currentHeadCode = titleMatch ? titleMatch[1].toUpperCase()
-      : trainMatch ? trainMatch[1].toUpperCase()
-      : (result.train || train).trim();
     console.log(`[Phone] Title: "${result.title}", Train: "${result.train}", HeadCode: "${this.currentHeadCode}"`);
 
     // Handle reply if reply options available
@@ -556,7 +819,7 @@ const PhoneCallsUI = {
       this.countEl.classList.add('hidden');
       this.noCallsEl.classList.remove('hidden');
       this.listEl.innerHTML = '';
-      this.hideNotification();
+      if (!this.inCall) this.hideNotification();
     } else {
       this.countEl.textContent = this.calls.length;
       this.countEl.classList.remove('hidden');
@@ -633,6 +896,12 @@ const PhoneCallsUI = {
           <div class="chat-message-time">${this.escapeHtml(msg.time)}</div>
         </div>`;
       }
+      if (msg.type === 'loading') {
+        return `<div class="chat-message chat-loading">
+          <div class="spinner"></div>
+          <div class="chat-message-text">${this.escapeHtml(msg.text)}</div>
+        </div>`;
+      }
       if (msg.type === 'driver') {
         return `<div class="chat-message chat-driver">
           <div class="chat-message-caller">${this.escapeHtml(msg.caller)}</div>
@@ -641,11 +910,37 @@ const PhoneCallsUI = {
         </div>`;
       }
       if (msg.type === 'reply-options') {
-        const optionsHtml = (msg.replies || []).map((r) => {
-          // Replace "at stop" with "at danger" for display
-          const display = r.replace(/\bat stop\b/gi, 'at danger');
-          return `<li>${this.escapeHtml(display)}</li>`;
-        }).join('');
+        const replies = msg.replies || [];
+        const hc = this.currentHeadCode || '';
+        const sig = this.currentSignalId || '';
+        const sigRef = sig ? ` signal ${sig}` : '';
+
+        // Group wait options into one line, keep others separate
+        const waitIndices = [];
+        const waitMins = [];
+        const otherReplies = [];
+        replies.forEach((r, i) => {
+          const wm = r.match(/wait\s+(\d+)\s*min/i);
+          if (wm) {
+            waitIndices.push(i);
+            waitMins.push(wm[1]);
+          } else {
+            otherReplies.push({ raw: r, index: i });
+          }
+        });
+
+        const items = [];
+        if (waitMins.length > 0) {
+          const timeParts = waitMins.map((m) =>
+            `<span class="wait-time-choice" data-index="${waitIndices[waitMins.indexOf(m)]}">${m}</span>`
+          ).join(' / ');
+          items.push({ html: `${this.escapeHtml(hc)}, correct. Remain at${this.escapeHtml(sigRef)}. Standby for ${timeParts} minutes before phoning back`, replyIndex: -1 });
+        }
+        otherReplies.forEach((o) => {
+          items.push({ html: this.escapeHtml(this.formatReplyOption(o.raw)), replyIndex: o.index });
+        });
+
+        const optionsHtml = items.map((item) => `<li data-reply-index="${item.replyIndex}">${item.html}</li>`).join('');
         return `<div class="chat-message chat-reply-options">
           <div class="chat-message-label">YOUR REPLY OPTIONS</div>
           <ol class="reply-options-list">${optionsHtml}</ol>

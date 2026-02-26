@@ -349,10 +349,38 @@
 
 .reply-options-list {
   margin: 0;
-  padding-left: 20px;
+  padding-left: 24px;
   font-size: 12px;
   color: var(--text-light);
-  line-height: 1.8;
+  line-height: 1.5;
+}
+
+.reply-options-list li {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+
+.reply-options-list li:last-child {
+  border-bottom: none;
+}
+
+.reply-options-list li[data-reply-index="-1"] {
+  cursor: default;
+}
+
+.reply-options-list li:hover {
+  background: rgba(66, 165, 245, 0.12);
+  border-radius: 3px;
+}
+
+.reply-options-list li[data-reply-index="-1"]:hover {
+  background: transparent;
+}
+
+.wait-time-choice:hover {
+  background: rgba(66, 165, 245, 0.5);
+  color: #fff;
 }
 
 .reply-buttons {
@@ -377,6 +405,65 @@
 .reply-btn:hover {
   background: rgba(66, 165, 245, 0.4);
   color: #fff;
+}
+
+/* Wait time choices in reply options list */
+.wait-time-choice {
+  display: inline-block;
+  background: rgba(66, 165, 245, 0.25);
+  color: #42a5f5;
+  font-weight: bold;
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+/* Wait time button row in fallback buttons */
+.reply-btn-wait-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.reply-btn-wait-label {
+  color: #42a5f5;
+  font-size: 12px;
+}
+
+.reply-btn-wait {
+  min-width: auto;
+  padding: 4px 10px;
+  font-weight: bold;
+}
+
+/* Loading spinner for TTS generation */
+.chat-loading {
+  border-left-color: var(--border-light);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+}
+
+.chat-loading .spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-top-color: var(--text-light);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.chat-loading .chat-message-text {
+  color: var(--border-light);
+  font-size: 11px;
+  font-style: italic;
 }
 
 .chat-empty {
