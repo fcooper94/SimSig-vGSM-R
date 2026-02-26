@@ -24,6 +24,8 @@ const ConnectionUI = {
       } else {
         window.simsigAPI.connection.connect();
         this.setStatus('connecting');
+        const initOverlay = document.getElementById('init-overlay');
+        if (initOverlay) initOverlay.classList.remove('hidden');
       }
     });
   },

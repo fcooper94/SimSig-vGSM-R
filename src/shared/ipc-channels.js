@@ -35,6 +35,9 @@ module.exports = {
   // Sim info
   SIM_NAME: 'sim:name',
 
+  // Init
+  INIT_READY: 'init:ready',
+
   // STT
   STT_TRANSCRIBE: 'stt:transcribe',
 };

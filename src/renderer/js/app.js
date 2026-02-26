@@ -8,6 +8,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   TrainTracker.init();
   MessageFeed.init();
 
+  // Hide init overlay once pause/unpause sync completes
+  window.simsigAPI.sim.onReady(() => {
+    const initOverlay = document.getElementById('init-overlay');
+    if (initOverlay) initOverlay.classList.add('hidden');
+    PhoneCallsUI.initReady = true;
+    // Start ringing if calls arrived during init
+    if (PhoneCallsUI.calls.length > 0 && !PhoneCallsUI.inCall) {
+      PhoneCallsUI.startRinging();
+    }
+  });
+
   // Register event listeners from main process
   window.simsigAPI.connection.onStatusChange((status) => {
     ConnectionUI.setStatus(status);
@@ -132,21 +143,25 @@ document.addEventListener('DOMContentLoaded', async () => {
       row.appendChild(dialIcon);
 
       row.addEventListener('click', async () => {
-        if (PhoneCallsUI.calls.length > 0) {
-          phonebookStatus.textContent = 'Cannot dial while incoming calls are waiting';
+        if (PhoneCallsUI.inCall || PhoneCallsUI._outgoingCall || PhoneCallsUI._dialingActive) {
+          phonebookStatus.textContent = 'Cannot dial while in a call';
           return;
         }
         row.classList.add('dialing');
+        PhoneCallsUI.showDialingNotification(name);
         const res = await window.simsigAPI.phone.dialPhoneBook(idx);
-        row.classList.remove('dialing');
         if (res.error) {
+          row.classList.remove('dialing');
+          PhoneCallsUI.stopDialing();
           phonebookStatus.textContent = res.error;
         } else {
-          phonebookStatus.textContent = `Dialing ${name}...`;
+          // Keep ringing for a random 3–8 seconds, then transition to in-call
+          const delay = 3000 + Math.random() * 5000;
           setTimeout(() => {
-            phonebookStatus.textContent = '';
-            switchTab('incoming');
-          }, 1500);
+            row.classList.remove('dialing');
+            PhoneCallsUI.stopDialing();
+            PhoneCallsUI.showOutgoingCallNotification(name);
+          }, delay);
         }
       });
       phonebookList.appendChild(row);

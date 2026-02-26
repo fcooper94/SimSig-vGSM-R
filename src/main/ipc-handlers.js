@@ -105,6 +105,7 @@ function registerIpcHandlers() {
           if (err) console.error('[TogglePause] Error:', err.message);
           if (stdout) console.log('[TogglePause]', stdout.trim());
           if (stderr) console.error('[TogglePause] stderr:', stderr.trim());
+          sendToMainWindow(channels.INIT_READY, true);
         });
       }, 2000);
 

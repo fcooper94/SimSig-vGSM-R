@@ -12,6 +12,7 @@ const PhoneCallsUI = {
   trainSignalCache: {}, // headcode → last known signal ID
 
   init() {
+    this.initReady = false;
     this.listEl = document.getElementById('phone-calls-list');
     this.countEl = document.getElementById('phone-calls-count');
     this.chatEl = document.getElementById('chat-messages');
@@ -38,7 +39,9 @@ const PhoneCallsUI = {
 
     // Click the notification box to answer the latest call or end the current call
     this.notificationEl.addEventListener('click', () => {
-      if (this.inCall) {
+      if (this._outgoingCall) {
+        this.endOutgoingCall();
+      } else if (this.inCall) {
         if (this._hasReplyOptions && !this._replySent) return; // must reply first
         this.hangUp();
       } else if (this.calls.length > 0) {
@@ -117,7 +120,7 @@ const PhoneCallsUI = {
     this.wasRinging = true;
     this.silenced = false;
     this.silenceBtn.classList.remove('hidden');
-    if (this.isPaused()) return;
+    if (this.isPaused() || !this.initReady) return;
     this.ringingAudio.currentTime = 0;
     this.ringingAudio.play().catch(() => {});
   },
@@ -1065,6 +1068,117 @@ const PhoneCallsUI = {
     });
   },
 
+  showDialingNotification(contactName) {
+    if (!this.notificationEl) return;
+    this.notificationEl.classList.remove('hidden');
+    this.notificationEl.classList.remove('in-call');
+    this.notificationEl.classList.add('flashing');
+    this.notificationTrainEl.textContent = contactName;
+    if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
+    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[Dialing]';
+    const icon = this.notificationEl.querySelector('#notification-icon');
+    if (icon) icon.innerHTML = '&#128222;';
+    // Play ringing-out via Web Audio API with smooth fade-out and 1s gap
+    if (!this._ringOutCtx) {
+      this._ringOutCtx = new (window.AudioContext || window.webkitAudioContext)();
+      fetch('../../sounds/ringing-out.wav')
+        .then(r => r.arrayBuffer())
+        .then(buf => this._ringOutCtx.decodeAudioData(buf))
+        .then(decoded => {
+          this._ringOutBuffer = decoded;
+          if (this._dialingActive) this._playRingOut();
+        })
+        .catch(() => {});
+    }
+    this._dialingActive = true;
+    if (this._ringOutBuffer) this._playRingOut();
+  },
+
+  _playRingOut() {
+    if (!this._dialingActive || !this._ringOutBuffer || !this._ringOutCtx) return;
+    const ctx = this._ringOutCtx;
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    const source = ctx.createBufferSource();
+    source.buffer = this._ringOutBuffer;
+    source.connect(gain);
+    // Fade out over last 50ms
+    const dur = this._ringOutBuffer.duration;
+    gain.gain.setValueAtTime(1, ctx.currentTime);
+    gain.gain.setValueAtTime(1, ctx.currentTime + dur - 0.05);
+    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + dur);
+    source.start(0);
+    this._ringOutSource = source;
+    this._ringOutGain = gain;
+    // Schedule next loop with 1s gap
+    source.onended = () => {
+      this._ringingOutTimer = setTimeout(() => {
+        if (this._dialingActive) this._playRingOut();
+      }, 1000);
+    };
+  },
+
+  stopDialing() {
+    this._dialingActive = false;
+    if (this._ringingOutTimer) {
+      clearTimeout(this._ringingOutTimer);
+      this._ringingOutTimer = null;
+    }
+    if (this._ringOutSource) {
+      try { this._ringOutSource.stop(); } catch (e) {}
+      this._ringOutSource = null;
+    }
+    this.hideNotification();
+  },
+
+  showOutgoingCallNotification(contactName) {
+    if (!this.notificationEl) return;
+    this._outgoingCall = true;
+    this._outgoingContactName = contactName;
+    this.notificationEl.classList.remove('hidden');
+    this.notificationEl.classList.remove('flashing');
+    this.notificationEl.classList.add('in-call');
+    this.notificationTrainEl.textContent = contactName;
+    if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
+    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[Hang Up]';
+    const icon = this.notificationEl.querySelector('#notification-icon');
+    if (icon) icon.innerHTML = '&#128222;';
+    // Mark the phone book row as in-call
+    this._updatePhonebookInCall(contactName, true);
+  },
+
+  endOutgoingCall() {
+    if (this._outgoingContactName) {
+      this._updatePhonebookInCall(this._outgoingContactName, false);
+    }
+    this._outgoingCall = false;
+    this._outgoingContactName = '';
+    this.hideNotification();
+  },
+
+  _updatePhonebookInCall(contactName, active) {
+    const rows = document.querySelectorAll('.phonebook-item');
+    rows.forEach((row) => {
+      const label = row.querySelector('.phonebook-name');
+      const icon = row.querySelector('.phonebook-dial-icon');
+      if (label && label.textContent === contactName) {
+        if (active) {
+          if (icon) {
+            icon.dataset.originalHtml = icon.innerHTML;
+            icon.innerHTML = '';
+            icon.textContent = 'In Call';
+            icon.classList.add('in-call');
+          }
+        } else {
+          if (icon) {
+            icon.innerHTML = icon.dataset.originalHtml || '&#128222;';
+            icon.classList.remove('in-call');
+          }
+        }
+      }
+    });
+  },
+
   showInCallNotification(trainText) {
     if (!this.notificationEl) return;
     this.notificationEl.classList.remove('hidden');
@@ -1077,6 +1191,13 @@ const PhoneCallsUI = {
     if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[End Call]';
     const icon = this.notificationEl.querySelector('#notification-icon');
     if (icon) icon.innerHTML = '&#128643;';
+    // Update radio display to In Call
+    const radioDisplay = document.getElementById('radio-display');
+    if (radioDisplay) radioDisplay.classList.add('in-call');
+    const line1 = document.getElementById('display-line-1');
+    const line2 = document.getElementById('display-line-2');
+    if (line1) line1.textContent = 'In Call';
+    if (line2) line2.textContent = headcode;
   },
 
   showNotification(trainText) {
@@ -1103,6 +1224,13 @@ const PhoneCallsUI = {
     if (this.notificationEl.querySelector('#notification-icon')) {
       this.notificationEl.querySelector('#notification-icon').textContent = '';
     }
+    // Reset radio display
+    const radioDisplay = document.getElementById('radio-display');
+    if (radioDisplay) radioDisplay.classList.remove('in-call');
+    const line1 = document.getElementById('display-line-1');
+    const line2 = document.getElementById('display-line-2');
+    if (line1) line1.textContent = 'GSM-R';
+    if (line2) line2.textContent = 'Ready';
   },
 
   renderChat() {

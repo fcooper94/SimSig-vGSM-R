@@ -19,6 +19,16 @@
   white-space: nowrap;
 }
 
+#radio-display.in-call {
+  background: #0a1a2e;
+  border-color: #2266cc;
+}
+
+#radio-display.in-call .display-line {
+  color: #42a5f5;
+  text-shadow: 0 0 4px rgba(66, 165, 245, 0.4);
+}
+
 /* Phone calls section — left panel (display controlled by .tab-view) */
 #phone-calls {
   flex-direction: column;

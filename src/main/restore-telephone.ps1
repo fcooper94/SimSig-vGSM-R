@@ -117,9 +117,8 @@ try {
 
         $log += "Found $($offScreenWindows.Count) off-screen SimSig window(s)"
 
-        # Only restore the Telephone Calls window; close answer dialogs (stale)
-        $restoreClasses = @("TTelephoneForm")
-        # WM_CLOSE = 0x0010
+        # Restore TTelephoneForm on-screen; move TAnswerCallForm on-screen then close
+        # (moving first ensures SimSig saves a visible position for future dialogs)
         $WM_CLOSE = 0x0010
 
         $offset = 0
@@ -135,21 +134,30 @@ try {
             # Skip the main SimSig window itself
             if ($wnd -eq $simsigHwnd) { continue }
 
-            if ($restoreClasses -contains $cls) {
-                # Restore user-facing dialogs to center of SimSig monitor
+            if ($cls -eq "TTelephoneForm") {
+                # Restore Telephone Calls window on-screen
                 [void][WinRestore2]::ShowWindow($wnd, 9)  # SW_RESTORE
                 [void][WinRestore2]::SetWindowPos($wnd, [WinRestore2]::HWND_TOPMOST, ($centerX + $offset), ($centerY + $offset), 0, 0, $flags)
                 [void][WinRestore2]::SetForegroundWindow($wnd)
                 $log += "Restored [$cls] '$title' at ($($centerX + $offset), $($centerY + $offset))"
                 $offset += 30
-
-                if ($cls -eq "TTelephoneForm") {
-                    $script:restoredTelephone = $true
-                }
-            } else {
-                # Close dialogs our app opened (Place Call, confirmations, etc.)
+                $script:restoredTelephone = $true
+            } elseif ($cls -eq "TAnswerCallForm") {
+                # Move back on-screen so SimSig saves the visible position, then close
+                [void][WinRestore2]::ShowWindow($wnd, 9)
+                [void][WinRestore2]::SetWindowPos($wnd, [WinRestore2]::HWND_TOPMOST, ($centerX + $offset), ($centerY + $offset), 0, 0, $flags)
+                Start-Sleep -Milliseconds 100
                 [void][WinRestore2]::PostMessage($wnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
-                $log += "Closed [$cls] '$title'"
+                $log += "Restored then closed [$cls] '$title' at ($($centerX + $offset), $($centerY + $offset))"
+                $offset += 30
+            } else {
+                # Move on-screen so SimSig saves visible position, then close
+                [void][WinRestore2]::ShowWindow($wnd, 9)
+                [void][WinRestore2]::SetWindowPos($wnd, [WinRestore2]::HWND_TOPMOST, ($centerX + $offset), ($centerY + $offset), 0, 0, $flags)
+                Start-Sleep -Milliseconds 100
+                [void][WinRestore2]::PostMessage($wnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+                $log += "Restored then closed [$cls] '$title' at ($($centerX + $offset), $($centerY + $offset))"
+                $offset += 30
             }
         }
     }
