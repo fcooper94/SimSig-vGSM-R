@@ -91,7 +91,10 @@ function restoreTelephoneWindow() {
   console.log('[Quit] Launched restore script');
 }
 
-app.on('before-quit', restoreTelephoneWindow);
+app.on('before-quit', () => {
+  restoreTelephoneWindow();
+  try { require('./global-ptt').stop(); } catch (_) {}
+});
 app.on('will-quit', restoreTelephoneWindow);
 
 app.on('window-all-closed', () => {

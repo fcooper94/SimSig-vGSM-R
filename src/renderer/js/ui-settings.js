@@ -71,10 +71,11 @@ const SettingsUI = {
     const keybind = document.getElementById('setting-ptt-keybind').value;
     await window.simsigAPI.settings.set('ptt.keybind', keybind);
 
-    // Update PTT keybind in real-time
+    // Update PTT keybind in real-time (renderer + main process global hook)
     if (typeof PTTUI !== 'undefined') {
       PTTUI.keybind = keybind;
     }
+    await window.simsigAPI.ptt.setKeybind(keybind);
 
     // Update audio pipeline volumes in real-time
     if (typeof AudioPipeline !== 'undefined') {

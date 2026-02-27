@@ -20,6 +20,7 @@ module.exports = {
   // Audio
   AUDIO_DEVICES: 'audio:get-devices',
   PTT_STATE: 'ptt:state-changed',
+  PTT_SET_KEYBIND: 'ptt:set-keybind',
 
   // Phone calls
   PHONE_CALLS_UPDATE: 'phone:calls-update',
@@ -27,6 +28,10 @@ module.exports = {
   PHONE_REPLY_CALL: 'phone:reply-call',
   PHONE_BOOK_READ: 'phone:book-read',
   PHONE_BOOK_DIAL: 'phone:book-dial',
+  PHONE_PLACE_CALL_STATUS: 'phone:place-call-status',
+  PHONE_PLACE_CALL_REPLY: 'phone:place-call-reply',
+  PHONE_PLACE_CALL_HANGUP: 'phone:place-call-hangup',
+  PHONE_HIDE_ANSWER: 'phone:hide-answer',
 
   // TTS
   TTS_GET_VOICES: 'tts:get-voices',

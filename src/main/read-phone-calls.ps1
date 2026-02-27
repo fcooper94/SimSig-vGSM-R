@@ -172,7 +172,8 @@ try {
         }
     }
 
-    $result = @{ calls = $calls; simName = $simName }
+    $simsigFound = [SimSigListBox]::simsigHwnd -ne [IntPtr]::Zero
+    $result = @{ calls = $calls; simName = $simName; simsigFound = $simsigFound }
     if ($calls.Count -eq 0) {
         $result.calls = @()
     }

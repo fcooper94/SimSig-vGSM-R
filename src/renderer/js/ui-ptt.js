@@ -25,20 +25,15 @@ const PTTUI = {
       if (this.isActive) this.deactivate();
     });
 
-    // Keyboard hold-to-talk
-    document.addEventListener('keydown', (e) => {
-      if (e.code === this.keybind && !e.repeat && !this.isActive) {
-        // Don't trigger PTT when settings modal is open or keybind listening
-        if (typeof SettingsUI !== 'undefined' && SettingsUI.isListeningForKeybind) return;
-        if (typeof SettingsUI !== 'undefined' && !SettingsUI.modal.classList.contains('hidden')) return;
+    // Global PTT from main process (works even when app is not focused)
+    window.simsigAPI.ptt.onStateChange((active) => {
+      // Don't trigger PTT when settings modal is open or keybind listening
+      if (typeof SettingsUI !== 'undefined' && SettingsUI.isListeningForKeybind) return;
+      if (typeof SettingsUI !== 'undefined' && !SettingsUI.modal.classList.contains('hidden')) return;
 
-        e.preventDefault();
+      if (active && !this.isActive) {
         this.activate();
-      }
-    });
-
-    document.addEventListener('keyup', (e) => {
-      if (e.code === this.keybind && this.isActive) {
+      } else if (!active && this.isActive) {
         this.deactivate();
       }
     });

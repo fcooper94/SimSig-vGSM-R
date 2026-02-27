@@ -4,12 +4,14 @@ const path = require('path');
 const SCRIPT_PATH = path.join(__dirname, 'read-phone-calls.ps1');
 
 class PhoneReader {
-  constructor(onChange, onSimName) {
+  constructor(onChange, onSimName, onSimSigClosed) {
     this.onChange = onChange;
     this.onSimName = onSimName;
+    this.onSimSigClosed = onSimSigClosed;
     this.intervalId = null;
     this.lastJson = '[]';
     this.lastSimName = '';
+    this.simsigWasFound = false;
     this.polling = false;
   }
 
@@ -65,6 +67,15 @@ class PhoneReader {
         if (data.simName && data.simName !== this.lastSimName && this.onSimName) {
           this.lastSimName = data.simName;
           this.onSimName(data.simName);
+        }
+
+        // Detect SimSig closing
+        if (data.simsigFound) {
+          this.simsigWasFound = true;
+        } else if (this.simsigWasFound && !data.simsigFound) {
+          console.log('[PhoneReader] SimSig closed, triggering app quit');
+          this.stopPolling();
+          if (this.onSimSigClosed) this.onSimSigClosed();
         }
       } catch (parseErr) {
         console.warn('[PhoneReader] Failed to parse JSON:', parseErr.message);

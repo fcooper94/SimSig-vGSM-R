@@ -287,6 +287,22 @@ try {
         }
     }
 
+    # Hide any lingering Place Call dialog (may be left from phone book read)
+    $placeCallCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::NameProperty,
+        "Place Call"
+    )
+    $placeCallDlg = $root.FindFirst(
+        [System.Windows.Automation.TreeScope]::Children,
+        $placeCallCond
+    )
+    if ($null -ne $placeCallDlg) {
+        $pcHwnd = [IntPtr]$placeCallDlg.Current.NativeWindowHandle
+        if ($pcHwnd -ne [IntPtr]::Zero) {
+            [Win32Auto]::HideOffScreen($pcHwnd)
+        }
+    }
+
     # Build result
     $result = @{
         train   = $trainName

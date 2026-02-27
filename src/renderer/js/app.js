@@ -155,22 +155,43 @@ document.addEventListener('DOMContentLoaded', async () => {
           PhoneCallsUI.stopDialing();
           phonebookStatus.textContent = res.error;
         } else {
-          // Keep ringing for a random 3–8 seconds, then transition to in-call
-          const delay = 3000 + Math.random() * 5000;
-          setTimeout(() => {
+          // Poll SimSig's Place Call dialog until connected
+          const pollForConnection = async () => {
+            // Minimum ring time of 3 seconds before first check
+            await new Promise((r) => setTimeout(r, 3000));
+            for (let i = 0; i < 30; i++) {
+              if (!PhoneCallsUI._dialingActive) return; // user cancelled
+              const status = await window.simsigAPI.phone.placeCallStatus();
+              if (status.connected) {
+                row.classList.remove('dialing');
+                PhoneCallsUI.stopDialing();
+                PhoneCallsUI.showOutgoingCallNotification(name, status.message, status.replies);
+                return;
+              }
+              await new Promise((r) => setTimeout(r, 1000));
+            }
+            // Timed out — stop dialing
             row.classList.remove('dialing');
             PhoneCallsUI.stopDialing();
-            PhoneCallsUI.showOutgoingCallNotification(name);
-          }, delay);
+            phonebookStatus.textContent = 'No answer';
+          };
+          pollForConnection();
         }
       });
       phonebookList.appendChild(row);
     });
+    // Re-apply In Call state if an outgoing call is active
+    if (PhoneCallsUI._outgoingCall && PhoneCallsUI._outgoingContactName) {
+      PhoneCallsUI._updatePhonebookInCall(PhoneCallsUI._outgoingContactName, true);
+    }
   }
 
   document.getElementById('phonebook-btn').addEventListener('click', () => {
     switchTab('phonebook');
-    loadPhoneBook();
+    // Only fetch from SimSig on first open — use cache after that
+    if (phonebookContacts.length === 0) {
+      loadPhoneBook();
+    }
   });
 
   document.getElementById('phonebook-refresh').addEventListener('click', () => {

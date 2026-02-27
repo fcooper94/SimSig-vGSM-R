@@ -26,7 +26,9 @@
       "Bash(pip install Pillow)",
       "Bash(python -c \":*)",
       "Bash(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File restore-telephone.ps1)",
-      "Bash(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"& { try { Add-Type @'':*)"
+      "Bash(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"& { try { Add-Type @'':*)",
+      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File \"c:/dev/SimSig-Comms/src/main/force-close-answer.ps1\")",
+      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File \"c:/dev/SimSig-Comms/src/main/reply-phone-call.ps1\" -ReplyIndex 0)"
     ]
   }
 }

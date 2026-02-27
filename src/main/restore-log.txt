@@ -1,7 +1,7 @@
-﻿SimSig hwnd: 4264024  PID: 60980
+﻿SimSig hwnd: 2690960  PID: 46728
 Monitor: (0,0)-(2560,1392)
 Restore target: (1080, 546)
-Found 3 off-screen SimSig window(s)
-Restored then closed [TAnswerCallForm] 'Answer call from Train 4O22 (Panel)' at (1080, 546)
-Restored [TTelephoneForm] 'Telephone Calls' at (1110, 576)
-Restored then closed [TDialForm] 'Place Call' at (1140, 606)
+Found 2 off-screen SimSig window(s)
+Closed (off-screen) [TAnswerCallForm] 'Answer call from Manor Farm'
+Restored [TTelephoneForm] 'Telephone Calls' at (1080, 546)
+Closed Place Call dialog

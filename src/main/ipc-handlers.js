@@ -1,4 +1,4 @@
-const { ipcMain, BrowserWindow } = require('electron');
+const { ipcMain, BrowserWindow, app } = require('electron');
 const channels = require('../shared/ipc-channels');
 const settings = require('./settings');
 const { updateClock, updateClockTime, getClockState, formatTime } = require('./clock');
@@ -13,6 +13,12 @@ const RECOGNIZE_SCRIPT = require('path').join(__dirname, 'speech-recognize.ps1')
 const TOGGLE_PAUSE_SCRIPT = require('path').join(__dirname, 'toggle-pause.ps1');
 const READ_PHONE_BOOK_SCRIPT = require('path').join(__dirname, 'read-phone-book.ps1');
 const DIAL_PHONE_BOOK_SCRIPT = require('path').join(__dirname, 'dial-phone-book.ps1');
+const READ_PLACE_CALL_SCRIPT = require('path').join(__dirname, 'read-place-call.ps1');
+const REPLY_PLACE_CALL_SCRIPT = require('path').join(__dirname, 'reply-place-call.ps1');
+const HANGUP_PLACE_CALL_SCRIPT = require('path').join(__dirname, 'hangup-place-call.ps1');
+const HIDE_ANSWER_SCRIPT = require('path').join(__dirname, 'hide-answer-dialog.ps1');
+
+const globalPtt = require('./global-ptt');
 
 const ELEVENLABS_API_KEY = '3998465c5e3d9716316d59035e326752511cb408fb6bb94e37bf7d1df273dc54';
 
@@ -41,6 +47,14 @@ function registerIpcHandlers() {
     settings.set(key, value);
   });
   ipcMain.handle(channels.SETTINGS_GET_ALL, () => settings.getAll());
+
+  // Global PTT keyboard hook
+  const allSettings = settings.getAll();
+  globalPtt.start(allSettings.ptt?.keybind || 'Space');
+
+  ipcMain.handle(channels.PTT_SET_KEYBIND, (_event, code) => {
+    globalPtt.setKeybind(code);
+  });
 
   // Connection
   ipcMain.handle(channels.CONNECTION_CONNECT, async () => {
@@ -116,6 +130,10 @@ function registerIpcHandlers() {
         (simName) => {
           sendToMainWindow(channels.SIM_NAME, simName);
           settings.set('signaller.panelName', simName);
+        },
+        () => {
+          console.log('[IPC] SimSig closed — quitting app');
+          app.quit();
         },
       );
       phoneReader.startPolling(2000);
@@ -281,6 +299,111 @@ function registerIpcHandlers() {
           console.error('[PhoneBookDial] Parse error, raw output:', stdout);
           resolve({ error: 'Failed to parse response' });
         }
+      });
+    });
+  });
+
+  // Place Call — read connection status and replies
+  ipcMain.handle(channels.PHONE_PLACE_CALL_STATUS, () => {
+    const args = [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', READ_PLACE_CALL_SCRIPT,
+    ];
+    return new Promise((resolve) => {
+      execFile('powershell', args, { timeout: 5000 }, (err, stdout, stderr) => {
+        if (stderr) console.error('[PlaceCallStatus] stderr:', stderr.trim());
+        console.log('[PlaceCallStatus] stdout:', (stdout || '').trim());
+        if (err) {
+          console.error('[PlaceCallStatus] Error:', err.message);
+          resolve({ connected: false, error: err.message });
+          return;
+        }
+        try {
+          const lines = (stdout || '').trim().split(/\r?\n/).filter(Boolean);
+          const jsonLine = lines[lines.length - 1] || '{}';
+          const result = JSON.parse(jsonLine);
+          console.log('[PlaceCallStatus] connected:', result.connected, 'debug:', result.debug || '');
+          resolve(result);
+        } catch (parseErr) {
+          console.error('[PlaceCallStatus] Parse error, raw:', stdout);
+          resolve({ connected: false, error: 'Failed to parse response' });
+        }
+      });
+    });
+  });
+
+  // Place Call — send a reply
+  ipcMain.handle(channels.PHONE_PLACE_CALL_REPLY, (_event, replyIndex) => {
+    const args = [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', REPLY_PLACE_CALL_SCRIPT, '-ReplyIndex', String(replyIndex || 0),
+    ];
+    return new Promise((resolve) => {
+      execFile('powershell', args, { timeout: 30000 }, (err, stdout, stderr) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win) {
+          win.setAlwaysOnTop(true, 'floating');
+          win.moveTop();
+          win.focus();
+        }
+        if (stderr) console.error('[PlaceCallReply] stderr:', stderr.trim());
+        if (err) {
+          resolve({ error: err.message });
+          return;
+        }
+        try {
+          const lines = (stdout || '').trim().split(/\r?\n/).filter(Boolean);
+          const jsonLine = lines[lines.length - 1] || '{}';
+          const parsed = JSON.parse(jsonLine);
+          console.log('[PlaceCallReply] stdout:', jsonLine);
+          console.log('[PlaceCallReply] parsed:', JSON.stringify(parsed));
+          resolve(parsed);
+        } catch (parseErr) {
+          console.error('[PlaceCallReply] Parse error, raw stdout:', stdout);
+          resolve({ error: 'Failed to parse response' });
+        }
+      });
+    });
+  });
+
+  // Place Call — hang up and close dialog
+  ipcMain.handle(channels.PHONE_PLACE_CALL_HANGUP, () => {
+    const args = [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', HANGUP_PLACE_CALL_SCRIPT,
+    ];
+    return new Promise((resolve) => {
+      execFile('powershell', args, { timeout: 5000 }, (err, stdout, stderr) => {
+        if (stderr) console.error('[PlaceCallHangup] stderr:', stderr.trim());
+        if (err) {
+          resolve({ error: err.message });
+          return;
+        }
+        try {
+          const lines = (stdout || '').trim().split(/\r?\n/).filter(Boolean);
+          const jsonLine = lines[lines.length - 1] || '{}';
+          resolve(JSON.parse(jsonLine));
+        } catch (parseErr) {
+          resolve({ error: 'Failed to parse response' });
+        }
+      });
+    });
+  });
+
+  // Hide any lingering TAnswerCallForm dialog
+  ipcMain.handle(channels.PHONE_HIDE_ANSWER, () => {
+    const args = [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', HIDE_ANSWER_SCRIPT,
+    ];
+    return new Promise((resolve) => {
+      execFile('powershell', args, { timeout: 5000 }, (err, stdout, stderr) => {
+        if (stderr) console.error('[HideAnswer] stderr:', stderr.trim());
+        if (err) {
+          resolve({ error: err.message });
+          return;
+        }
+        resolve({ success: true });
       });
     });
   });

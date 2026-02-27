@@ -40,11 +40,12 @@ const PhoneCallsUI = {
     // Click the notification box to answer the latest call or end the current call
     this.notificationEl.addEventListener('click', () => {
       if (this._outgoingCall) {
+        if (this._outgoingReplies && this._outgoingReplies.length > 0 && !this._outgoingReplySent) return;
         this.endOutgoingCall();
       } else if (this.inCall) {
         if (this._hasReplyOptions && !this._replySent) return; // must reply first
         this.hangUp();
-      } else if (this.calls.length > 0) {
+      } else if (this.calls.length > 0 && !this._dialingActive) {
         this.answerCall(this.calls.length - 1);
       }
     });
@@ -101,7 +102,7 @@ const PhoneCallsUI = {
       }
     }
 
-    if (this.calls.length > 0 && !this.wasRinging && !this.inCall) {
+    if (this.calls.length > 0 && !this.wasRinging && !this.inCall && !this._outgoingCall && !this._dialingActive) {
       this.startRinging();
     }
 
@@ -141,7 +142,7 @@ const PhoneCallsUI = {
 
   // Resume ringing if calls are waiting (called when sim unpauses)
   resumeRinging() {
-    if (this.calls.length > 0 && this.wasRinging && !this.inCall && !this.silenced) {
+    if (this.calls.length > 0 && this.wasRinging && !this.inCall && !this._outgoingCall && !this._dialingActive && !this.silenced) {
       this.ringingAudio.currentTime = 0;
       this.ringingAudio.play().catch(() => {});
     }
@@ -408,13 +409,32 @@ const PhoneCallsUI = {
   // Match user's spoken text against available reply options
   matchReply(transcript, replies) {
     const text = transcript.toLowerCase();
+    // First try exact pattern matchers (for incoming call standard replies)
     for (const matcher of this.REPLY_MATCHERS) {
       if (matcher.pattern.test(text)) {
         const idx = replies.findIndex((r) => r.toLowerCase().includes(matcher.fragment));
         if (idx >= 0) return idx;
       }
     }
-    return -1;
+    // Fallback: fuzzy keyword matching — find the reply with the most word overlap
+    // If there's only one reply, any speech selects it
+    if (replies.length === 1) return 0;
+    const words = text.split(/\s+/).filter((w) => w.length > 3);
+    let bestIdx = -1;
+    let bestScore = 0;
+    replies.forEach((reply, i) => {
+      const rLower = reply.toLowerCase();
+      let score = 0;
+      for (const w of words) {
+        if (rLower.includes(w)) score++;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    });
+    // Require at least 1 matching word
+    return bestScore >= 1 ? bestIdx : -1;
   },
 
   // Wait for PTT press, then record audio until PTT release, then transcribe
@@ -422,6 +442,9 @@ const PhoneCallsUI = {
     try {
       // Wait for PTT press to start
       await this.waitForPTTPress();
+
+      // Mute background noise during recording for cleaner audio
+      if (this.bgGain) this.bgGain.gain.value = 0;
 
       const settingsAll = await window.simsigAPI.settings.getAll();
       const deviceId = settingsAll.audio?.inputDeviceId;
@@ -450,6 +473,9 @@ const PhoneCallsUI = {
         });
       });
 
+      // Restore background noise after recording
+      if (this.bgGain) this.bgGain.gain.value = 0.5;
+
       if (audioData.length < 500) return ''; // too short, nothing said
 
       console.log(`[STT] Recorded ${audioData.length} bytes, sending for transcription...`);
@@ -461,6 +487,7 @@ const PhoneCallsUI = {
       }
       return result || '';
     } catch (err) {
+      if (this.bgGain) this.bgGain.gain.value = 0.5;
       console.error('[STT] Recording error:', err);
       return '';
     }
@@ -609,7 +636,7 @@ const PhoneCallsUI = {
     }
     // Hold back — caller acknowledges
     if (/hold.*back/i.test(lower)) {
-      return 'Ok, please hold it back until booked time. Thanks';
+      return 'Ok I will hold it back';
     }
     // Continue after speaking to control
     if (/continue\s+after\s+speaking/i.test(lower) || /continue.*obey/i.test(lower)) {
@@ -625,7 +652,7 @@ const PhoneCallsUI = {
   // Send a reply by index — shared by speech, click, and fallback button paths
   async sendReply(replyIndex, replies, caller) {
     // Show loading spinner immediately, send reply + fetch TTS in parallel
-    this.addMessage({ type: 'loading', text: 'Driver responding...' });
+    this.addMessage({ type: 'loading', text: 'Replying...' });
     const confirmation = this.buildConfirmation(replies[replyIndex]);
 
     const voices = await this.getElevenVoices();
@@ -651,7 +678,7 @@ const PhoneCallsUI = {
     } else {
       await this.speakLocal(this.phoneticize(confirmation), caller);
     }
-    this.showHangUpInChat();
+    await this.showHangUpInChat();
   },
 
   // Set up delegated click handler for reply options (survives renderChat DOM rebuilds)
@@ -696,7 +723,7 @@ const PhoneCallsUI = {
     if (replies.length === 1 && /^ok$/i.test(replies[0].trim())) {
       await window.simsigAPI.phone.replyCall(0, this.currentHeadCode);
       this._replySent = true;
-      this.showHangUpInChat();
+      await this.showHangUpInChat();
       return;
     }
 
@@ -739,8 +766,43 @@ const PhoneCallsUI = {
     this.setupReplyClickHandlers(replies, caller);
   },
 
-  // End-call is handled via the notification box — no chat button needed
-  showHangUpInChat() {},
+  // After reply is sent, listen for goodbye on incoming calls
+  async showHangUpInChat() {
+    if (!this.inCall) return;
+    this.addMessage({ type: 'greeting', text: 'Hold PTT to say goodbye...' });
+
+    try {
+      const transcript = await this.recordAndTranscribe();
+      if (!this.inCall) return;
+      if (transcript) {
+        const lower = transcript.toLowerCase();
+        const goodbyeWords = ['bye', 'goodbye', 'thanks', 'thank', 'cheers', 'ta', 'cheerio'];
+        const isGoodbye = goodbyeWords.some((w) => lower.includes(w));
+        if (isGoodbye) {
+          const voiceKey = this._activeCallVoiceKey || this._activeCallTrain || '';
+          const goodbyes = [
+            'Right, cheers mate, bye.',
+            'Ta, bye now.',
+            'Sound, cheers, bye bye.',
+            'Nice one, ta, bye.',
+            'Alright mate, cheers, bye.',
+            'Lovely, ta, see ya.',
+            'Right oh, cheers, bye.',
+            'Sweet, ta mate, bye bye.',
+            'Alright, cheers ears, bye.',
+            'Sorted, ta, bye now.',
+          ];
+          const reply = goodbyes[Math.floor(Math.random() * goodbyes.length)];
+          this.addMessage({ type: 'driver', caller: this.shortenCaller(voiceKey), text: reply });
+          await this.speakAsDriver(reply, voiceKey);
+          this.hangUp();
+          return;
+        }
+      }
+    } catch (e) {
+      // PTT cancelled or error — just continue
+    }
+  },
 
   // Fallback: show clickable buttons for reply options
   waitForReplyButton(replies, caller) {
@@ -755,7 +817,7 @@ const PhoneCallsUI = {
         const confirmation = this.buildConfirmation(reply);
         this.addMessage({ type: 'driver', caller, text: confirmation });
         await this.speakAsDriver(confirmation, caller);
-        this.showHangUpInChat();
+        await this.showHangUpInChat();
         resolve();
       };
 
@@ -840,6 +902,7 @@ const PhoneCallsUI = {
     this._hasReplyOptions = false;
     this._replySent = false;
     this._activeCallTrain = '';
+    this._activeCallVoiceKey = '';
     this.stopBgNoise();
     this.bgCallerType = 'train';
     this.messages = [];
@@ -850,6 +913,9 @@ const PhoneCallsUI = {
     this.renderChat();
     this.renderCalls();
     this.hideNotification();
+
+    // Hide any lingering TAnswerCallForm dialog in SimSig
+    window.simsigAPI.phone.hideAnswerDialog().catch(() => {});
     // If there are waiting calls, show the next one and start ringing
     if (this.calls.length > 0) {
       const nextCall = this.calls[this.calls.length - 1];
@@ -918,6 +984,7 @@ const PhoneCallsUI = {
     const position = this.extractPosition(result.title);
     const greeting = `Hello, ${panelName} Signaller${position ? ', ' + position : ''}, Go ahead`;
     const caller = (result.title || '').replace(/^Answer call from\s*/i, '') || result.train || '';
+    this._activeCallVoiceKey = caller; // consistent key for voice selection during this call
     const driverMsg = result.message || '';
     const csd = this.parseCsdMessage(driverMsg);
     const earlyRun = this.parseEarlyRunningMessage(driverMsg);
@@ -1053,8 +1120,8 @@ const PhoneCallsUI = {
         </tr>`;
       }).join('');
 
-      // Only flash notification for new calls if not already in a call
-      if (!this.inCall) {
+      // Only flash notification for new calls if not already in a call or on an outgoing call
+      if (!this.inCall && !this._outgoingCall && !this._dialingActive) {
         const latestCall = this.calls[this.calls.length - 1];
         this.showNotification(latestCall.train || '');
       }
@@ -1128,13 +1195,16 @@ const PhoneCallsUI = {
       try { this._ringOutSource.stop(); } catch (e) {}
       this._ringOutSource = null;
     }
+    // Close the Place Call dialog if we were dialing
+    window.simsigAPI.phone.placeCallHangup().catch(() => {});
     this.hideNotification();
   },
 
-  showOutgoingCallNotification(contactName) {
+  async showOutgoingCallNotification(contactName, message, replies) {
     if (!this.notificationEl) return;
     this._outgoingCall = true;
     this._outgoingContactName = contactName;
+    this._outgoingReplySent = false;
     this.notificationEl.classList.remove('hidden');
     this.notificationEl.classList.remove('flashing');
     this.notificationEl.classList.add('in-call');
@@ -1145,14 +1215,192 @@ const PhoneCallsUI = {
     if (icon) icon.innerHTML = '&#128222;';
     // Mark the phone book row as in-call
     this._updatePhonebookInCall(contactName, true);
+
+    // Start background audio based on contact type
+    this.bgCallerType = this.getCallerType(contactName, '');
+    this.startBgNoise();
+
+    // Show greeting in chat and speak it — they identify themselves
+    const shortName = this.shortenCaller(contactName);
+    const greeting = `Hello, ${shortName}`;
+    this.addMessage({ type: 'driver', caller: shortName, text: greeting });
+    await this.speakAsDriver(`Hello, ${shortName}?`, contactName);
+
+    // Show the message from the caller if available
+    if (message) {
+      this.addMessage({ type: 'driver', caller: shortName, text: message });
+      await this.speakAsDriver(message, contactName);
+    }
+
+    // Show reply options if available
+    if (replies && replies.length > 0) {
+      this._outgoingReplies = replies;
+      this.addMessage({ type: 'reply-options', replies });
+      this.setupOutgoingReplyClickHandlers(replies, contactName);
+
+      // PTT voice reply loop (same pattern as incoming calls)
+      const MAX_ATTEMPTS = 3;
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        if (this._outgoingReplySent || !this._outgoingCall) return;
+        this.addMessage({ type: 'greeting', text: 'Hold PTT and speak your reply...' });
+
+        let transcript = '';
+        try {
+          transcript = await this.recordAndTranscribe();
+        } catch (e) {
+          if (this._outgoingReplySent || !this._outgoingCall) return;
+          break;
+        }
+        if (this._outgoingReplySent || !this._outgoingCall) return;
+
+        if (transcript) {
+          const replyIndex = this.matchReply(transcript, replies);
+          if (replyIndex >= 0) {
+            this._outgoingReplySent = true;
+            await this.sendOutgoingReply(replyIndex, replies, contactName);
+            return;
+          }
+        }
+
+        // Not understood
+        const sorry = 'Can you say again please';
+        this.addMessage({ type: 'driver', caller: shortName, text: sorry });
+        await this.speakAsDriver(sorry, contactName);
+      }
+
+      if (this._outgoingReplySent || !this._outgoingCall) return;
+      // After max attempts, re-show clickable reply options
+      this.addMessage({ type: 'reply-options', replies });
+      this.setupOutgoingReplyClickHandlers(replies, contactName);
+    }
+  },
+
+  setupOutgoingReplyClickHandlers(replies, contactName) {
+    if (this._outgoingReplyHandler) {
+      this.chatEl.removeEventListener('click', this._outgoingReplyHandler);
+    }
+
+    this._outgoingReplyHandler = (e) => {
+      if (this._outgoingReplySent) return;
+
+      const chip = e.target.closest('.wait-time-choice');
+      if (chip) {
+        this._outgoingReplySent = true;
+        const idx = parseInt(chip.dataset.index, 10);
+        this.sendOutgoingReply(idx, replies, contactName);
+        return;
+      }
+
+      const li = e.target.closest('.reply-options-list li');
+      if (li) {
+        const replyIdx = parseInt(li.dataset.replyIndex, 10);
+        if (replyIdx < 0) return;
+        this._outgoingReplySent = true;
+        this.sendOutgoingReply(replyIdx, replies, contactName);
+      }
+    };
+
+    this.chatEl.addEventListener('click', this._outgoingReplyHandler);
+  },
+
+  // Generate a plausible confirmation response based on the reply text.
+  // SimSig's Place Call dialog response text is in a TLabel which has no HWND
+  // and no UI Automation exposure, so it cannot be read programmatically.
+  generateConfirmationFromReply(replyText) {
+    const lower = replyText.toLowerCase();
+    if (/block.*signal|signal.*block/i.test(replyText)) return 'Ok, no problem, I will mark the line as blocked';
+    if (/unblock|remove.*block|clear.*block/i.test(replyText)) return 'Right, I will remove the block now, thanks';
+    if (/permission.*enter|enter.*section/i.test(replyText)) return 'Ok, permission granted, thank you';
+    if (/proceed|continue/i.test(replyText)) return 'Ok, will do, thanks';
+    if (/stop|hold|wait/i.test(replyText)) return 'Ok, no problem, I will hold them';
+    if (/caution/i.test(replyText)) return 'Right, understood, will proceed with caution';
+    if (/wrong.*line|wrong.*road/i.test(replyText)) return 'Oh right, ok, thanks for letting me know';
+    return 'Ok, lovely, thanks';
+  },
+
+  async sendOutgoingReply(replyIndex, replies, contactName) {
+    this.addMessage({ type: 'loading', text: 'Sending...' });
+
+    // Send reply to SimSig via Place Call dialog (physical mouse click)
+    const result = await window.simsigAPI.phone.placeCallReply(replyIndex);
+    console.log('[OutgoingReply] result:', JSON.stringify(result));
+
+    // Remove loading spinner
+    this.messages = this.messages.filter((m) => m.type !== 'loading');
+
+    // Show what we selected as a signaller message
+    const replyText = replies[replyIndex] || '';
+    this.addMessage({ type: 'signaller', text: replyText });
+
+    // Generate confirmation — dialog response text is inaccessible (Delphi TLabel, no HWND)
+    const confirmation = this.generateConfirmationFromReply(replyText);
+    this.addMessage({ type: 'driver', text: confirmation });
+    await this.speakAsDriver(confirmation, contactName);
+
+    // Listen for goodbye — user says "ok thanks bye" etc., TTS replies "Bye"
+    await this._listenForGoodbye(contactName);
+
+    this.stopBgNoise();
+  },
+
+  async _listenForGoodbye(contactName) {
+    if (!this._outgoingCall) return;
+    this.addMessage({ type: 'greeting', text: 'Hold PTT to say goodbye...' });
+
+    try {
+      const transcript = await this.recordAndTranscribe();
+      if (!this._outgoingCall) return;
+      if (transcript) {
+        const lower = transcript.toLowerCase();
+        const goodbyeWords = ['bye', 'goodbye', 'thanks', 'thank', 'cheers', 'ta', 'cheerio'];
+        const isGoodbye = goodbyeWords.some((w) => lower.includes(w));
+        if (isGoodbye) {
+          this.addMessage({ type: 'signaller', text: transcript });
+          const goodbyes = [
+            'Ok, speak later, bye.',
+            'Thanks, bye now.',
+            'Bye bye.',
+            'Cheers, bye.',
+            'Right, thanks, bye.',
+            'Ok, bye now.',
+            'Ok, thanks for that, bye.',
+            'Right oh, bye.',
+            'Ok, thank you, bye now.',
+            'Very good, thanks, bye.',
+          ];
+          const reply = goodbyes[Math.floor(Math.random() * goodbyes.length)];
+          this.addMessage({ type: 'driver', text: reply });
+          await this.speakAsDriver(reply, contactName);
+          this.endOutgoingCall();
+          return;
+        }
+        // Not a goodbye — show what they said and carry on
+        this.addMessage({ type: 'signaller', text: transcript });
+      }
+    } catch (e) {
+      // PTT cancelled or error — just continue
+    }
   },
 
   endOutgoingCall() {
+    // Click "Hang up and close" on the Place Call dialog
+    window.simsigAPI.phone.placeCallHangup().catch(() => {});
+
     if (this._outgoingContactName) {
       this._updatePhonebookInCall(this._outgoingContactName, false);
     }
     this._outgoingCall = false;
     this._outgoingContactName = '';
+    this._outgoingReplySent = false;
+    this._outgoingReplies = null;
+    if (this._outgoingReplyHandler) {
+      this.chatEl.removeEventListener('click', this._outgoingReplyHandler);
+      this._outgoingReplyHandler = null;
+    }
+    this.stopBgNoise();
+    this.bgCallerType = 'train';
+    this.messages = [];
+    this.renderChat();
     this.hideNotification();
   },
 
@@ -1235,11 +1483,13 @@ const PhoneCallsUI = {
 
   renderChat() {
     if (this.messages.length === 0) {
-      this.chatEl.innerHTML = '<div class="chat-empty">No driver messages yet</div>';
+      this.chatEl.innerHTML = '<div class="chat-empty">No messages yet</div>';
       return;
     }
 
-    this.chatEl.innerHTML = this.messages.map((msg) => {
+    this.chatEl.innerHTML = this.messages.filter((m) =>
+      m.type === 'driver' || m.type === 'reply-options' || m.type === 'loading' || m.type === 'greeting'
+    ).map((msg) => {
       if (msg.type === 'greeting') {
         return `<div class="chat-message chat-greeting">
           <div class="chat-message-label">SPEAK NOW</div>
@@ -1312,16 +1562,7 @@ const PhoneCallsUI = {
           <div class="chat-message-time">${this.escapeHtml(msg.time)}</div>
         </div>`;
       }
-      if (msg.type === 'system') {
-        return `<div class="chat-message chat-system">
-          <div class="chat-message-text">${this.escapeHtml(msg.text)}</div>
-          <div class="chat-message-time">${this.escapeHtml(msg.time)}</div>
-        </div>`;
-      }
-      return `<div class="chat-message chat-error">
-        <div class="chat-message-text">${this.escapeHtml(msg.text)}</div>
-        <div class="chat-message-time">${this.escapeHtml(msg.time)}</div>
-      </div>`;
+      return '';
     }).join('');
 
     this.chatEl.scrollTop = this.chatEl.scrollHeight;

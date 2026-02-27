@@ -130,6 +130,13 @@ public class Win32Reply {
         return result;
     }
 
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+    public static void HideOffScreen(IntPtr hWnd) {
+        SetWindowPos(hWnd, IntPtr.Zero, -32000, -32000, 0, 0, 0x0001 | 0x0004 | 0x0010);
+    }
+
     // Find a child button by text (OK, &OK, Close)
     public static IntPtr FindButtonByText(IntPtr parent, string[] texts) {
         IntPtr result = IntPtr.Zero;
@@ -262,7 +269,7 @@ try {
         Start-Sleep -Milliseconds 200
     }
 
-    # Hide the TAnswerCallForm off-screen (it may still be open after reply)
+    # Close the TAnswerCallForm (it may still be open after reply)
     $answerFormCond2 = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::ClassNameProperty,
         "TAnswerCallForm"
@@ -274,7 +281,23 @@ try {
     if ($null -ne $answerForm2) {
         $aHwnd = [IntPtr]$answerForm2.Current.NativeWindowHandle
         if ($aHwnd -ne [IntPtr]::Zero) {
-            [Win32Reply]::SetWindowPos($aHwnd, [IntPtr]::Zero, -32000, -32000, 0, 0, 0x0001 -bor 0x0004 -bor 0x0010)
+            [Win32Reply]::PostMessage($aHwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        }
+    }
+
+    # Hide any lingering Place Call dialog (may be left from phone book read)
+    $placeCallCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::NameProperty,
+        "Place Call"
+    )
+    $placeCallDlg = $root.FindFirst(
+        [System.Windows.Automation.TreeScope]::Children,
+        $placeCallCond
+    )
+    if ($null -ne $placeCallDlg) {
+        $pcHwnd = [IntPtr]$placeCallDlg.Current.NativeWindowHandle
+        if ($pcHwnd -ne [IntPtr]::Zero) {
+            [Win32Reply]::HideOffScreen($pcHwnd)
         }
     }
 
@@ -308,7 +331,7 @@ try {
                 if ($null -ne $telWindow) {
                     $tHwnd = [IntPtr]$telWindow.Current.NativeWindowHandle
                     if ($tHwnd -ne [IntPtr]::Zero) {
-                        [Win32Reply]::SetWindowPos($tHwnd, [IntPtr]::Zero, -32000, -32000, 0, 0, 0x0001 -bor 0x0004 -bor 0x0010)
+                        [Win32Reply]::HideOffScreen($tHwnd)
                     }
                 }
             }
@@ -317,7 +340,7 @@ try {
         # Window exists — make sure it's hidden off-screen
         $tHwnd = [IntPtr]$telWindow.Current.NativeWindowHandle
         if ($tHwnd -ne [IntPtr]::Zero) {
-            [Win32Reply]::SetWindowPos($tHwnd, [IntPtr]::Zero, -32000, -32000, 0, 0, 0x0001 -bor 0x0004 -bor 0x0010)
+            [Win32Reply]::HideOffScreen($tHwnd)
         }
     }
 

@@ -32,16 +32,29 @@ public class PhoneBookDial {
     [DllImport("user32.dll")]
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
+    [DllImport("user32.dll")]
+    public static extern int GetDlgCtrlID(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetParent(IntPtr hWnd);
+
     public const int CB_SETCURSEL = 0x014E;
     public const int CB_GETCOUNT = 0x0146;
     public const int BM_CLICK = 0x00F5;
     public const uint WM_KEYDOWN = 0x0100;
     public const uint WM_KEYUP = 0x0101;
+    public const int WM_COMMAND = 0x0111;
     public const int WM_CLOSE = 0x0010;
     public const int VK_O = 0x4F;
+    public const int CBN_SELCHANGE = 1;
 
     public static void SelectComboItem(IntPtr hWnd, int index) {
         SendMessage(hWnd, CB_SETCURSEL, (IntPtr)index, IntPtr.Zero);
+        // Notify the parent (Delphi TComboBox needs CBN_SELCHANGE to update internally)
+        IntPtr parent = GetParent(hWnd);
+        int ctrlId = GetDlgCtrlID(hWnd);
+        IntPtr wParam = (IntPtr)((CBN_SELCHANGE << 16) | (ctrlId & 0xFFFF));
+        SendMessage(parent, WM_COMMAND, wParam, hWnd);
     }
 
     public static int GetComboCount(IntPtr hWnd) {

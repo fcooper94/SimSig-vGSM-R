@@ -9,6 +9,8 @@ const channels = {
   CONNECTION_CONNECT: 'connection:connect',
   CONNECTION_DISCONNECT: 'connection:disconnect',
   CONNECTION_STATUS: 'connection:status-changed',
+  PTT_STATE: 'ptt:state-changed',
+  PTT_SET_KEYBIND: 'ptt:set-keybind',
   MESSAGE_RECEIVED: 'message:received',
   CLOCK_UPDATE: 'clock:update',
   CMD_ALL_SIGNALS_DANGER: 'cmd:all-signals-danger',
@@ -18,6 +20,10 @@ const channels = {
   PHONE_REPLY_CALL: 'phone:reply-call',
   PHONE_BOOK_READ: 'phone:book-read',
   PHONE_BOOK_DIAL: 'phone:book-dial',
+  PHONE_PLACE_CALL_STATUS: 'phone:place-call-status',
+  PHONE_PLACE_CALL_REPLY: 'phone:place-call-reply',
+  PHONE_PLACE_CALL_HANGUP: 'phone:place-call-hangup',
+  PHONE_HIDE_ANSWER: 'phone:hide-answer',
   TTS_GET_VOICES: 'tts:get-voices',
   TTS_SPEAK: 'tts:speak',
   STT_TRANSCRIBE: 'stt:transcribe',
@@ -84,11 +90,24 @@ contextBridge.exposeInMainWorld('simsigAPI', {
     replyCall: (replyIndex, headCode) => ipcRenderer.invoke(channels.PHONE_REPLY_CALL, replyIndex, headCode),
     readPhoneBook: () => ipcRenderer.invoke(channels.PHONE_BOOK_READ),
     dialPhoneBook: (index) => ipcRenderer.invoke(channels.PHONE_BOOK_DIAL, index),
+    placeCallStatus: () => ipcRenderer.invoke(channels.PHONE_PLACE_CALL_STATUS),
+    placeCallReply: (replyIndex) => ipcRenderer.invoke(channels.PHONE_PLACE_CALL_REPLY, replyIndex),
+    placeCallHangup: () => ipcRenderer.invoke(channels.PHONE_PLACE_CALL_HANGUP),
+    hideAnswerDialog: () => ipcRenderer.invoke(channels.PHONE_HIDE_ANSWER),
   },
 
   tts: {
     getVoices: () => ipcRenderer.invoke(channels.TTS_GET_VOICES),
     speak: (text, voiceId) => ipcRenderer.invoke(channels.TTS_SPEAK, text, voiceId),
+  },
+
+  ptt: {
+    onStateChange: (callback) => {
+      const listener = (_event, active) => callback(active);
+      ipcRenderer.on(channels.PTT_STATE, listener);
+      return () => ipcRenderer.removeListener(channels.PTT_STATE, listener);
+    },
+    setKeybind: (code) => ipcRenderer.invoke(channels.PTT_SET_KEYBIND, code),
   },
 
   stt: {

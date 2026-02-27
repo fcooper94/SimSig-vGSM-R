@@ -121,46 +121,74 @@ try {
         # (moving first ensures SimSig saves a visible position for future dialogs)
         $WM_CLOSE = 0x0010
 
-        $offset = 0
+        # Split into telephone windows (keep open) and others (close after restoring)
+        $telephoneWindows = @()
+        $otherWindows = @()
         foreach ($wnd in $offScreenWindows) {
+            if ($wnd -eq $simsigHwnd) { continue }
             $clsSb = New-Object System.Text.StringBuilder 256
             [void][WinRestore2]::GetClassName($wnd, $clsSb, 256)
             $cls = $clsSb.ToString()
+            if ($cls -eq "TTelephoneForm") {
+                $telephoneWindows += $wnd
+            } else {
+                $otherWindows += $wnd
+            }
+        }
 
+        $offset = 0
+
+        # First: close non-telephone dialogs (Place Call, Answer Call, etc.)
+        # Send WM_CLOSE while still off-screen — don't show them first,
+        # because SimSig may ignore WM_CLOSE and leave them visible.
+        foreach ($wnd in $otherWindows) {
+            $clsSb = New-Object System.Text.StringBuilder 256
+            [void][WinRestore2]::GetClassName($wnd, $clsSb, 256)
+            $cls = $clsSb.ToString()
             $titleSb = New-Object System.Text.StringBuilder 256
             [void][WinRestore2]::GetWindowText($wnd, $titleSb, 256)
             $title = $titleSb.ToString()
 
-            # Skip the main SimSig window itself
-            if ($wnd -eq $simsigHwnd) { continue }
+            [void][WinRestore2]::PostMessage($wnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+            $log += "Closed (off-screen) [$cls] '$title'"
+        }
 
-            if ($cls -eq "TTelephoneForm") {
-                # Restore Telephone Calls window on-screen
-                [void][WinRestore2]::ShowWindow($wnd, 9)  # SW_RESTORE
-                [void][WinRestore2]::SetWindowPos($wnd, [WinRestore2]::HWND_TOPMOST, ($centerX + $offset), ($centerY + $offset), 0, 0, $flags)
-                [void][WinRestore2]::SetForegroundWindow($wnd)
-                $log += "Restored [$cls] '$title' at ($($centerX + $offset), $($centerY + $offset))"
-                $offset += 30
-                $script:restoredTelephone = $true
-            } elseif ($cls -eq "TAnswerCallForm") {
-                # Move back on-screen so SimSig saves the visible position, then close
-                [void][WinRestore2]::ShowWindow($wnd, 9)
-                [void][WinRestore2]::SetWindowPos($wnd, [WinRestore2]::HWND_TOPMOST, ($centerX + $offset), ($centerY + $offset), 0, 0, $flags)
-                Start-Sleep -Milliseconds 100
-                [void][WinRestore2]::PostMessage($wnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
-                $log += "Restored then closed [$cls] '$title' at ($($centerX + $offset), $($centerY + $offset))"
-                $offset += 30
-            } else {
-                # Move on-screen so SimSig saves visible position, then close
-                [void][WinRestore2]::ShowWindow($wnd, 9)
-                [void][WinRestore2]::SetWindowPos($wnd, [WinRestore2]::HWND_TOPMOST, ($centerX + $offset), ($centerY + $offset), 0, 0, $flags)
-                Start-Sleep -Milliseconds 100
-                [void][WinRestore2]::PostMessage($wnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
-                $log += "Restored then closed [$cls] '$title' at ($($centerX + $offset), $($centerY + $offset))"
-                $offset += 30
-            }
+        # Wait for dialogs to close before restoring TTelephoneForm
+        if ($otherWindows.Count -gt 0) {
+            Start-Sleep -Milliseconds 500
+        }
+
+        # Then: restore TTelephoneForm last so it stays on top
+        foreach ($wnd in $telephoneWindows) {
+            $titleSb = New-Object System.Text.StringBuilder 256
+            [void][WinRestore2]::GetWindowText($wnd, $titleSb, 256)
+            $title = $titleSb.ToString()
+
+            [void][WinRestore2]::ShowWindow($wnd, 9)  # SW_RESTORE
+            [void][WinRestore2]::SetWindowPos($wnd, [WinRestore2]::HWND_TOPMOST, ($centerX + $offset), ($centerY + $offset), 0, 0, $flags)
+            [void][WinRestore2]::SetForegroundWindow($wnd)
+            $log += "Restored [TTelephoneForm] '$title' at ($($centerX + $offset), $($centerY + $offset))"
+            $offset += 30
+            $script:restoredTelephone = $true
         }
     }
+
+    # Close any leftover "Place Call" dialog (may not be off-screen)
+    $placeCallCb = [WinRestore2+EnumWindowsProc]{
+        param([IntPtr]$hWnd, [IntPtr]$lParam)
+        $wndPid = [uint32]0
+        [void][WinRestore2]::GetWindowThreadProcessId($hWnd, [ref]$wndPid)
+        if ($wndPid -eq $script:simsigPid) {
+            $titleSb = New-Object System.Text.StringBuilder 256
+            [void][WinRestore2]::GetWindowText($hWnd, $titleSb, 256)
+            if ($titleSb.ToString() -eq "Place Call") {
+                [void][WinRestore2]::PostMessage($hWnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+                $script:log += "Closed Place Call dialog"
+            }
+        }
+        return $true
+    }
+    [void][WinRestore2]::EnumWindows($placeCallCb, [IntPtr]::Zero)
 
     # Only send F6 to open TTelephoneForm if we did NOT already restore it
     if (-not $restoredTelephone) {
