@@ -193,6 +193,34 @@
           <label>Output Volume <input type="range" id="setting-output-volume" min="0" max="100" value="50"><span id="output-volume-val">50%</span></label>
         </fieldset>
         <fieldset>
+          <legend>Text-to-Speech</legend>
+          <label>Provider
+            <select id="setting-tts-provider">
+              <option value="edge">Edge TTS (Free)</option>
+              <option value="elevenlabs">ElevenLabs (Premium)</option>
+              <option value="windows">Windows TTS (Offline)</option>
+            </select>
+          </label>
+          <label id="tts-apikey-row">API Key
+            <span class="input-with-info">
+              <input type="password" id="setting-tts-apikey" placeholder="Enter ElevenLabs API key" disabled>
+              <span class="info-icon" id="tts-apikey-info">i
+                <span class="info-tooltip">
+                  <a href="https://elevenlabs.io" target="_blank">elevenlabs.io</a>
+                  <ol>
+                    <li>Create account</li>
+                    <li>Go to Dashboard</li>
+                    <li>Create API key (Edit)</li>
+                    <li>Don't restrict key</li>
+                    <li>Copy Key ID</li>
+                  </ol>
+                </span>
+              </span>
+            </span>
+          </label>
+          <div id="tts-credit-status" class="hidden"></div>
+        </fieldset>
+        <fieldset>
           <legend>Push-To-Talk</legend>
           <label>Keybind <input type="text" id="setting-ptt-keybind" readonly></label>
           <button type="button" id="ptt-rebind-btn">Press to rebind...</button>
@@ -226,6 +254,8 @@
     <div id="paused-text">SIM PAUSED</div>
   </div>
 
+  <script src="../../node_modules/vosk-browser/dist/vosk.js"></script>
+  <script src="js/stt-vosk.js"></script>
   <script src="js/time-utils.js"></script>
   <script src="js/ui-connection.js"></script>
   <script src="js/ui-settings.js"></script>

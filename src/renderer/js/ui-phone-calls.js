@@ -7,8 +7,8 @@ const PhoneCallsUI = {
   ringingAudio: null,
   wasRinging: false,
   inCall: false,
-  voiceCache: {},       // caller → voice ID (ElevenLabs) or local profile
-  elevenVoices: null,   // cached list of British voices from ElevenLabs
+  voiceCache: {},       // caller → voice ID (Edge TTS) or local profile
+  ttsVoices: null,   // cached list of voices from TTS provider
   trainSignalCache: {}, // headcode → last known signal ID
 
   init() {
@@ -85,8 +85,8 @@ const PhoneCallsUI = {
     speechSynthesis.getVoices();
     speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
 
-    // Pre-fetch ElevenLabs voices so first TTS is instant
-    this.getElevenVoices();
+    // Pre-fetch TTS voices so first TTS is instant (skipped for Windows TTS)
+    this.getTTSVoices();
 
     this.renderChat();
   },
@@ -192,29 +192,41 @@ const PhoneCallsUI = {
     });
   },
 
-  // Fetch ElevenLabs British voices (cached)
-  async getElevenVoices() {
-    if (this.elevenVoices) return this.elevenVoices;
+  // Fetch TTS voices (cached). Returns null for Windows TTS provider.
+  async getTTSVoices() {
+    if (this.ttsVoices) return this.ttsVoices;
     try {
-      const voices = await window.simsigAPI.tts.getVoices();
-      this.elevenVoices = voices && voices.length > 0 ? voices : null;
-      return this.elevenVoices;
+      const result = await window.simsigAPI.tts.getVoices();
+      // Windows TTS provider returns a sentinel — renderer handles it locally
+      if (result && result.provider === 'windows') return null;
+      this.ttsVoices = result && result.length > 0 ? result : null;
+      return this.ttsVoices;
     } catch {
       return null;
     }
   },
 
-  // Pick a consistent ElevenLabs voice for a caller
-  getElevenVoiceId(caller, voices) {
+  // Pick a consistent TTS voice for a caller (80% male, 20% female)
+  getTTSVoiceId(caller, voices) {
     if (this.voiceCache[caller]) return this.voiceCache[caller];
     const hash = this.hashString(caller);
-    const voice = voices[hash % voices.length];
+    const males = voices.filter((v) => v.gender === 'male');
+    const females = voices.filter((v) => v.gender !== 'male');
+    let voice;
+    if (males.length && females.length) {
+      // Use hash to deterministically assign ~80% male
+      const useMale = (hash % 10) < 8;
+      const pool = useMale ? males : females;
+      voice = pool[hash % pool.length];
+    } else {
+      voice = voices[hash % voices.length];
+    }
     this.voiceCache[caller] = voice.id;
     return voice.id;
   },
 
-  // Fetch TTS audio from ElevenLabs (returns audioData bytes, does NOT play)
-  async fetchElevenLabsAudio(text, voiceId) {
+  // Fetch TTS audio from provider (returns audioData bytes, does NOT play)
+  async fetchTTSAudio(text, voiceId) {
     const audioData = await window.simsigAPI.tts.speak(text, voiceId);
     return audioData || null;
   },
@@ -268,9 +280,9 @@ const PhoneCallsUI = {
     });
   },
 
-  // Speak via ElevenLabs API (main process handles the HTTP call)
-  async speakElevenLabs(text, voiceId) {
-    const audioData = await this.fetchElevenLabsAudio(text, voiceId);
+  // Speak via Edge TTS (main process handles the synthesis)
+  async speakTTS(text, voiceId) {
+    const audioData = await this.fetchTTSAudio(text, voiceId);
     return this.playAudioData(audioData);
   },
 
@@ -298,7 +310,7 @@ const PhoneCallsUI = {
     });
   },
 
-  // Stop any currently playing TTS (ElevenLabs audio or browser speech)
+  // Stop any currently playing TTS (Edge TTS audio or browser speech)
   stopTTS() {
     if (this._currentAudio) {
       this._currentAudio.pause();
@@ -409,13 +421,24 @@ const PhoneCallsUI = {
     { pattern: /(?:15|fifteen|one[\s-]*five|1[\s-]*5)\s*min/, fragment: '15 minute' },
     { pattern: /(?<!\d)(?:0?2|two|to)\s*min/, fragment: '2 minute' },
     { pattern: /(?<!\d)(?:0?5|five)\s*min/, fragment: '5 minute' },
-    { pattern: /authoris[ez].*pass|pass.*signal|pass\s*at\s*(?:stop|danger)/, fragment: 'authorise driver to pass' },
+    { pattern: /wait/, fragment: '2 minute' },  // bare "wait" defaults to 2 min
+    { pattern: /authoris[ez].*pass|pass.*signal|pass\s*at\s*(?:stop|danger)|let\s*him\s*pass|pass\s*it/, fragment: 'authorise driver to pass' },
     { pattern: /examine.*line|examine\s*the/, fragment: 'examine the line' },
-    { pattern: /permission|granted|enter|proceed/, fragment: 'permission granted' },
+    // Place call specific matchers
+    { pattern: /request\s*permission/, fragment: 'request permission' },
+    { pattern: /cancel\s*all\s*accept/, fragment: 'cancel all acceptance' },
+    { pattern: /cancel\s*accept/, fragment: 'cancel acceptance' },
+    { pattern: /cancel/, fragment: 'cancel' },
+    { pattern: /please\s*block|block.*signal/, fragment: 'block' },
+    // General incoming call matchers
+    { pattern: /permission\s*granted|granted/, fragment: 'permission granted' },
     { pattern: /understood|continue|obey|speaking.*control/, fragment: 'continue after speaking' },
     { pattern: /run\s*early|let.*run|let.*continue/, fragment: 'run early' },
     { pattern: /hold.*back|hold.*booked/, fragment: 'hold' },
   ],
+
+  // "danger" and "stop" are interchangeable in SimSig signalling terminology
+  SYNONYMS: [['danger', 'stop']],
 
   // Match user's spoken text against available reply options
   matchReply(transcript, replies) {
@@ -423,21 +446,36 @@ const PhoneCallsUI = {
     // First try exact pattern matchers (for incoming call standard replies)
     for (const matcher of this.REPLY_MATCHERS) {
       if (matcher.pattern.test(text)) {
-        const idx = replies.findIndex((r) => r.toLowerCase().includes(matcher.fragment));
-        if (idx >= 0) return idx;
+        // Try the fragment as-is, then with synonyms swapped
+        const fragments = [matcher.fragment];
+        for (const pair of this.SYNONYMS) {
+          if (matcher.fragment.includes(pair[0])) fragments.push(matcher.fragment.replace(pair[0], pair[1]));
+          if (matcher.fragment.includes(pair[1])) fragments.push(matcher.fragment.replace(pair[1], pair[0]));
+        }
+        for (const frag of fragments) {
+          const idx = replies.findIndex((r) => r.toLowerCase().includes(frag));
+          if (idx >= 0) return idx;
+        }
       }
     }
     // Fallback: fuzzy keyword matching — find the reply with the most word overlap
     // If there's only one reply, any speech selects it
     if (replies.length === 1) return 0;
     const words = text.split(/\s+/).filter((w) => w.length > 3);
+    // Build synonym lookup for fuzzy matching
+    const synMap = {};
+    for (const pair of this.SYNONYMS) {
+      synMap[pair[0]] = pair[1];
+      synMap[pair[1]] = pair[0];
+    }
     let bestIdx = -1;
     let bestScore = 0;
     replies.forEach((reply, i) => {
       const rLower = reply.toLowerCase();
       let score = 0;
       for (const w of words) {
-        if (rLower.includes(w)) score++;
+        if (rLower.includes(w)) { score++; }
+        else if (synMap[w] && rLower.includes(synMap[w])) { score++; }
       }
       if (score > bestScore) {
         bestScore = score;
@@ -448,7 +486,9 @@ const PhoneCallsUI = {
     return bestScore >= 1 ? bestIdx : -1;
   },
 
-  // Wait for PTT press, then record audio until PTT release, then transcribe
+  // Wait for PTT press, record audio, then transcribe using the configured provider:
+  //   ElevenLabs → record PCM, send to main process → ElevenLabs Scribe API
+  //   Edge/Windows → record via Vosk in-browser (WASM, no network needed)
   async recordAndTranscribe() {
     try {
       // Wait for PTT press to start
@@ -457,51 +497,98 @@ const PhoneCallsUI = {
       // Mute background noise during recording for cleaner audio
       if (this.bgGain) this.bgGain.gain.value = 0;
 
-      const settingsAll = await window.simsigAPI.settings.getAll();
-      const deviceId = settingsAll.audio?.inputDeviceId;
-      const constraints = deviceId && deviceId !== 'default'
-        ? { audio: { deviceId: { exact: deviceId } } }
-        : { audio: true };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const settings = await window.simsigAPI.settings.getAll();
+      const provider = settings.tts?.provider || 'edge';
 
-      // Record while PTT is held
-      const audioData = await new Promise((resolve) => {
-        const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
-        const chunks = [];
-        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-        recorder.onstop = async () => {
-          stream.getTracks().forEach((t) => t.stop());
-          const blob = new Blob(chunks, { type: 'audio/webm' });
-          const buffer = await blob.arrayBuffer();
-          resolve(Array.from(new Uint8Array(buffer)));
-        };
+      if (provider === 'elevenlabs') {
+        // --- ElevenLabs Scribe: record PCM, send to main process ---
+        console.log('[STT] PTT pressed — recording audio for ElevenLabs Scribe...');
+        const audioData = await this._recordPCMWhilePTT();
+        if (this.bgGain) this.bgGain.gain.value = 0.5;
 
-        recorder.start(100);
+        if (!audioData || audioData.length === 0) {
+          console.log('[STT] No audio recorded');
+          return '';
+        }
 
-        // Stop when PTT is released
-        this.waitForPTTRelease().then(() => {
-          if (recorder.state === 'recording') recorder.stop();
-        });
-      });
+        console.log(`[STT] Sending ${audioData.length} samples to Scribe...`);
+        // Send as regular array (Electron IPC structured clone handles it)
+        const result = await window.simsigAPI.stt.transcribe([...audioData]);
 
-      // Restore background noise after recording
-      if (this.bgGain) this.bgGain.gain.value = 0.5;
-
-      if (audioData.length < 500) return ''; // too short, nothing said
-
-      console.log(`[STT] Recorded ${audioData.length} bytes, sending for transcription...`);
-      const result = await window.simsigAPI.stt.transcribe(audioData);
-      console.log('[STT] Result:', result);
-      if (result && typeof result === 'object' && result.error) {
-        console.error('[STT] Error:', result.error);
-        return '';
+        if (result && typeof result === 'object' && result.error) {
+          console.error('[STT] Scribe error:', result.error);
+          return '';
+        }
+        console.log(`[STT] Scribe result: "${result}"`);
+        return result || '';
+      } else {
+        // --- Vosk: in-browser WASM recognition ---
+        console.log('[STT] PTT pressed — using Vosk in-browser STT...');
+        try {
+          const isPTTActive = () => typeof PTTUI !== 'undefined' && PTTUI.isActive;
+          const result = await VoskSTT.transcribe(isPTTActive);
+          if (this.bgGain) this.bgGain.gain.value = 0.5;
+          console.log(`[STT] Vosk result: "${result}"`);
+          return result || '';
+        } catch (voskErr) {
+          console.error('[STT] Vosk error:', voskErr.message);
+          if (this.bgGain) this.bgGain.gain.value = 0.5;
+          return '';
+        }
       }
-      return result || '';
     } catch (err) {
       if (this.bgGain) this.bgGain.gain.value = 0.5;
       console.error('[STT] Recording error:', err);
       return '';
     }
+  },
+
+  // Record raw PCM Float32 audio at 16kHz while PTT is held
+  async _recordPCMWhilePTT() {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        channelCount: 1,
+        sampleRate: 16000,
+      },
+    });
+
+    const audioContext = new AudioContext({ sampleRate: 16000 });
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    const chunks = [];
+
+    processor.onaudioprocess = (event) => {
+      const data = event.inputBuffer.getChannelData(0);
+      chunks.push(new Float32Array(data));
+    };
+
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+
+    // Wait for PTT release
+    await this.waitForPTTRelease();
+
+    // Small delay to capture trailing audio
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Cleanup
+    processor.disconnect();
+    source.disconnect();
+    audioContext.close();
+    stream.getTracks().forEach((t) => t.stop());
+
+    // Concatenate all chunks into a single Float32Array
+    const totalLength = chunks.reduce((acc, c) => acc + c.length, 0);
+    const combined = new Float32Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    return combined;
   },
 
   // Returns a promise that resolves when PTT is pressed
@@ -666,11 +753,11 @@ const PhoneCallsUI = {
     this.addMessage({ type: 'loading', text: 'Replying...' });
     const confirmation = this.buildConfirmation(replies[replyIndex]);
 
-    const voices = await this.getElevenVoices();
+    const voices = await this.getTTSVoices();
     let audioPromise = null;
     if (voices && voices.length > 0) {
-      const voiceId = this.getElevenVoiceId(caller, voices);
-      audioPromise = this.fetchElevenLabsAudio(this.phoneticize(confirmation), voiceId);
+      const voiceId = this.getTTSVoiceId(caller, voices);
+      audioPromise = this.fetchTTSAudio(this.phoneticize(confirmation), voiceId);
     }
 
     // Send reply to SimSig while TTS generates
@@ -787,31 +874,26 @@ const PhoneCallsUI = {
         const transcript = await this.recordAndTranscribe();
         if (!this.inCall) return;
         if (transcript) {
-          const lower = transcript.toLowerCase();
-          const goodbyeWords = ['bye', 'goodbye', 'thanks', 'thank', 'cheers', 'ta', 'cheerio'];
-          const isGoodbye = goodbyeWords.some((w) => lower.includes(w));
-          if (isGoodbye) {
-            const voiceKey = this._activeCallVoiceKey || this._activeCallTrain || '';
-            const goodbyes = [
-              'Right, cheers mate, bye.',
-              'Ta, bye now.',
-              'Sound, cheers, bye bye.',
-              'Nice one, ta, bye.',
-              'Alright mate, cheers, bye.',
-              'Lovely, ta, see ya.',
-              'Right oh, cheers, bye.',
-              'Sweet, ta mate, bye bye.',
-              'Alright, cheers ears, bye.',
-              'Sorted, ta, bye now.',
-            ];
-            const reply = goodbyes[Math.floor(Math.random() * goodbyes.length)];
-            this.addMessage({ type: 'driver', caller: this.shortenCaller(voiceKey), text: reply });
-            await this.speakAsDriver(reply, voiceKey);
-            this.hangUp();
-            return;
-          }
-          // Not a goodbye — show what they said and keep listening
-          this.addMessage({ type: 'signaller', text: transcript });
+          // At the goodbye stage, any speech is treated as goodbye
+          // (user has already sent their reply — they're just ending the call)
+          const voiceKey = this._activeCallVoiceKey || this._activeCallTrain || '';
+          const goodbyes = [
+            'Right, cheers mate, bye.',
+            'Ta, bye now.',
+            'Sound, cheers, bye bye.',
+            'Nice one, ta, bye.',
+            'Alright mate, cheers, bye.',
+            'Lovely, ta, see ya.',
+            'Right oh, cheers, bye.',
+            'Sweet, ta mate, bye bye.',
+            'Alright, cheers ears, bye.',
+            'Sorted, ta, bye now.',
+          ];
+          const reply = goodbyes[Math.floor(Math.random() * goodbyes.length)];
+          this.addMessage({ type: 'driver', caller: this.shortenCaller(voiceKey), text: reply });
+          await this.speakAsDriver(reply, voiceKey);
+          this.hangUp();
+          return;
         }
       } catch (e) {
         // PTT cancelled or error — loop back and try again
@@ -881,19 +963,16 @@ const PhoneCallsUI = {
     });
   },
 
-  // Speak as driver — phoneticizes codes, tries ElevenLabs, falls back to local
+  // Speak as driver — phoneticizes codes, tries selected TTS provider, falls back to local
   async speakAsDriver(text, caller) {
     if (this.isPaused()) return;
     const spoken = this.phoneticize(text);
-    const voices = await this.getElevenVoices();
+    const voices = await this.getTTSVoices();
     if (voices && voices.length > 0) {
-      const voiceId = this.getElevenVoiceId(caller, voices);
-      console.log(`[TTS] Using ElevenLabs voice ${voiceId} for "${caller}"`);
-      const ok = await this.speakElevenLabs(spoken, voiceId);
+      const voiceId = this.getTTSVoiceId(caller, voices);
+      const ok = await this.speakTTS(spoken, voiceId);
       if (ok) return;
-      console.warn('[TTS] ElevenLabs speak failed, falling back to local TTS');
-    } else {
-      console.warn('[TTS] No ElevenLabs voices available, using local TTS');
+      console.warn('[TTS] Speak failed, falling back to local TTS');
     }
     await this.speakLocal(spoken, caller);
   },
@@ -973,7 +1052,7 @@ const PhoneCallsUI = {
     const [result, settingsAll, voices] = await Promise.all([
       window.simsigAPI.phone.answerCall(index, train),
       window.simsigAPI.settings.getAll(),
-      this.getElevenVoices(),
+      this.getTTSVoices(),
     ]);
 
     if (result.error) {
@@ -1067,9 +1146,9 @@ const PhoneCallsUI = {
     let prefetchedAudio = null;
     let voiceId = null;
     if (voices && voices.length > 0) {
-      voiceId = this.getElevenVoiceId(caller, voices);
+      voiceId = this.getTTSVoiceId(caller, voices);
       // Start fetching audio immediately — don't wait for user to finish speaking
-      const audioPromise = this.fetchElevenLabsAudio(this.phoneticize(spokenMsg), voiceId);
+      const audioPromise = this.fetchTTSAudio(this.phoneticize(spokenMsg), voiceId);
 
       // Show greeting and wait for user speech AT THE SAME TIME as audio generates
       this.addMessage({ type: 'greeting', text: greeting });
@@ -1277,12 +1356,16 @@ const PhoneCallsUI = {
         if (this._outgoingReplySent || !this._outgoingCall) return;
 
         if (transcript) {
+          console.log(`[PlaceCall] Heard: "${transcript}", matching against:`, replies);
           const replyIndex = this.matchReply(transcript, replies);
+          console.log(`[PlaceCall] Match result: index=${replyIndex}`);
           if (replyIndex >= 0) {
             this._outgoingReplySent = true;
             await this.sendOutgoingReply(replyIndex, replies, contactName);
             return;
           }
+        } else {
+          console.log('[PlaceCall] No speech detected (empty transcript)');
         }
 
         // Not understood
@@ -1472,31 +1555,25 @@ const PhoneCallsUI = {
         const transcript = await this.recordAndTranscribe();
         if (!this._outgoingCall) return;
         if (transcript) {
-          const lower = transcript.toLowerCase();
-          const goodbyeWords = ['bye', 'goodbye', 'thanks', 'thank', 'cheers', 'ta', 'cheerio'];
-          const isGoodbye = goodbyeWords.some((w) => lower.includes(w));
-          if (isGoodbye) {
-            this.addMessage({ type: 'signaller', text: transcript });
-            const goodbyes = [
-              'Ok, speak later, bye.',
-              'Thanks, bye now.',
-              'Bye bye.',
-              'Cheers, bye.',
-              'Right, thanks, bye.',
-              'Ok, bye now.',
-              'Ok, thanks for that, bye.',
-              'Right oh, bye.',
-              'Ok, thank you, bye now.',
-              'Very good, thanks, bye.',
-            ];
-            const reply = goodbyes[Math.floor(Math.random() * goodbyes.length)];
-            this.addMessage({ type: 'driver', text: reply });
-            await this.speakAsDriver(reply, contactName);
-            this.endOutgoingCall();
-            return;
-          }
-          // Not a goodbye — show what they said and keep listening
+          // At the goodbye stage, any speech ends the call
           this.addMessage({ type: 'signaller', text: transcript });
+          const goodbyes = [
+            'Ok, speak later, bye.',
+            'Thanks, bye now.',
+            'Bye bye.',
+            'Cheers, bye.',
+            'Right, thanks, bye.',
+            'Ok, bye now.',
+            'Ok, thanks for that, bye.',
+            'Right oh, bye.',
+            'Ok, thank you, bye now.',
+            'Very good, thanks, bye.',
+          ];
+          const reply = goodbyes[Math.floor(Math.random() * goodbyes.length)];
+          this.addMessage({ type: 'driver', text: reply });
+          await this.speakAsDriver(reply, contactName);
+          this.endOutgoingCall();
+          return;
         }
       } catch (e) {
         // PTT cancelled or error — loop back and try again

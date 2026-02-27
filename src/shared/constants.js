@@ -39,5 +39,9 @@ module.exports = {
     signaller: {
       panelName: '',
     },
+    tts: {
+      provider: 'edge',
+      elevenLabsApiKey: '',
+    },
   },
 };

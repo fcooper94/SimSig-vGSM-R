@@ -26,6 +26,7 @@ const channels = {
   PHONE_HIDE_ANSWER: 'phone:hide-answer',
   TTS_GET_VOICES: 'tts:get-voices',
   TTS_SPEAK: 'tts:speak',
+  TTS_CHECK_CREDITS: 'tts:check-credits',
   STT_TRANSCRIBE: 'stt:transcribe',
   SIM_NAME: 'sim:name',
   INIT_READY: 'init:ready',
@@ -99,6 +100,7 @@ contextBridge.exposeInMainWorld('simsigAPI', {
   tts: {
     getVoices: () => ipcRenderer.invoke(channels.TTS_GET_VOICES),
     speak: (text, voiceId) => ipcRenderer.invoke(channels.TTS_SPEAK, text, voiceId),
+    checkCredits: (apiKey) => ipcRenderer.invoke(channels.TTS_CHECK_CREDITS, apiKey),
   },
 
   ptt: {

@@ -45,23 +45,72 @@ try {
     $choices.Add("pass signal at stop and examine")
     $choices.Add("ok")
     $choices.Add("okay")
+    $choices.Add("wait")
+    $choices.Add("give him 2 minutes")
+    $choices.Add("give him two minutes")
+    $choices.Add("give him 5 minutes")
+    $choices.Add("give him five minutes")
+    $choices.Add("tell him to wait")
+    $choices.Add("tell him to pass")
+    $choices.Add("pass it")
+    $choices.Add("let him pass")
+    $choices.Add("yes")
+    $choices.Add("no")
+    # Goodbye phrases
+    $choices.Add("bye")
+    $choices.Add("bye bye")
+    $choices.Add("goodbye")
+    $choices.Add("thanks bye")
+    $choices.Add("thanks bye bye")
+    $choices.Add("thank you bye")
+    $choices.Add("thank you goodbye")
+    $choices.Add("cheers bye")
+    $choices.Add("cheers bye bye")
+    $choices.Add("cheers mate bye")
+    $choices.Add("cheers mate")
+    $choices.Add("ta bye")
+    $choices.Add("ta bye bye")
+    $choices.Add("thanks")
+    $choices.Add("thank you")
+    $choices.Add("cheers")
+    $choices.Add("cheerio")
+    # Place call phrases
+    $choices.Add("request permission")
+    $choices.Add("request permission to run")
+    $choices.Add("cancel")
+    $choices.Add("cancel all")
+    $choices.Add("cancel acceptance")
+    $choices.Add("cancel all acceptances")
+    $choices.Add("please block")
+    $choices.Add("block your signal")
+    $choices.Add("block signal")
+    $choices.Add("permission granted")
+    $choices.Add("no obstruction")
+    $choices.Add("continue normally")
+    $choices.Add("hold")
+    $choices.Add("hold it")
+    $choices.Add("hold the train")
+    $choices.Add("let it run")
+    $choices.Add("let it continue")
+    $choices.Add("run early")
 
     $builder = New-Object System.Speech.Recognition.GrammarBuilder
     $builder.Append($choices)
 
     $grammar = New-Object System.Speech.Recognition.Grammar($builder)
+    $grammar.Weight = 1.0
     $engine.LoadGrammar($grammar)
 
-    # Also load dictation as fallback (lower priority)
+    # Low-weight dictation fallback so we can at least hear SOMETHING
     $dictation = New-Object System.Speech.Recognition.DictationGrammar
-    $dictation.Weight = 0.1
+    $dictation.Weight = 0.01
     $engine.LoadGrammar($dictation)
 
     $engine.SetInputToDefaultAudioDevice()
 
-    # Speed up end-of-speech detection
-    $engine.EndSilenceTimeout = [TimeSpan]::FromMilliseconds(500)
-    $engine.EndSilenceTimeoutAmbiguous = [TimeSpan]::FromMilliseconds(300)
+    # Give user time to finish speaking before cutting off
+    $engine.EndSilenceTimeout = [TimeSpan]::FromMilliseconds(1500)
+    $engine.EndSilenceTimeoutAmbiguous = [TimeSpan]::FromMilliseconds(1000)
 
     $result = $engine.Recognize([TimeSpan]::FromSeconds($TimeoutSeconds))
     $engine.Dispose()

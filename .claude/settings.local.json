@@ -28,7 +28,14 @@
       "Bash(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File restore-telephone.ps1)",
       "Bash(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"& { try { Add-Type @'':*)",
       "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File \"c:/dev/SimSig-Comms/src/main/force-close-answer.ps1\")",
-      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File \"c:/dev/SimSig-Comms/src/main/reply-phone-call.ps1\" -ReplyIndex 0)"
+      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File \"c:/dev/SimSig-Comms/src/main/reply-phone-call.ps1\" -ReplyIndex 0)",
+      "WebFetch(domain:useapi.net)",
+      "WebFetch(domain:tts.travisvn.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:migushthe2nd.github.io)",
+      "Bash(node generate-voice-samples.js)",
+      "Bash(git log --all --oneline --grep -i \"elevenlabs\\\\|eleven\")",
+      "WebFetch(domain:app.unpkg.com)"
     ]
   }
 }

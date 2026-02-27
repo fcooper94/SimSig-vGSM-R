@@ -140,6 +140,115 @@ label input[type="range"] + span {
   background: var(--accent-dim) !important;
 }
 
+/* API key input with info icon */
+.input-with-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 260px;
+}
+
+.input-with-info input {
+  flex: 1;
+  width: auto !important;
+}
+
+.input-with-info input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.info-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--text-light);
+  font-size: 11px;
+  font-weight: bold;
+  font-style: italic;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.info-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: -8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 14px;
+  width: 220px;
+  font-style: normal;
+  font-weight: normal;
+  font-size: 12px;
+  color: var(--text);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  z-index: 200;
+  line-height: 1.5;
+}
+
+.info-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 14px;
+  border: 6px solid transparent;
+  border-top-color: var(--border);
+}
+
+.info-icon:hover .info-tooltip {
+  display: block;
+}
+
+.info-tooltip a {
+  color: var(--accent);
+  text-decoration: underline;
+  font-weight: 600;
+}
+
+.info-tooltip ol {
+  margin: 6px 0 0 0;
+  padding-left: 18px;
+}
+
+.info-tooltip ol li {
+  margin-bottom: 2px;
+}
+
+/* TTS credit status */
+#tts-credit-status {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-top: 4px;
+}
+
+#tts-credit-status.status-ok {
+  color: #2a7d2a;
+  background: #e8f5e9;
+}
+
+#tts-credit-status.status-low {
+  color: #b86e00;
+  background: #fff3e0;
+}
+
+#tts-credit-status.status-error {
+  color: #cc0000;
+  background: #ffeaea;
+}
+
+#tts-credit-status.status-loading {
+  color: var(--text-dim);
+}
+
 /* Emergency view — in-panel tab */
 #emrg-panel-header {
   display: flex;

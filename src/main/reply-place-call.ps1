@@ -1,6 +1,6 @@
 # reply-place-call.ps1
-# Uses UI Automation to find the reply ComboBox (same approach as read-place-call.ps1).
-# Selects reply via keyboard (Home + Down keys), Tab to Send button, Enter.
+# Finds the reply control in the Place Call dialog (TListBox or TComboBox).
+# Selects the reply by index, clicks "Send request/message" button.
 # If a parameter dialog appears (e.g. "Enter train"), types headcode and presses Enter.
 # After sending, reads the TMemo response text and returns it.
 #
@@ -59,13 +59,22 @@ public class PlaceCallReply {
     public delegate bool EnumCallback(IntPtr hWnd, IntPtr lParam);
 
     public const uint KEYEVENTF_KEYUP = 0x0002;
-    public const byte VK_DOWN  = 0x28;
-    public const byte VK_HOME  = 0x24;
-    public const byte VK_TAB   = 0x09;
+    public const byte VK_DOWN   = 0x28;
+    public const byte VK_HOME   = 0x24;
+    public const byte VK_TAB    = 0x09;
     public const byte VK_RETURN = 0x0D;
+
+    // ComboBox messages
     public const int CB_GETCOUNT    = 0x0146;
     public const int CB_GETLBTEXT   = 0x0148;
     public const int CB_GETLBTEXTLEN = 0x0149;
+
+    // ListBox messages
+    public const int LB_GETCOUNT    = 0x018B;
+    public const int LB_GETTEXT     = 0x0189;
+    public const int LB_GETTEXTLEN  = 0x018A;
+    public const int LB_SETCURSEL   = 0x0186;
+
     public const int BM_CLICK = 0x00F5;
     public const int SW_RESTORE = 9;
 
@@ -75,16 +84,31 @@ public class PlaceCallReply {
         keybd_event(vk, 0, KEYEVENTF_KEYUP, IntPtr.Zero);
     }
 
+    // ComboBox helpers
     public static int GetComboCount(IntPtr hWnd) {
         return (int)SendMessage(hWnd, CB_GETCOUNT, IntPtr.Zero, IntPtr.Zero);
     }
-
     public static string GetComboText(IntPtr hWnd, int index) {
         int len = (int)SendMessage(hWnd, CB_GETLBTEXTLEN, (IntPtr)index, IntPtr.Zero);
         if (len <= 0) return "";
         StringBuilder sb = new StringBuilder(len + 1);
         SendMessageSb(hWnd, CB_GETLBTEXT, (IntPtr)index, sb);
         return sb.ToString();
+    }
+
+    // ListBox helpers
+    public static int GetListBoxCount(IntPtr hWnd) {
+        return (int)SendMessage(hWnd, LB_GETCOUNT, IntPtr.Zero, IntPtr.Zero);
+    }
+    public static string GetListBoxText(IntPtr hWnd, int index) {
+        int len = (int)SendMessage(hWnd, LB_GETTEXTLEN, (IntPtr)index, IntPtr.Zero);
+        if (len <= 0) return "";
+        StringBuilder sb = new StringBuilder(len + 1);
+        SendMessageSb(hWnd, LB_GETTEXT, (IntPtr)index, sb);
+        return sb.ToString();
+    }
+    public static void SetListBoxSel(IntPtr hWnd, int index) {
+        SendMessage(hWnd, LB_SETCURSEL, (IntPtr)index, IntPtr.Zero);
     }
 
     public static void HideOffScreen(IntPtr hWnd) {
@@ -202,17 +226,65 @@ try {
         [PlaceCallReply]::HideOffScreen($dialogHwnd)
     }
 
-    # Find all TComboBox controls via UI Automation
-    $comboCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-        "TComboBox"
-    )
-    $allCombos = $dialog.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $comboCond
-    )
+    $replyKeywords = "^(Request|Message|Send|Cancel|Pass|Hold|Block|Continue|Ask|Authoris|Please)"
+    $replyControlHwnd = [IntPtr]::Zero
+    $replyControlType = ""  # "listbox" or "combo"
 
-    # Check if "Send request/message" button exists (confirms we're connected)
+    # 1) Check TListBox controls first
+    $listCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+        "TListBox"
+    )
+    $allLists = $dialog.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $listCond
+    )
+    foreach ($lb in $allLists) {
+        $hw = [IntPtr]$lb.Current.NativeWindowHandle
+        if ($hw -eq [IntPtr]::Zero) { continue }
+        $cnt = [PlaceCallReply]::GetListBoxCount($hw)
+        if ($cnt -gt 0) {
+            $firstItem = [PlaceCallReply]::GetListBoxText($hw, 0)
+            if ($firstItem -match $replyKeywords) {
+                $replyControlHwnd = $hw
+                $replyControlType = "listbox"
+                break
+            }
+        }
+    }
+
+    # 2) If no listbox, check TComboBox controls
+    if ($replyControlHwnd -eq [IntPtr]::Zero) {
+        $comboCond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+            "TComboBox"
+        )
+        $allCombos = $dialog.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $comboCond
+        )
+        foreach ($combo in $allCombos) {
+            $hw = [IntPtr]$combo.Current.NativeWindowHandle
+            if ($hw -eq [IntPtr]::Zero) { continue }
+            $cnt = [PlaceCallReply]::GetComboCount($hw)
+            if ($cnt -gt 0) {
+                $firstItem = [PlaceCallReply]::GetComboText($hw, 0)
+                if ($firstItem -match $replyKeywords) {
+                    $replyControlHwnd = $hw
+                    $replyControlType = "combo"
+                    break
+                }
+            }
+        }
+    }
+
+    if ($replyControlHwnd -eq [IntPtr]::Zero) {
+        [PlaceCallReply]::HideOffScreen($dialogHwnd)
+        Write-Output '{"error":"Reply control not found (no TListBox or TComboBox with reply items)"}'
+        exit 0
+    }
+
+    # Find the "Send request/message" button
     $sendBtnCond = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::NameProperty,
         "Send request/message"
@@ -221,83 +293,46 @@ try {
         [System.Windows.Automation.TreeScope]::Descendants,
         $sendBtnCond
     )
+    $sendBtnHwnd = if ($null -ne $sendBtn) { [IntPtr]$sendBtn.Current.NativeWindowHandle } else { [IntPtr]::Zero }
 
-    # Identify the reply ComboBox by content — first item starts with reply keywords
-    $replyKeywords = "^(Request|Message|Send|Cancel|Pass|Hold|Block|Continue|Ask|Authoris|Please)"
-    $replyComboHwnd = [IntPtr]::Zero
-    $replyCount = 0
-
-    foreach ($combo in $allCombos) {
-        $hw = [IntPtr]$combo.Current.NativeWindowHandle
-        if ($hw -eq [IntPtr]::Zero) { continue }
-        $cnt = [PlaceCallReply]::GetComboCount($hw)
-        if ($cnt -gt 0) {
-            $firstItem = [PlaceCallReply]::GetComboText($hw, 0)
-            if ($firstItem -match $replyKeywords) {
-                $replyComboHwnd = $hw
-                $replyCount = $cnt
-                break
-            }
-        }
-    }
-
-    # Fallback: if keyword match failed but Send button exists, pick combo with longest first item
-    if ($replyComboHwnd -eq [IntPtr]::Zero -and $null -ne $sendBtn -and $allCombos.Count -ge 2) {
-        foreach ($combo in $allCombos) {
-            $hw = [IntPtr]$combo.Current.NativeWindowHandle
-            if ($hw -eq [IntPtr]::Zero) { continue }
-            $cnt = [PlaceCallReply]::GetComboCount($hw)
-            if ($cnt -gt 0) {
-                $firstItem = [PlaceCallReply]::GetComboText($hw, 0)
-                if ($firstItem.Length -gt 20) {
-                    $replyComboHwnd = $hw
-                    $replyCount = $cnt
-                    break
-                }
-            }
-        }
-    }
-
-    if ($replyComboHwnd -eq [IntPtr]::Zero) {
-        # Debug: dump all combo info
-        $debugParts = @("combos=$($allCombos.Count)")
-        $ci = 0
-        foreach ($combo in $allCombos) {
-            $hw = [IntPtr]$combo.Current.NativeWindowHandle
-            if ($hw -eq [IntPtr]::Zero) { $ci++; continue }
-            $cnt = [PlaceCallReply]::GetComboCount($hw)
-            $first = ""
-            if ($cnt -gt 0) { $first = [PlaceCallReply]::GetComboText($hw, 0) }
-            $debugParts += "c${ci}=${cnt}items"
-            if ($first) { $debugParts += "c${ci}first=$first" }
-            $ci++
-        }
-        $debugStr = ($debugParts -join "; ") -replace '"', "'" -replace "`n", " " -replace "`r", ""
-        [PlaceCallReply]::HideOffScreen($dialogHwnd)
-        Write-Output "{`"error`":`"Reply ComboBox not found`",`"debug`":`"$debugStr`"}"
-        exit 0
-    }
-
-    # Restore & foreground the dialog for keyboard focus (stays off-screen)
+    # Restore & foreground the dialog for interaction
     [PlaceCallReply]::ShowWindow($dialogHwnd, 9) | Out-Null
     [PlaceCallReply]::SetForegroundWindow($dialogHwnd) | Out-Null
     Start-Sleep -Milliseconds 200
 
-    # Focus the reply ComboBox and navigate to the desired index
-    [PlaceCallReply]::FocusControl($dialogHwnd, $replyComboHwnd)
-    Start-Sleep -Milliseconds 100
-    [PlaceCallReply]::PressKey([PlaceCallReply]::VK_HOME)
-    Start-Sleep -Milliseconds 50
+    if ($replyControlType -eq "listbox") {
+        # For TListBox: use LB_SETCURSEL to select the item, then click Send button
+        [PlaceCallReply]::SetListBoxSel($replyControlHwnd, $ReplyIndex)
+        Start-Sleep -Milliseconds 100
 
-    for ($i = 0; $i -lt $ReplyIndex; $i++) {
-        [PlaceCallReply]::PressKey([PlaceCallReply]::VK_DOWN)
+        # Click the "Send request/message" button
+        if ($sendBtnHwnd -ne [IntPtr]::Zero) {
+            [PlaceCallReply]::SendMessage($sendBtnHwnd, [PlaceCallReply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        } else {
+            # Fallback: focus listbox, Tab to button, Enter
+            [PlaceCallReply]::FocusControl($dialogHwnd, $replyControlHwnd)
+            Start-Sleep -Milliseconds 100
+            [PlaceCallReply]::PressKey([PlaceCallReply]::VK_TAB)
+            Start-Sleep -Milliseconds 100
+            [PlaceCallReply]::PressKey([PlaceCallReply]::VK_RETURN)
+        }
+    } else {
+        # For TComboBox: focus, Home + Down keys to navigate, Tab to button, Enter
+        [PlaceCallReply]::FocusControl($dialogHwnd, $replyControlHwnd)
+        Start-Sleep -Milliseconds 100
+        [PlaceCallReply]::PressKey([PlaceCallReply]::VK_HOME)
         Start-Sleep -Milliseconds 50
-    }
 
-    # Tab to the "Send request/message" button and press Enter
-    [PlaceCallReply]::PressKey([PlaceCallReply]::VK_TAB)
-    Start-Sleep -Milliseconds 100
-    [PlaceCallReply]::PressKey([PlaceCallReply]::VK_RETURN)
+        for ($i = 0; $i -lt $ReplyIndex; $i++) {
+            [PlaceCallReply]::PressKey([PlaceCallReply]::VK_DOWN)
+            Start-Sleep -Milliseconds 50
+        }
+
+        # Tab to the "Send request/message" button and press Enter
+        [PlaceCallReply]::PressKey([PlaceCallReply]::VK_TAB)
+        Start-Sleep -Milliseconds 100
+        [PlaceCallReply]::PressKey([PlaceCallReply]::VK_RETURN)
+    }
 
     # Poll for parameter dialog (e.g. "Confirmation required" with edit box for headcode)
     Add-Type -AssemblyName System.Windows.Forms
@@ -340,7 +375,7 @@ try {
     # Wait a moment for SimSig to update the TMemo response
     Start-Sleep -Milliseconds 500
 
-    # Read the TMemo response text (same approach as read-place-call.ps1)
+    # Read the TMemo response text
     $responseText = ""
 
     # Re-find the dialog in case it refreshed
@@ -369,12 +404,9 @@ try {
         }
     }
 
-    $result = @{
-        success  = $true
-        response = $responseText
-    }
-    $json = $result | ConvertTo-Json -Compress -Depth 3
-    Write-Output $json
+    $escapedResp = ($responseText -replace '\\', '\\\\' -replace '"', '\"' -replace "`n", '\n' -replace "`r", '')
+    Write-Output "{`"success`":true,`"response`":`"$escapedResp`"}"
 } catch {
-    Write-Output "{`"error`":`"$($_.Exception.Message)`"}"
+    $escapedErr = ($_.Exception.Message -replace '\\', '\\\\' -replace '"', '\"' -replace "`n", ' ' -replace "`r", '')
+    Write-Output "{`"error`":`"$escapedErr`"}"
 }

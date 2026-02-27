@@ -1,6 +1,6 @@
 # read-place-call.ps1
 # Reads the SimSig "Place Call" (TDialForm) dialog state after dialing.
-# When connected, replies are in a TComboBox (not TListBox).
+# Reply options may be in a TListBox (multi-option) or TComboBox (single request).
 # Outputs JSON: { "connected": true/false, "message": "...", "replies": [...] }
 
 Add-Type -AssemblyName UIAutomationClient | Out-Null
@@ -23,9 +23,14 @@ public class PlaceCallReader {
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
     // ComboBox messages
-    public const int CB_GETCOUNT = 0x0146;
-    public const int CB_GETLBTEXT = 0x0148;
+    public const int CB_GETCOUNT    = 0x0146;
+    public const int CB_GETLBTEXT   = 0x0148;
     public const int CB_GETLBTEXTLEN = 0x0149;
+
+    // ListBox messages
+    public const int LB_GETCOUNT    = 0x018B;
+    public const int LB_GETTEXT     = 0x0189;
+    public const int LB_GETTEXTLEN  = 0x018A;
 
     public static int GetComboCount(IntPtr hWnd) {
         return (int)SendMessage(hWnd, CB_GETCOUNT, IntPtr.Zero, IntPtr.Zero);
@@ -36,6 +41,18 @@ public class PlaceCallReader {
         if (len <= 0) return "";
         StringBuilder sb = new StringBuilder(len + 1);
         SendMessage(hWnd, CB_GETLBTEXT, (IntPtr)index, sb);
+        return sb.ToString();
+    }
+
+    public static int GetListBoxCount(IntPtr hWnd) {
+        return (int)SendMessage(hWnd, LB_GETCOUNT, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    public static string GetListBoxText(IntPtr hWnd, int index) {
+        int len = (int)SendMessage(hWnd, LB_GETTEXTLEN, (IntPtr)index, IntPtr.Zero);
+        if (len <= 0) return "";
+        StringBuilder sb = new StringBuilder(len + 1);
+        SendMessage(hWnd, LB_GETTEXT, (IntPtr)index, sb);
         return sb.ToString();
     }
 
@@ -69,42 +86,29 @@ try {
         [PlaceCallReader]::HideOffScreen($dialogHwnd)
     }
 
-    # Check if "Send request/message" button exists (only present when connected)
-    $sendBtnCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::NameProperty,
-        "Send request/message"
-    )
-    $sendBtn = $dialog.FindFirst(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $sendBtnCond
-    )
-
-    # Find all TComboBox controls
-    $comboCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-        "TComboBox"
-    )
-    $allCombos = $dialog.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $comboCond
-    )
-
-    # Identify the reply ComboBox by keyword matching on first item.
-    # The reply combo has request/message items; the contacts combo has location names.
-    $replyComboHwnd = [IntPtr]::Zero
-    $replyItems = @()
     $replyKeywords = "^(Request|Message|Send|Cancel|Pass|Hold|Block|Continue|Ask|Authoris|Please)"
+    $replyItems = @()
+    $replyControlType = ""  # "listbox" or "combo"
 
-    foreach ($combo in $allCombos) {
-        $hw = [IntPtr]$combo.Current.NativeWindowHandle
+    # 1) Check TListBox controls first — reply options are typically in a listbox
+    $listCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+        "TListBox"
+    )
+    $allLists = $dialog.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $listCond
+    )
+    foreach ($lb in $allLists) {
+        $hw = [IntPtr]$lb.Current.NativeWindowHandle
         if ($hw -eq [IntPtr]::Zero) { continue }
-        $cnt = [PlaceCallReader]::GetComboCount($hw)
+        $cnt = [PlaceCallReader]::GetListBoxCount($hw)
         if ($cnt -gt 0) {
-            $firstItem = [PlaceCallReader]::GetComboText($hw, 0)
+            $firstItem = [PlaceCallReader]::GetListBoxText($hw, 0)
             if ($firstItem -match $replyKeywords) {
-                $replyComboHwnd = $hw
+                $replyControlType = "listbox"
                 for ($i = 0; $i -lt $cnt; $i++) {
-                    $text = [PlaceCallReader]::GetComboText($hw, $i)
+                    $text = [PlaceCallReader]::GetListBoxText($hw, $i)
                     if ($text) { $replyItems += $text }
                 }
                 break
@@ -112,16 +116,24 @@ try {
         }
     }
 
-    # Fallback: pick the combo with the longest first item (request text vs location name)
-    if ($replyComboHwnd -eq [IntPtr]::Zero -and $allCombos.Count -ge 2) {
+    # 2) If no listbox match, check TComboBox controls (single-request style like "Please block...")
+    if ($replyItems.Count -eq 0) {
+        $comboCond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+            "TComboBox"
+        )
+        $allCombos = $dialog.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $comboCond
+        )
         foreach ($combo in $allCombos) {
             $hw = [IntPtr]$combo.Current.NativeWindowHandle
             if ($hw -eq [IntPtr]::Zero) { continue }
             $cnt = [PlaceCallReader]::GetComboCount($hw)
             if ($cnt -gt 0) {
                 $firstItem = [PlaceCallReader]::GetComboText($hw, 0)
-                if ($firstItem.Length -gt 20) {
-                    $replyComboHwnd = $hw
+                if ($firstItem -match $replyKeywords) {
+                    $replyControlType = "combo"
                     for ($i = 0; $i -lt $cnt; $i++) {
                         $text = [PlaceCallReader]::GetComboText($hw, $i)
                         if ($text) { $replyItems += $text }
@@ -132,12 +144,23 @@ try {
         }
     }
 
-    # Connected = reply combo found with items
-    if ($replyComboHwnd -eq [IntPtr]::Zero -or $replyItems.Count -eq 0) {
-        # Not connected yet — dump debug info
-        $debugParts = @("combos=$($allCombos.Count)")
+    # Connected = reply items found (in either listbox or combo)
+    if ($replyItems.Count -eq 0) {
+        # Not connected yet — dump debug info about all controls
+        $debugParts = @()
+
+        # Combos
+        $comboCond2 = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+            "TComboBox"
+        )
+        $allCombos2 = $dialog.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $comboCond2
+        )
+        $debugParts += "combos=$($allCombos2.Count)"
         $ci = 0
-        foreach ($combo in $allCombos) {
+        foreach ($combo in $allCombos2) {
             $hw = [IntPtr]$combo.Current.NativeWindowHandle
             if ($hw -eq [IntPtr]::Zero) { $ci++; continue }
             $cnt = [PlaceCallReader]::GetComboCount($hw)
@@ -147,6 +170,22 @@ try {
             if ($first) { $debugParts += "c${ci}first=$first" }
             $ci++
         }
+
+        # Listboxes
+        $debugParts += "listboxes=$($allLists.Count)"
+        $li = 0
+        foreach ($lb in $allLists) {
+            $hw = [IntPtr]$lb.Current.NativeWindowHandle
+            if ($hw -eq [IntPtr]::Zero) { $li++; continue }
+            $cnt = [PlaceCallReader]::GetListBoxCount($hw)
+            $first = ""
+            if ($cnt -gt 0) { $first = [PlaceCallReader]::GetListBoxText($hw, 0) }
+            $debugParts += "lb${li}=${cnt}items"
+            if ($first) { $debugParts += "lb${li}first=$first" }
+            $li++
+        }
+
+        # Buttons
         $btnCond = New-Object System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::ClassNameProperty,
             "TButton"
@@ -186,7 +225,7 @@ try {
         $repliesJson += "`"$escaped`""
     }
     $repliesArr = "[" + ($repliesJson -join ",") + "]"
-    Write-Output "{`"connected`":true,`"message`":`"$escapedMsg`",`"replies`":$repliesArr}"
+    Write-Output "{`"connected`":true,`"message`":`"$escapedMsg`",`"replies`":$repliesArr,`"replyControl`":`"$replyControlType`"}"
 } catch {
     Write-Output "{`"connected`":false,`"error`":`"$($_.Exception.Message)`"}"
 }

@@ -3,7 +3,7 @@ const channels = require('../shared/ipc-channels');
 const settings = require('./settings');
 const { updateClock, updateClockTime, getClockState, formatTime } = require('./clock');
 const { execFile } = require('child_process');
-const https = require('https');
+const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 const StompConnectionManager = require('./stomp-client');
 const PhoneReader = require('./phone-reader');
 
@@ -20,11 +20,48 @@ const HIDE_ANSWER_SCRIPT = require('path').join(__dirname, 'hide-answer-dialog.p
 
 const globalPtt = require('./global-ptt');
 
-const ELEVENLABS_API_KEY = '3998465c5e3d9716316d59035e326752511cb408fb6bb94e37bf7d1df273dc54';
 
 let stompManager = null;
 let phoneReader = null;
 let ttsVoicesCache = null;
+let elevenLabsVoicesCache = null;
+
+// Convert Float32 PCM samples to a 16-bit WAV buffer
+function float32ToWav(samples, sampleRate) {
+  const numSamples = samples.length;
+  const byteRate = sampleRate * 2; // 16-bit mono
+  const blockAlign = 2;
+  const dataSize = numSamples * 2;
+  const buffer = Buffer.alloc(44 + dataSize);
+
+  // RIFF header
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write('WAVE', 8);
+
+  // fmt chunk
+  buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16);           // chunk size
+  buffer.writeUInt16LE(1, 20);            // PCM format
+  buffer.writeUInt16LE(1, 22);            // mono
+  buffer.writeUInt32LE(sampleRate, 24);   // sample rate
+  buffer.writeUInt32LE(byteRate, 28);     // byte rate
+  buffer.writeUInt16LE(blockAlign, 32);   // block align
+  buffer.writeUInt16LE(16, 34);           // bits per sample
+
+  // data chunk
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(dataSize, 40);
+
+  // Convert Float32 [-1, 1] to Int16
+  for (let i = 0; i < numSamples; i++) {
+    let s = Math.max(-1, Math.min(1, samples[i]));
+    s = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    buffer.writeInt16LE(Math.round(s), 44 + i * 2);
+  }
+
+  return buffer;
+}
 
 function sendToAllWindows(channel, data) {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -45,6 +82,14 @@ function registerIpcHandlers() {
   ipcMain.handle(channels.SETTINGS_GET, (_event, key) => settings.get(key));
   ipcMain.handle(channels.SETTINGS_SET, (_event, key, value) => {
     settings.set(key, value);
+    // Invalidate TTS caches when provider or API key changes
+    if (key === 'tts.provider') {
+      ttsVoicesCache = null;
+      elevenLabsVoicesCache = null;
+    }
+    if (key === 'tts.elevenLabsApiKey') {
+      elevenLabsVoicesCache = null;
+    }
   });
   ipcMain.handle(channels.SETTINGS_GET_ALL, () => settings.getAll());
 
@@ -138,8 +183,11 @@ function registerIpcHandlers() {
       );
       phoneReader.startPolling(2000);
 
-      // Pre-fetch ElevenLabs voices in background so first TTS is instant
-      prefetchVoices().catch(() => {});
+      // Pre-warm Edge TTS instances in background so first TTS is instant
+      const ttsProvider = settings.get('tts.provider') || 'edge';
+      if (ttsProvider === 'edge') {
+        prefetchVoices().catch(() => {});
+      }
     } catch (err) {
       console.error('[Gateway] Connection failed:', err);
       sendToMainWindow(channels.CONNECTION_STATUS, { status: 'error', error: err.message });
@@ -414,192 +462,359 @@ function registerIpcHandlers() {
     createMessageLogWindow();
   });
 
-  // TTS — ElevenLabs (account voices + shared library for more British voices)
-  function fetchJSON(url, apiKey) {
-    return new Promise((resolve) => {
-      const req = https.request(url, {
-        method: 'GET',
-        headers: { 'xi-api-key': apiKey },
-      }, (res) => {
-        const chunks = [];
-        res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () => {
-          if (res.statusCode !== 200) {
-            console.error(`[TTS] API error ${res.statusCode} for ${url}: ${Buffer.concat(chunks).toString().slice(0, 200)}`);
-            resolve(null);
-            return;
-          }
-          try { resolve(JSON.parse(Buffer.concat(chunks).toString())); }
-          catch { resolve(null); }
-        });
-      });
-      req.on('error', () => resolve(null));
-      req.end();
+  // TTS — ElevenLabs (premium paid voices, requires API key)
+  const ELEVENLABS_API_BASE = 'https://api.elevenlabs.io';
+
+  // Only show British accents relevant to UK railway workers
+  const ELEVENLABS_ALLOWED_ACCENTS = [
+    'british', 'british-essex', 'british-swedish',
+    'english-italian', 'english-swedish',
+  ];
+
+  async function fetchElevenLabsVoices(apiKey) {
+    if (elevenLabsVoicesCache) return elevenLabsVoicesCache;
+
+    const response = await fetch(`${ELEVENLABS_API_BASE}/v2/voices?page_size=100`, {
+      headers: { 'xi-api-key': apiKey },
     });
+    if (!response.ok) {
+      throw new Error(`ElevenLabs API error: ${response.status} ${response.statusText}`);
+    }
+    const data = await response.json();
+
+    // Log all accents found so we can refine the filter
+    const allAccents = [...new Set((data.voices || []).map((v) => v.labels?.accent).filter(Boolean))];
+    console.log('[TTS] ElevenLabs accents available:', allAccents.join(', '));
+
+    const voices = (data.voices || [])
+      .filter((v) => {
+        const lang = (v.labels?.language || '').toLowerCase();
+        if (lang !== 'english' && !lang.startsWith('en')) return false;
+        const accent = (v.labels?.accent || '').toLowerCase();
+        return ELEVENLABS_ALLOWED_ACCENTS.some((a) => accent.includes(a));
+      })
+      .map((v) => ({
+        id: `el-${v.voice_id}`,
+        name: v.name,
+        accent: v.labels?.accent || 'unknown',
+        gender: v.labels?.gender || 'unknown',
+      }));
+
+    console.log(`[TTS] ${voices.length} ElevenLabs British voices loaded (from ${(data.voices || []).length} total)`);
+    elevenLabsVoicesCache = voices;
+    return voices;
   }
 
-  // Only use these specific voices for driver TTS
-  const ALLOWED_VOICE_NAMES = new Set([
-    'Archer',
-    'Benedict - Smooth British Narrator',
-    'Bradford - British Narrator, Storyteller',
-    'Russell - Dramatic British TV',
-    'Eastend Steve',
-    'Yowz - South London',
-    'Tom',
-    'John Smith',
-    'George',
-    'Jobi',
-  ]);
+  async function speakElevenLabs(text, voiceId, apiKey) {
+    const realVoiceId = voiceId.startsWith('el-') ? voiceId.slice(3) : voiceId;
+
+    const response = await fetch(
+      `${ELEVENLABS_API_BASE}/v1/text-to-speech/${realVoiceId}?output_format=mp3_44100_128`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'xi-api-key': apiKey,
+        },
+        body: JSON.stringify({
+          text,
+          model_id: 'eleven_flash_v2_5',
+          voice_settings: {
+            stability: 0.3,
+            similarity_boost: 0.75,
+            style: 0.4,
+            speed: 1.2,
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => '');
+      throw new Error(`ElevenLabs TTS error: ${response.status} ${errBody}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    return Array.from(new Uint8Array(arrayBuffer));
+  }
+
+  // TTS — Edge TTS (free Microsoft neural voices, no API key needed)
+  // Subtle pitch/rate tweaks per voice to sound like distinct real people
+  const EDGE_VOICES = [
+    // British male
+    { id: 'edge-0',  name: 'Ryan',      voice: 'en-GB-RyanNeural',                accent: 'british',      gender: 'male',   pitch: '-18Hz',  rate: 1.29 },
+    { id: 'edge-1',  name: 'Thomas',    voice: 'en-GB-ThomasNeural',              accent: 'british',      gender: 'male',   pitch: '-5Hz',   rate: 1.23 },
+    // British female
+    { id: 'edge-2',  name: 'Sonia',     voice: 'en-GB-SoniaNeural',               accent: 'british',      gender: 'female', pitch: '-15Hz',  rate: 1.27 },
+    { id: 'edge-3',  name: 'Libby',     voice: 'en-GB-LibbyNeural',               accent: 'british',      gender: 'female', pitch: '-7Hz',   rate: 1.21 },
+    { id: 'edge-4',  name: 'Maisie',    voice: 'en-GB-MaisieNeural',              accent: 'british',      gender: 'female', pitch: '-10Hz',  rate: 1.25 },
+    // Irish
+    { id: 'edge-5',  name: 'Connor',    voice: 'en-IE-ConnorNeural',              accent: 'irish',        gender: 'male',   pitch: '-14Hz',  rate: 1.25 },
+    { id: 'edge-6',  name: 'Emily',     voice: 'en-IE-EmilyNeural',               accent: 'irish',        gender: 'female', pitch: '-10Hz',  rate: 1.23 },
+    // Australian
+    { id: 'edge-7',  name: 'William',   voice: 'en-AU-WilliamMultilingualNeural', accent: 'australian',   gender: 'male',   pitch: '-16Hz',  rate: 1.27 },
+    { id: 'edge-8',  name: 'Natasha',   voice: 'en-AU-NatashaNeural',             accent: 'australian',   gender: 'female', pitch: '-10Hz',  rate: 1.21 },
+    // New Zealand
+    { id: 'edge-9',  name: 'Mitchell',  voice: 'en-NZ-MitchellNeural',            accent: 'new zealand',  gender: 'male',   pitch: '-13Hz',  rate: 1.25 },
+    { id: 'edge-10', name: 'Molly',     voice: 'en-NZ-MollyNeural',               accent: 'new zealand',  gender: 'female', pitch: '-6Hz',   rate: 1.23 },
+    // Canadian
+    { id: 'edge-11', name: 'Liam',      voice: 'en-CA-LiamNeural',                accent: 'canadian',     gender: 'male',   pitch: '-15Hz',  rate: 1.27 },
+    { id: 'edge-12', name: 'Clara',     voice: 'en-CA-ClaraNeural',               accent: 'canadian',     gender: 'female', pitch: '-10Hz',  rate: 1.25 },
+    // Hong Kong English
+    { id: 'edge-13', name: 'Sam',       voice: 'en-HK-SamNeural',                 accent: 'hong kong',    gender: 'male',   pitch: '-14Hz',  rate: 1.23 },
+    { id: 'edge-14', name: 'Yan',       voice: 'en-HK-YanNeural',                 accent: 'hong kong',    gender: 'female', pitch: '-10Hz',  rate: 1.21 },
+    // Philippine English
+    { id: 'edge-15', name: 'James',     voice: 'en-PH-JamesNeural',               accent: 'philippine',   gender: 'male',   pitch: '-13Hz',  rate: 1.25 },
+    { id: 'edge-16', name: 'Rosa',      voice: 'en-PH-RosaNeural',                accent: 'philippine',   gender: 'female', pitch: '-10Hz',  rate: 1.23 },
+    // Singaporean English
+    { id: 'edge-17', name: 'Wayne',     voice: 'en-SG-WayneNeural',               accent: 'singaporean',  gender: 'male',   pitch: '-15Hz',  rate: 1.27 },
+    { id: 'edge-18', name: 'Luna',      voice: 'en-SG-LunaNeural',                accent: 'singaporean',  gender: 'female', pitch: '-10Hz',  rate: 1.23 },
+    // Tanzanian English
+    { id: 'edge-19', name: 'Elimu',     voice: 'en-TZ-ElimuNeural',               accent: 'tanzanian',    gender: 'male',   pitch: '-14Hz',  rate: 1.25 },
+    { id: 'edge-20', name: 'Imani',     voice: 'en-TZ-ImaniNeural',               accent: 'tanzanian',    gender: 'female', pitch: '-10Hz',  rate: 1.21 },
+  ];
+
+  // Cache MsEdgeTTS instances per base voice for reuse
+  const ttsInstances = {};
+
+  async function getOrCreateTTS(voiceName) {
+    if (ttsInstances[voiceName]) return ttsInstances[voiceName];
+    const tts = new MsEdgeTTS();
+    await tts.setMetadata(voiceName, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+    ttsInstances[voiceName] = tts;
+    return tts;
+  }
 
   async function prefetchVoices() {
     if (ttsVoicesCache) return ttsVoicesCache;
-
-    const mapVoice = (v) => ({
-      id: v.voice_id,
-      name: v.name,
-      accent: v.labels?.accent || v.accent || '',
-      gender: v.labels?.gender || v.gender || '',
-    });
-
-    const accountData = await fetchJSON('https://api.elevenlabs.io/v1/voices', ELEVENLABS_API_KEY);
-    const allVoices = (accountData?.voices || []).map(mapVoice);
-    const allowed = allVoices.filter((v) => ALLOWED_VOICE_NAMES.has(v.name));
-
-    if (allowed.length === 0) {
-      console.warn(`[TTS] No allowed voices found in account (${allVoices.length} total)`);
-      ttsVoicesCache = allVoices;
-      return allVoices;
-    }
-
-    ttsVoicesCache = allowed;
-    console.log(`[TTS] ${allowed.length} allowed voices ready`);
-    return allowed;
+    // Pre-warm TTS instances so first speak is fast
+    const uniqueBaseVoices = [...new Set(EDGE_VOICES.map((v) => v.voice))];
+    await Promise.allSettled(uniqueBaseVoices.map((v) => getOrCreateTTS(v)));
+    console.log(`[TTS] ${EDGE_VOICES.length} Edge TTS voices ready (${uniqueBaseVoices.length} base voices)`);
+    ttsVoicesCache = EDGE_VOICES.map(({ id, name, accent, gender }) => ({ id, name, accent, gender }));
+    return ttsVoicesCache;
   }
 
-  ipcMain.handle(channels.TTS_GET_VOICES, () => prefetchVoices());
+  ipcMain.handle(channels.TTS_GET_VOICES, async () => {
+    const provider = settings.get('tts.provider') || 'edge';
 
-  ipcMain.handle(channels.TTS_SPEAK, (_event, text, voiceId) => {
-    if (!voiceId) return null;
-
-    const body = JSON.stringify({
-      text,
-      model_id: 'eleven_flash_v2_5',
-      voice_settings: { stability: 0.75, similarity_boost: 0.75, speed: 1.0 },
-    });
-
-    const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?optimize_streaming_latency=4&output_format=mp3_22050_32`;
-
-    return new Promise((resolve) => {
-      const req = https.request(url, {
-        method: 'POST',
-        headers: {
-          'xi-api-key': ELEVENLABS_API_KEY,
-          'Content-Type': 'application/json',
-        },
-      }, (res) => {
-        const chunks = [];
-        res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () => {
-          if (res.statusCode !== 200) {
-            const errBody = Buffer.concat(chunks).toString().slice(0, 200);
-            console.error(`[TTS] API error ${res.statusCode}: ${errBody}`);
-            resolve(null);
-            return;
-          }
-          resolve(Array.from(Buffer.concat(chunks)));
-        });
-      });
-      req.on('error', (err) => {
-        console.error('[TTS] Request error:', err.message);
-        resolve(null);
-      });
-      req.write(body);
-      req.end();
-    });
-  });
-
-  // STT — ElevenLabs Scribe (preferred) or Windows Speech Recognition (fallback)
-  ipcMain.handle(channels.STT_TRANSCRIBE, (_event, audioData) => {
-    // Use ElevenLabs STT if audio data provided
-    if (audioData && audioData.length > 0) {
-      return new Promise((resolve) => {
-        console.log(`[STT] Using ElevenLabs Scribe (${audioData.length} bytes)...`);
-
-        const boundary = '----ElevenLabsBoundary' + Date.now();
-        const audioBuffer = Buffer.from(audioData);
-
-        // Build multipart form data — each part as a separate Buffer
-        const CRLF = '\r\n';
-        const bodyParts = [];
-        // model_id field
-        bodyParts.push(Buffer.from(
-          `--${boundary}${CRLF}` +
-          `Content-Disposition: form-data; name="model_id"${CRLF}${CRLF}` +
-          `scribe_v1${CRLF}`
-        ));
-        // language_code field
-        bodyParts.push(Buffer.from(
-          `--${boundary}${CRLF}` +
-          `Content-Disposition: form-data; name="language_code"${CRLF}${CRLF}` +
-          `en${CRLF}`
-        ));
-        // file field header
-        bodyParts.push(Buffer.from(
-          `--${boundary}${CRLF}` +
-          `Content-Disposition: form-data; name="file"; filename="audio.webm"${CRLF}` +
-          `Content-Type: audio/webm${CRLF}${CRLF}`
-        ));
-        // file binary data
-        bodyParts.push(audioBuffer);
-        // closing boundary
-        bodyParts.push(Buffer.from(`${CRLF}--${boundary}--${CRLF}`));
-        const body = Buffer.concat(bodyParts);
-
-        const req = https.request('https://api.elevenlabs.io/v1/speech-to-text', {
-          method: 'POST',
-          headers: {
-            'xi-api-key': ELEVENLABS_API_KEY,
-            'Content-Type': `multipart/form-data; boundary=${boundary}`,
-            'Content-Length': body.length,
-          },
-        }, (res) => {
-          const chunks = [];
-          res.on('data', (chunk) => chunks.push(chunk));
-          res.on('end', () => {
-            const responseText = Buffer.concat(chunks).toString();
-            if (res.statusCode !== 200) {
-              console.error(`[STT] ElevenLabs API error ${res.statusCode}: ${responseText.slice(0, 200)}`);
-              resolve({ error: `API error ${res.statusCode}` });
-              return;
-            }
-            try {
-              const data = JSON.parse(responseText);
-              const text = (data.text || '').trim();
-              console.log(`[STT] ElevenLabs result: "${text}"`);
-              resolve(text);
-            } catch (parseErr) {
-              console.error('[STT] Parse error:', parseErr.message);
-              resolve({ error: 'Failed to parse STT response' });
-            }
-          });
-        });
-        req.on('error', (err) => {
-          console.error('[STT] ElevenLabs request error:', err.message);
-          resolve({ error: err.message });
-        });
-        req.write(body);
-        req.end();
-      });
+    if (provider === 'windows') {
+      return { provider: 'windows' };
     }
 
-    // Fallback: Windows Speech Recognition
+    if (provider === 'elevenlabs') {
+      const apiKey = (settings.get('tts.elevenLabsApiKey') || '').trim();
+      if (!apiKey) {
+        console.warn('[TTS] No ElevenLabs API key configured');
+        return [];
+      }
+      try {
+        return await fetchElevenLabsVoices(apiKey);
+      } catch (err) {
+        console.error('[TTS] ElevenLabs voices fetch failed:', err.message);
+        return [];
+      }
+    }
+
+    // Default: Edge TTS
+    if (ttsVoicesCache) return ttsVoicesCache;
+    return prefetchVoices();
+  });
+
+  function collectStream(tts, inputText, prosody) {
+    return new Promise((resolve, reject) => {
+      const { audioStream } = tts.toStream(inputText, prosody);
+      const chunks = [];
+      audioStream.on('data', (chunk) => chunks.push(chunk));
+      audioStream.on('end', () => resolve(Buffer.concat(chunks)));
+      audioStream.on('error', (err) => reject(err));
+    });
+  }
+
+  async function speakEdgeTTS(text, voiceId) {
+    const voiceDef = EDGE_VOICES.find((v) => v.id === voiceId);
+    if (!voiceDef) {
+      console.error(`[TTS] Unknown Edge voice ID: ${voiceId}`);
+      return null;
+    }
+
+    const buildProsody = () => {
+      const p = {};
+      if (voiceDef.rate !== 1.0) p.rate = voiceDef.rate;
+      if (voiceDef.pitch !== '+0Hz') p.pitch = voiceDef.pitch;
+      return Object.keys(p).length > 0 ? p : undefined;
+    };
+
+    try {
+      const tts = await getOrCreateTTS(voiceDef.voice);
+      const buffer = await collectStream(tts, text, buildProsody());
+      if (buffer.length === 0) {
+        console.warn('[TTS] Empty audio returned, retrying with fresh instance...');
+        delete ttsInstances[voiceDef.voice];
+        const freshTts = await getOrCreateTTS(voiceDef.voice);
+        const retryBuffer = await collectStream(freshTts, text, buildProsody());
+        if (retryBuffer.length === 0) {
+          console.error('[TTS] Retry also returned empty audio');
+          return null;
+        }
+        return Array.from(retryBuffer);
+      }
+      return Array.from(buffer);
+    } catch (err) {
+      console.warn(`[TTS] Edge error (will retry): ${err.message}`);
+      delete ttsInstances[voiceDef.voice];
+      try {
+        const freshTts = await getOrCreateTTS(voiceDef.voice);
+        const buffer = await collectStream(freshTts, text, buildProsody());
+        if (buffer.length === 0) return null;
+        return Array.from(buffer);
+      } catch (retryErr) {
+        console.error('[TTS] Edge retry failed:', retryErr.message);
+        return null;
+      }
+    }
+  }
+
+  ipcMain.handle(channels.TTS_SPEAK, async (_event, text, voiceId) => {
+    if (!voiceId) return null;
+    const provider = settings.get('tts.provider') || 'edge';
+
+    if (provider === 'windows') {
+      return null; // Renderer handles Windows TTS directly
+    }
+
+    if (provider === 'elevenlabs') {
+      const apiKey = (settings.get('tts.elevenLabsApiKey') || '').trim();
+      if (!apiKey) return null;
+      try {
+        return await speakElevenLabs(text, voiceId, apiKey);
+      } catch (err) {
+        console.error('[TTS] ElevenLabs speak error:', err.message);
+        return null;
+      }
+    }
+
+    // Default: Edge TTS
+    return speakEdgeTTS(text, voiceId);
+  });
+
+  // ElevenLabs credit check — returns { remaining, total } or { error }
+  ipcMain.handle(channels.TTS_CHECK_CREDITS, async (_event, apiKey) => {
+    const trimmedKey = (apiKey || '').trim();
+    if (!trimmedKey) return { error: 'No API key provided' };
+    try {
+      console.log(`[TTS] Checking ElevenLabs credits (key length: ${trimmedKey.length}, starts: ${trimmedKey.slice(0, 4)}...)`);
+      const response = await fetch(`${ELEVENLABS_API_BASE}/v1/user/subscription`, {
+        headers: { 'xi-api-key': trimmedKey },
+      });
+      if (response.status === 401) {
+        const body = await response.text();
+        console.error('[TTS] Credit check 401:', body);
+        return { error: 'Invalid API key' };
+      }
+      if (!response.ok) {
+        const body = await response.text();
+        console.error(`[TTS] Credit check ${response.status}:`, body);
+        return { error: `API error: ${response.status}` };
+      }
+      const data = await response.json();
+      const used = data.character_count || 0;
+      const limit = data.character_limit || 0;
+      const remaining = limit - used;
+      console.log(`[TTS] ElevenLabs credits: ${remaining}/${limit} remaining (tier: ${data.tier})`);
+      return { remaining, total: limit, tier: data.tier || 'unknown' };
+    } catch (err) {
+      console.error('[TTS] Credit check error:', err.message);
+      return { error: err.message };
+    }
+  });
+
+  // STT — ElevenLabs Scribe (cloud, premium) or Vosk (handled in renderer)
+  // When ElevenLabs is the TTS provider, audio is sent here for Scribe transcription.
+  // When Edge/Windows TTS is selected, Vosk runs entirely in the renderer (no IPC).
+  ipcMain.handle(channels.STT_TRANSCRIBE, async (_event, audioData) => {
+    const provider = settings.get('tts.provider') || 'edge';
+
+    if (provider === 'elevenlabs' && audioData) {
+      const apiKey = (settings.get('tts.elevenLabsApiKey') || '').trim();
+      if (!apiKey) {
+        console.error('[STT] No ElevenLabs API key for Scribe');
+        return { error: 'No API key' };
+      }
+
+      try {
+        console.log(`[STT] Using ElevenLabs Scribe (${audioData.length} samples)...`);
+
+        // Convert Float32 PCM samples to 16-bit WAV
+        const wavBuffer = float32ToWav(audioData, 16000);
+
+        // Build multipart form data manually (Node.js built-in)
+        const boundary = '----ElevenLabsScribe' + Date.now();
+        const formParts = [];
+
+        // model_id field
+        formParts.push(
+          `--${boundary}\r\n` +
+          'Content-Disposition: form-data; name="model_id"\r\n\r\n' +
+          'scribe_v1\r\n'
+        );
+
+        // language_code field
+        formParts.push(
+          `--${boundary}\r\n` +
+          'Content-Disposition: form-data; name="language_code"\r\n\r\n' +
+          'en\r\n'
+        );
+
+        // file field
+        formParts.push(
+          `--${boundary}\r\n` +
+          'Content-Disposition: form-data; name="file"; filename="audio.wav"\r\n' +
+          'Content-Type: audio/wav\r\n\r\n'
+        );
+
+        // Assemble body
+        const preParts = formParts.slice(0, 2).join('');
+        const fileHeader = formParts[2];
+        const closing = `\r\n--${boundary}--\r\n`;
+
+        const preBuffer = Buffer.from(preParts, 'utf-8');
+        const fileHeaderBuffer = Buffer.from(fileHeader, 'utf-8');
+        const closingBuffer = Buffer.from(closing, 'utf-8');
+        const body = Buffer.concat([preBuffer, fileHeaderBuffer, wavBuffer, closingBuffer]);
+
+        const response = await fetch(`${ELEVENLABS_API_BASE}/v1/speech-to-text`, {
+          method: 'POST',
+          headers: {
+            'xi-api-key': apiKey,
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          },
+          body,
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          console.error(`[STT] Scribe error ${response.status}:`, errText);
+          return { error: `Scribe API error: ${response.status}` };
+        }
+
+        const result = await response.json();
+        const text = (result.text || '').trim();
+        console.log(`[STT] Scribe result: "${text}"`);
+        return text;
+      } catch (err) {
+        console.error('[STT] Scribe error:', err.message);
+        return { error: err.message };
+      }
+    }
+
+    // Fallback: PowerShell Windows Speech Recognition (if called without audio data)
     return new Promise((resolve) => {
       console.log('[STT] Using Windows Speech Recognition fallback...');
       execFile('powershell', [
         '-NoProfile', '-ExecutionPolicy', 'Bypass',
-        '-File', RECOGNIZE_SCRIPT, '-TimeoutSeconds', '5',
-      ], { timeout: 10000 }, (err, stdout) => {
+        '-File', RECOGNIZE_SCRIPT, '-TimeoutSeconds', '15',
+      ], { timeout: 20000 }, (err, stdout) => {
         if (err) {
           console.error('[STT] PowerShell error:', err.message);
           resolve({ error: err.message });
