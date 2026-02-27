@@ -8,9 +8,6 @@ param(
     [string]$HeadCode = ""
 )
 
-Add-Type -AssemblyName UIAutomationClient
-Add-Type -AssemblyName UIAutomationTypes
-
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -181,7 +178,87 @@ public class Win32Reply {
         return result;
     }
 
-    // Find a child button by text
+    // Find SimSig main window
+    public static IntPtr FindSimSig() {
+        IntPtr result = IntPtr.Zero;
+        EnumWindows((hWnd, lParam) => {
+            var sb = new StringBuilder(256);
+            GetWindowText(hWnd, sb, 256);
+            if (sb.ToString().StartsWith("SimSig -")) {
+                result = hWnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return result;
+    }
+
+    // Find a top-level window by class name
+    public static IntPtr FindTopWindowByClass(string className) {
+        IntPtr result = IntPtr.Zero;
+        EnumWindows((hWnd, lParam) => {
+            var sb = new StringBuilder(256);
+            GetClassName(hWnd, sb, 256);
+            if (sb.ToString() == className) {
+                result = hWnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return result;
+    }
+
+    // Find a top-level window by title
+    public static IntPtr FindTopWindowByTitle(string title) {
+        IntPtr result = IntPtr.Zero;
+        EnumWindows((hWnd, lParam) => {
+            var sb = new StringBuilder(256);
+            GetWindowText(hWnd, sb, 256);
+            if (sb.ToString() == title) {
+                result = hWnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return result;
+    }
+
+    // Find a child window by class name
+    public static IntPtr FindChildByClass(IntPtr parent, string className) {
+        IntPtr result = IntPtr.Zero;
+        EnumChildWindows(parent, (hWnd, lParam) => {
+            var sb = new StringBuilder(256);
+            GetClassName(hWnd, sb, 256);
+            if (sb.ToString() == className) {
+                result = hWnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return result;
+    }
+
+    // Find a child button by a single text label
+    public static IntPtr FindButtonByLabel(IntPtr parent, string text) {
+        IntPtr result = IntPtr.Zero;
+        EnumChildWindows(parent, (hWnd, lParam) => {
+            var sb = new StringBuilder(256);
+            GetClassName(hWnd, sb, 256);
+            string cls = sb.ToString();
+            if (cls == "TButton" || cls == "Button") {
+                sb.Clear();
+                GetWindowText(hWnd, sb, 256);
+                if (sb.ToString() == text) {
+                    result = hWnd;
+                    return false;
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+        return result;
+    }
+
+    // Find a child button by text (multiple options)
     public static IntPtr FindButtonByText(IntPtr parent, string[] texts) {
         IntPtr result = IntPtr.Zero;
         EnumChildWindows(parent, (hWnd, lParam) => {
@@ -207,59 +284,29 @@ public class Win32Reply {
 "@
 
 try {
-    $root = [System.Windows.Automation.AutomationElement]::RootElement
+    # Find the TAnswerCallForm dialog using pure Win32 API
+    $dialogHwnd = [Win32Reply]::FindTopWindowByClass("TAnswerCallForm")
 
-    # Find the TAnswerCallForm dialog
-    $answerFormCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-        "TAnswerCallForm"
-    )
-    $dialog = $root.FindFirst(
-        [System.Windows.Automation.TreeScope]::Children,
-        $answerFormCond
-    )
-
-    if ($null -eq $dialog) {
+    if ($dialogHwnd -eq [IntPtr]::Zero) {
         Write-Output '{"error":"Answer dialog not found"}'
         exit 0
     }
 
-    $simsigPid = $dialog.Current.ProcessId
-    $dialogHwnd = [IntPtr]$dialog.Current.NativeWindowHandle
+    # Find the TListBox (reply options) child
+    $listBoxHwnd = [Win32Reply]::FindChildByClass($dialogHwnd, "TListBox")
 
-    # Find the TListBox (reply options)
-    $listBoxCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-        "TListBox"
-    )
-    $listBox = $dialog.FindFirst(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $listBoxCond
-    )
-
-    if ($null -eq $listBox) {
+    if ($listBoxHwnd -eq [IntPtr]::Zero) {
         Write-Output '{"error":"Reply listbox not found"}'
         exit 0
     }
 
-    $listBoxHwnd = [IntPtr]$listBox.Current.NativeWindowHandle
+    # Find the Reply button child
+    $replyBtnHwnd = [Win32Reply]::FindButtonByLabel($dialogHwnd, "Reply")
 
-    # Find the Reply button
-    $replyBtnCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::NameProperty,
-        "Reply"
-    )
-    $replyBtn = $dialog.FindFirst(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $replyBtnCond
-    )
-
-    if ($null -eq $replyBtn) {
+    if ($replyBtnHwnd -eq [IntPtr]::Zero) {
         Write-Output '{"error":"Reply button not found"}'
         exit 0
     }
-
-    $replyBtnHwnd = [IntPtr]$replyBtn.Current.NativeWindowHandle
 
     # Keep dialog off-screen — just restore and foreground for keyboard focus
     [Win32Reply]::ShowWindow($dialogHwnd, [Win32Reply]::SW_RESTORE) | Out-Null
@@ -330,86 +377,45 @@ try {
 
     # Soft close: if TAnswerCallForm is still open, try Escape then hide off-screen
     Start-Sleep -Milliseconds 300
-    $answerForm2 = $root.FindFirst(
-        [System.Windows.Automation.TreeScope]::Children,
-        $answerFormCond
-    )
-    if ($null -ne $answerForm2) {
-        $aHwnd = [IntPtr]$answerForm2.Current.NativeWindowHandle
-        if ($aHwnd -ne [IntPtr]::Zero) {
-            [Win32Reply]::SetForegroundWindow($aHwnd) | Out-Null
-            Start-Sleep -Milliseconds 100
-            [Win32Reply]::PressKey(0x1B)  # VK_ESCAPE
-            Start-Sleep -Milliseconds 500
+    $aHwnd = [Win32Reply]::FindTopWindowByClass("TAnswerCallForm")
+    if ($aHwnd -ne [IntPtr]::Zero) {
+        [Win32Reply]::SetForegroundWindow($aHwnd) | Out-Null
+        Start-Sleep -Milliseconds 100
+        [Win32Reply]::PressKey(0x1B)  # VK_ESCAPE
+        Start-Sleep -Milliseconds 500
 
-            # Check if it closed — if not, hide off-screen
-            $answerForm3 = $root.FindFirst(
-                [System.Windows.Automation.TreeScope]::Children,
-                $answerFormCond
-            )
-            if ($null -ne $answerForm3) {
-                $aHwnd2 = [IntPtr]$answerForm3.Current.NativeWindowHandle
-                if ($aHwnd2 -ne [IntPtr]::Zero) {
-                    [Win32Reply]::HideOffScreen($aHwnd2)
-                }
-            }
+        # Check if it closed — if not, hide off-screen
+        $aHwnd2 = [Win32Reply]::FindTopWindowByClass("TAnswerCallForm")
+        if ($aHwnd2 -ne [IntPtr]::Zero) {
+            [Win32Reply]::HideOffScreen($aHwnd2)
         }
     }
 
     # Hide any lingering Place Call dialog
-    $placeCallCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::NameProperty,
-        "Place Call"
-    )
-    $placeCallDlg = $root.FindFirst(
-        [System.Windows.Automation.TreeScope]::Children,
-        $placeCallCond
-    )
-    if ($null -ne $placeCallDlg) {
-        $pcHwnd = [IntPtr]$placeCallDlg.Current.NativeWindowHandle
-        if ($pcHwnd -ne [IntPtr]::Zero) {
-            [Win32Reply]::HideOffScreen($pcHwnd)
-        }
+    $pcHwnd = [Win32Reply]::FindTopWindowByTitle("Place Call")
+    if ($pcHwnd -ne [IntPtr]::Zero) {
+        [Win32Reply]::HideOffScreen($pcHwnd)
     }
 
     # Check if the Telephone Calls window is still open
     Start-Sleep -Milliseconds 300
-    $telFormCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-        "TTelephoneForm"
-    )
-    $telWindow = $root.FindFirst(
-        [System.Windows.Automation.TreeScope]::Children,
-        $telFormCond
-    )
+    $telHwnd = [Win32Reply]::FindTopWindowByClass("TTelephoneForm")
 
-    if ($null -eq $telWindow -and $simsigPid -gt 0) {
+    if ($telHwnd -eq [IntPtr]::Zero) {
         # Window closed — send F6 to SimSig's main window to reopen it
-        try {
-            $proc = Get-Process -Id $simsigPid -ErrorAction Stop
-            $mainHwnd = $proc.MainWindowHandle
-            if ($mainHwnd -ne [IntPtr]::Zero) {
-                [Win32Reply]::PostMessage($mainHwnd, 0x0100, [IntPtr]0x75, [IntPtr]::Zero) | Out-Null
-                Start-Sleep -Milliseconds 50
-                [Win32Reply]::PostMessage($mainHwnd, 0x0101, [IntPtr]0x75, [IntPtr]::Zero) | Out-Null
-                Start-Sleep -Milliseconds 500
-                $telWindow = $root.FindFirst(
-                    [System.Windows.Automation.TreeScope]::Children,
-                    $telFormCond
-                )
-                if ($null -ne $telWindow) {
-                    $tHwnd = [IntPtr]$telWindow.Current.NativeWindowHandle
-                    if ($tHwnd -ne [IntPtr]::Zero) {
-                        [Win32Reply]::HideOffScreen($tHwnd)
-                    }
-                }
+        $simHwnd = [Win32Reply]::FindSimSig()
+        if ($simHwnd -ne [IntPtr]::Zero) {
+            [Win32Reply]::PostMessage($simHwnd, 0x0100, [IntPtr]0x75, [IntPtr]::Zero) | Out-Null
+            Start-Sleep -Milliseconds 50
+            [Win32Reply]::PostMessage($simHwnd, 0x0101, [IntPtr]0x75, [IntPtr]::Zero) | Out-Null
+            Start-Sleep -Milliseconds 500
+            $telHwnd2 = [Win32Reply]::FindTopWindowByClass("TTelephoneForm")
+            if ($telHwnd2 -ne [IntPtr]::Zero) {
+                [Win32Reply]::HideOffScreen($telHwnd2)
             }
-        } catch {}
-    } elseif ($null -ne $telWindow) {
-        $tHwnd = [IntPtr]$telWindow.Current.NativeWindowHandle
-        if ($tHwnd -ne [IntPtr]::Zero) {
-            [Win32Reply]::HideOffScreen($tHwnd)
         }
+    } else {
+        [Win32Reply]::HideOffScreen($telHwnd)
     }
 
     Write-Output '{"success":true}'

@@ -1,20 +1,24 @@
 :root {
-  --bg-primary: #505050;
-  --bg-secondary: #606060;
-  --bg-panel: #c0c0c0;
+  --bg-primary: #d4d0c8;
+  --bg-secondary: #d4d0c8;
+  --bg-panel: #d4d0c8;
   --bg-input: #ffffff;
-  --accent: #cc0000;
-  --accent-dim: #990000;
+  --accent: #000080;
+  --accent-dim: #000060;
   --text: #000000;
-  --text-light: #ffffff;
+  --text-light: #000000;
   --text-dim: #666666;
   --success: #008000;
   --warning: #ff8800;
   --error: #cc0000;
-  --border: #999999;
-  --border-light: #cccccc;
+  --border: #808080;
+  --border-light: #c0c0c0;
   --tab-bg: #d4d0c8;
   --toolbar-bg: #d4d0c8;
+  --bevel-light: #ffffff;
+  --bevel-dark: #404040;
+  --bevel-mid: #808080;
+  --grid-bg: #ece9d8;
 }
 
 * {
@@ -24,9 +28,10 @@
 }
 
 body {
-  font-family: 'Segoe UI', 'Tahoma', 'Arial', sans-serif;
+  font-family: 'Tahoma', 'Arial', sans-serif;
+  font-size: 11px;
   background-color: var(--bg-primary);
-  color: var(--text-light);
+  color: var(--text);
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -34,34 +39,40 @@ body {
   user-select: none;
 }
 
+/* ── HEADER ────────────────────────────────────────────────── */
 #top-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 4px 8px;
-  background-color: var(--bg-secondary);
-  border-bottom: 2px solid var(--border);
+  gap: 8px;
+  padding: 3px 4px;
+  background: var(--bg-primary);
+  border-bottom: 2px solid;
+  border-bottom-color: var(--bevel-dark);
+  border-top: 1px solid var(--bevel-light);
   flex-shrink: 0;
 }
 
 #panel-name-tab {
-  background: var(--accent);
-  color: var(--text-light);
-  padding: 4px 16px;
+  background: #000080;
+  color: #ffffff;
+  padding: 3px 14px;
   font-weight: bold;
-  font-size: 13px;
-  border-radius: 3px 3px 0 0;
+  font-size: 11px;
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  white-space: nowrap;
 }
 
 #connection-area {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  margin-left: auto;
 }
 
 #status-indicator {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   display: inline-block;
 }
@@ -71,6 +82,7 @@ body {
 #status-indicator.reconnecting { background-color: #ffd600; animation: pulse 1s infinite; }
 #status-indicator.connected { background-color: var(--success); }
 #status-indicator.error { background-color: var(--error); animation: pulse 0.5s infinite; }
+#status-indicator.no-gateway { background-color: var(--warning); }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
@@ -78,71 +90,158 @@ body {
 }
 
 #status-text {
-  font-size: 12px;
-  color: var(--border-light);
+  font-size: 11px;
+  color: var(--text);
 }
 
-#clock-display {
-  font-size: 16px;
-  font-weight: bold;
-  color: var(--text-light);
-  letter-spacing: 2px;
-  margin-left: auto;
+/* Header status icons (envelope, OK) */
+.header-status-icons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
 }
+
+.header-icon {
+  width: 20px;
+  height: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: var(--text);
+}
+
 
 #connect-btn, #settings-btn, #msglog-btn {
   background: var(--bg-panel);
   color: var(--text);
-  border: 1px solid var(--border);
-  padding: 3px 10px;
-  border-radius: 3px;
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  padding: 2px 8px;
   cursor: pointer;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 #connect-btn:hover, #settings-btn:hover, #msglog-btn:hover {
-  background: #b0b0b0;
+  background: #e0dcd4;
+}
+
+#connect-btn:active, #settings-btn:active, #msglog-btn:active {
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
 }
 
 #settings-btn, #msglog-btn {
-  font-size: 16px;
+  font-size: 11px;
   padding: 2px 6px;
 }
 
+/* Panel subtitle row */
+#panel-subtitle-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 1px 6px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--bevel-dark);
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text);
+}
+
+#panel-subtitle {
+  font-size: 11px;
+}
+
+/* ── MAIN CONTENT ──────────────────────────────────────────── */
 #app-content {
   display: flex;
   flex: 1;
   overflow: hidden;
+  padding: 4px;
+  gap: 4px;
+  background: var(--bg-primary);
 }
 
-/* LEFT: Incoming calls */
+/* LEFT PANEL — 2 stacked sections with icon gutters */
 #left-panel {
-  width: 50%;
+  width: 55%;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-right: 2px solid var(--border);
+  gap: 4px;
+}
+
+.gsm-section {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.gsm-section-icon {
+  width: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 6px;
   background: var(--bg-panel);
 }
 
-/* RIGHT: Driver comms chat */
+.gsm-section-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 2px solid;
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+  background: var(--grid-bg);
+}
+
+/* Empty grid — spreadsheet-like rows */
+.empty-grid {
+  flex: 1;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent,
+      transparent 21px,
+      #c0c0c0 21px,
+      #c0c0c0 22px
+    ),
+    repeating-linear-gradient(
+      to right,
+      transparent,
+      transparent 49%,
+      #c0c0c0 49%,
+      #c0c0c0 calc(49% + 1px),
+      transparent calc(49% + 1px),
+      transparent 100%
+    );
+  background-color: var(--grid-bg);
+}
+
+/* RIGHT PANEL */
 #right-panel {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg-secondary);
+  border: 2px solid;
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+  background: var(--grid-bg);
 }
 
-/* TAB BAR */
+/* ── TAB BAR ───────────────────────────────────────────────── */
 #tab-bar {
   display: flex;
   align-items: flex-end;
   background: var(--bg-primary);
-  border-top: 1px solid var(--border);
-  padding: 0 4px;
+  padding: 0 2px;
   padding-top: 2px;
   flex-shrink: 0;
   gap: 1px;
@@ -152,49 +251,60 @@ body {
   padding: 3px 10px;
   font-size: 11px;
   background: var(--tab-bg);
-  border: 1px solid var(--border);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
   border-bottom: none;
-  border-radius: 3px 3px 0 0;
   cursor: default;
   color: var(--text);
   user-select: none;
+  white-space: nowrap;
 }
 
 .tab-item.active {
-  background: var(--bg-panel);
+  background: var(--grid-bg);
   font-weight: bold;
+  position: relative;
+  bottom: -1px;
+  padding-bottom: 4px;
 }
 
 .tab-item.highlight {
-  color: var(--accent);
+  color: #0000cc;
   font-weight: bold;
 }
 
-/* BOTTOM TOOLBAR */
+/* ── BOTTOM TOOLBAR ────────────────────────────────────────── */
 #bottom-bar {
   display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 6px 8px;
+  align-items: stretch;
+  gap: 0;
+  padding: 4px 4px;
   background: var(--toolbar-bg);
-  border-top: 2px solid var(--border);
+  border-top: 2px solid;
+  border-top-color: var(--bevel-light);
   flex-shrink: 0;
-  min-height: 98px;
+  min-height: 70px;
 }
 
 .toolbar-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1px;
-  padding: 2px 6px;
-  border: none;
-  background: transparent;
+  justify-content: center;
+  gap: 2px;
+  padding: 3px 4px;
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  background: var(--bg-panel);
   cursor: pointer;
   font-family: inherit;
-  font-size: 9px;
+  font-size: 10px;
   color: var(--text);
-  min-width: 48px;
+  min-width: 56px;
+}
+
+.toolbar-btn:active:not(:disabled) {
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
 }
 
 .toolbar-btn:disabled {
@@ -203,85 +313,93 @@ body {
 }
 
 .toolbar-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--bg-panel);
-  border: 2px solid var(--border);
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 16px;
   color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
-.toolbar-btn:hover:not(:disabled) .toolbar-icon {
-  background: #b0b0b0;
+.toolbar-btn:hover:not(:disabled) {
+  background: #e0dcd4;
+}
+
+.toolbar-btn.emrg {
+  background: #cc0000;
+  color: #ffffff;
+  border-color: #ff4444 #880000 #880000 #ff4444;
 }
 
 .toolbar-btn.emrg .toolbar-icon {
-  background: #cc0000;
-  border-color: #990000;
-  color: white;
+  color: #ffffff;
 }
 
-.toolbar-btn.emrg:hover .toolbar-icon {
-  background: #ee0000;
+.toolbar-btn.emrg:hover {
+  background: #dd2222;
 }
 
-.toolbar-btn.ptt-toolbar .toolbar-icon {
-  background: #2a2a2a;
-  color: white;
+.toolbar-btn.emrg:active {
+  border-color: #880000 #ff4444 #ff4444 #880000;
+  background: #aa0000;
+}
+
+/* PTT button — hidden visually but kept in DOM for keybind */
+.toolbar-btn.ptt-toolbar {
+  display: none;
 }
 
 .toolbar-btn.active .toolbar-icon {
-  background: var(--accent);
-  border-color: var(--accent);
-  box-shadow: 0 0 10px rgba(204, 0, 0, 0.5);
+  color: var(--error);
 }
 
 .toolbar-separator {
-  width: 1px;
-  height: 36px;
-  background: var(--border);
-  margin: 0 4px;
+  width: 2px;
+  align-self: stretch;
+  margin: 2px 2px;
+  border-left: 1px solid var(--bevel-dark);
+  border-right: 1px solid var(--bevel-light);
+  background: transparent;
 }
 
 .toolbar-ptt-status {
-  font-size: 10px;
-  font-weight: bold;
-  color: var(--text);
-  min-width: 20px;
+  display: none;
 }
 
-.toolbar-ptt-status.active {
-  color: var(--accent);
+/* Push notification box to far right */
+.toolbar-spacer {
+  flex: 1;
 }
 
-/* CHAT HEADER */
+/* ── CHAT HEADER ───────────────────────────────────────────── */
 #chat-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
-  background: var(--bg-secondary);
+  padding: 4px 8px;
+  background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   font-weight: bold;
-  font-size: 13px;
-  color: var(--text-light);
+  font-size: 11px;
+  color: var(--text);
 }
 
 #chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  background: var(--grid-bg);
 }
 
-/* PLACEHOLDER GRIDS */
+/* ── PLACEHOLDER GRIDS ─────────────────────────────────────── */
 .placeholder-grid {
   flex: 1;
   border-top: 1px solid var(--border);
@@ -289,7 +407,7 @@ body {
 }
 
 .placeholder-grid-inner {
-  background: white;
+  background: var(--grid-bg);
   height: 100%;
   border: 1px solid var(--border-light);
   margin: 4px;
@@ -299,14 +417,14 @@ button {
   cursor: pointer;
 }
 
-/* Sim Paused overlay */
+/* ── OVERLAYS ──────────────────────────────────────────────── */
 #init-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.92);
+  background: rgba(0, 0, 0, 0.85);
   z-index: 950;
   display: flex;
   align-items: center;
@@ -319,8 +437,8 @@ button {
 }
 
 #init-text {
-  font-size: 28px;
-  color: rgba(255, 255, 255, 0.7);
+  font-size: 24px;
+  color: rgba(255, 255, 255, 0.8);
   letter-spacing: 4px;
   user-select: none;
 }
@@ -331,8 +449,8 @@ button {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  z-index: 900;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 9999;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -346,31 +464,118 @@ button {
 #paused-text {
   font-size: 48px;
   font-weight: bold;
-  color: rgba(255, 255, 255, 0.7);
+  color: #ffffff;
   letter-spacing: 8px;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
   user-select: none;
 }
 
-/* Keep settings and log buttons clickable above the overlay */
 #settings-btn, #msglog-btn {
   position: relative;
   z-index: 950;
 }
 
+/* ── CSS-DRAWN SECTION ICONS ───────────────────────────────── */
+/* Envelope with arrows (outgoing/calls) */
+.icon-envelope-arrows {
+  display: block;
+  width: 18px;
+  height: 14px;
+  border: 2px solid #404040;
+  border-top: none;
+  position: relative;
+  background: var(--bg-panel);
+}
+
+.icon-envelope-arrows::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  height: 0;
+  border-left: 11px solid transparent;
+  border-right: 11px solid transparent;
+  border-top: 8px solid #404040;
+}
+
+.icon-envelope-arrows::after {
+  content: '\2194';
+  position: absolute;
+  bottom: -6px;
+  right: -6px;
+  font-size: 10px;
+  color: #404040;
+  font-weight: bold;
+  line-height: 1;
+}
+
+/* Envelope with X (messages) */
+.icon-envelope-x {
+  display: block;
+  width: 18px;
+  height: 14px;
+  border: 2px solid #404040;
+  border-top: none;
+  position: relative;
+  background: var(--bg-panel);
+}
+
+.icon-envelope-x::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  height: 0;
+  border-left: 11px solid transparent;
+  border-right: 11px solid transparent;
+  border-top: 8px solid #404040;
+}
+
+.icon-envelope-x::after {
+  content: '\2716';
+  position: absolute;
+  bottom: -6px;
+  right: -6px;
+  font-size: 9px;
+  color: #cc0000;
+  font-weight: bold;
+  line-height: 1;
+}
+
+/* ── SCROLLBARS ────────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 16px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--bg-primary);
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
+  background: var(--bg-panel);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #888;
+  background: #e0dcd4;
 }
+
+::-webkit-scrollbar-button {
+  display: block;
+  height: 16px;
+  background: var(--bg-panel);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+}
+
+/* ── TAB VIEW SWITCHING ────────────────────────────────────── */
+.tab-view { display: none; flex-direction: column; overflow: hidden; }
+.tab-view.active-view { display: flex; flex: 1; }
+
+/* Clickable tabs */
+#tab-trains, #tab-incoming, #tab-log { cursor: pointer; }
+#tab-trains:hover, #tab-incoming:hover, #tab-log:hover { background: #e8e4dc; }

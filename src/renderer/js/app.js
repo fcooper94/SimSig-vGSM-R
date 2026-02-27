@@ -25,7 +25,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   window.simsigAPI.clock.onUpdate((data) => {
-    ConnectionUI.handleClockUpdate(data);
     const overlay = document.getElementById('paused-overlay');
     if (data.paused) {
       overlay.classList.remove('hidden');
@@ -40,13 +39,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     PhoneCallsUI.update(calls);
   });
 
+  window.simsigAPI.phone.onDriverHungUp(() => {
+    if (PhoneCallsUI.inCall) {
+      console.log('[App] Driver hung up — ending call');
+      PhoneCallsUI.hangUp();
+    }
+  });
+
   // Feed STOMP messages to TrainTracker and MessageFeed
   window.simsigAPI.messages.onMessage((msg) => {
     TrainTracker.handleMessage(msg);
     MessageFeed.handleMessage(msg);
   });
 
-  // Tab switching: Incoming / Trains Mobiles / Log / Emergency
+  // Tab switching — left panel views (comms chat stays always-visible in right panel)
   const tabs = {
     incoming:  { tab: document.getElementById('tab-incoming'), view: document.getElementById('phone-calls') },
     trains:    { tab: document.getElementById('tab-trains'),   view: document.getElementById('trains-mobiles') },
@@ -71,12 +77,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   tabs.trains.tab.addEventListener('click', () => switchTab('trains'));
   tabs.log.tab.addEventListener('click', () => switchTab('log'));
 
-  // Auto-populate panel name from SimSig window title
+  // Auto-populate panel name and subtitle from SimSig window title
   window.simsigAPI.sim.onName((name) => {
     const ascIdx = name.toUpperCase().indexOf('ASC');
     const trimmed = ascIdx !== -1 ? name.substring(0, ascIdx + 3).trim() : name;
     document.getElementById('panel-name-tab').textContent = trimmed;
+    // Show full name in subtitle row
+    document.getElementById('panel-subtitle').textContent = name;
   });
+
+  // Setting toolbar button opens settings modal
+  const settingsToolbarBtn = document.getElementById('settings-toolbar-btn');
+  if (settingsToolbarBtn) {
+    settingsToolbarBtn.addEventListener('click', () => SettingsUI.open());
+  }
 
   // Emergency view
   const emrgFeedback = document.getElementById('emrg-feedback');

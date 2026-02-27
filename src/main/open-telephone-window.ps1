@@ -54,6 +54,17 @@ public class SimSigTel {
                 SimSigPid = pid;
             }
         }
+        // Also match by window title in case the class name differs
+        if (MainFormHwnd == IntPtr.Zero) {
+            StringBuilder title = new StringBuilder(256);
+            GetWindowText(hWnd, title, 256);
+            if (title.ToString().StartsWith("SimSig -")) {
+                MainFormHwnd = hWnd;
+                uint pid;
+                GetWindowThreadProcessId(hWnd, out pid);
+                SimSigPid = pid;
+            }
+        }
         return true;
     }
 

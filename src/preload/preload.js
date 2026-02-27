@@ -24,6 +24,7 @@ const channels = {
   PHONE_PLACE_CALL_REPLY: 'phone:place-call-reply',
   PHONE_PLACE_CALL_HANGUP: 'phone:place-call-hangup',
   PHONE_HIDE_ANSWER: 'phone:hide-answer',
+  PHONE_DRIVER_HUNG_UP: 'phone:driver-hung-up',
   TTS_GET_VOICES: 'tts:get-voices',
   TTS_SPEAK: 'tts:speak',
   TTS_CHECK_CREDITS: 'tts:check-credits',
@@ -95,6 +96,11 @@ contextBridge.exposeInMainWorld('simsigAPI', {
     placeCallReply: (replyIndex, headCode) => ipcRenderer.invoke(channels.PHONE_PLACE_CALL_REPLY, replyIndex, headCode),
     placeCallHangup: () => ipcRenderer.invoke(channels.PHONE_PLACE_CALL_HANGUP),
     hideAnswerDialog: () => ipcRenderer.invoke(channels.PHONE_HIDE_ANSWER),
+    onDriverHungUp: (callback) => {
+      const listener = () => callback();
+      ipcRenderer.on(channels.PHONE_DRIVER_HUNG_UP, listener);
+      return () => ipcRenderer.removeListener(channels.PHONE_DRIVER_HUNG_UP, listener);
+    },
   },
 
   tts: {

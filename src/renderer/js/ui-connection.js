@@ -3,23 +3,15 @@ const ConnectionUI = {
   indicator: null,
   statusText: null,
   connectBtn: null,
-  clockDisplay: null,
-
-  // Clock interpolation state
-  lastClockSeconds: 0,
-  lastClockRealTime: 0,
-  speedRatio: 1,
-  paused: false,
-  clockInterval: null,
 
   init() {
     this.indicator = document.getElementById('status-indicator');
     this.statusText = document.getElementById('status-text');
     this.connectBtn = document.getElementById('connect-btn');
-    this.clockDisplay = document.getElementById('clock-display');
 
     this.connectBtn.addEventListener('click', () => {
-      if (this.isConnected) {
+      const currentStatus = this.indicator.className;
+      if (this.isConnected || currentStatus === 'no-gateway' || currentStatus === 'reconnecting') {
         window.simsigAPI.connection.disconnect();
       } else {
         window.simsigAPI.connection.connect();
@@ -41,6 +33,7 @@ const ConnectionUI = {
       connecting: 'Connecting...',
       connected: 'Connected',
       reconnecting: 'Reconnecting...',
+      'no-gateway': 'No Gateway',
       error: 'Error',
     };
 
@@ -50,53 +43,31 @@ const ConnectionUI = {
       this.statusText.textContent += `: ${status.error}`;
     }
 
-    this.connectBtn.textContent = this.isConnected ? 'Disconnect' : 'Connect';
+    // Tooltip for no-gateway explaining what's unavailable
+    this.statusText.title = statusStr === 'no-gateway'
+      ? 'Train position data requires the Information Gateway'
+      : '';
 
-    if (statusStr === 'disconnected' || statusStr === 'error') {
-      this.clockDisplay.textContent = '--:--:--';
-      this.stopClockTicker();
-    }
-  },
+    // No-gateway keeps Disconnect available (PhoneReader is still running)
+    this.connectBtn.textContent = (this.isConnected || statusStr === 'no-gateway') ? 'Disconnect' : 'Connect';
 
-  handleClockUpdate(data) {
-    ConnectionUI.lastClockSeconds = data.clockSeconds || 0;
-    ConnectionUI.lastClockRealTime = Date.now();
-    ConnectionUI.speedRatio = data.interval > 0 ? 500 / data.interval : 1;
-    ConnectionUI.paused = data.paused || false;
-
-    // Start the ticker if not already running
-    if (!ConnectionUI.clockInterval) {
-      ConnectionUI.startClockTicker();
+    // Clear init overlay on no-gateway so it doesn't stay stuck
+    if (statusStr === 'no-gateway') {
+      const initOverlay = document.getElementById('init-overlay');
+      if (initOverlay) initOverlay.classList.add('hidden');
     }
 
-    // Immediate update
-    ConnectionUI.updateClockDisplay();
-  },
-
-  startClockTicker() {
-    this.clockInterval = setInterval(() => {
-      ConnectionUI.updateClockDisplay();
-    }, 200);
-  },
-
-  stopClockTicker() {
-    if (this.clockInterval) {
-      clearInterval(this.clockInterval);
-      this.clockInterval = null;
-    }
-  },
-
-  updateClockDisplay() {
-    if (this.paused) {
-      const formatted = TimeUtils.formatSecondsFromMidnight(this.lastClockSeconds);
-      this.clockDisplay.textContent = formatted + ' (PAUSED)';
-      return;
-    }
-
-    // Interpolate: game seconds = last known + (real elapsed * speed ratio)
-    const realElapsed = (Date.now() - this.lastClockRealTime) / 1000;
-    const gameSeconds = Math.floor(this.lastClockSeconds + (realElapsed * this.speedRatio));
-    const formatted = TimeUtils.formatSecondsFromMidnight(gameSeconds);
-    this.clockDisplay.textContent = formatted;
+    // Show/hide "No Gateway" messages on Trains and Log tabs
+    const noGateway = statusStr === 'no-gateway' || statusStr === 'disconnected';
+    const trainsNoGw = document.getElementById('trains-no-gateway');
+    const feedNoGw = document.getElementById('feed-no-gateway');
+    const trainsContent = document.getElementById('trains-table-wrapper');
+    const noTrainsMsg = document.getElementById('no-trains-message');
+    const feedContent = document.getElementById('feed-log');
+    if (trainsNoGw) trainsNoGw.classList.toggle('hidden', !noGateway);
+    if (feedNoGw) feedNoGw.classList.toggle('hidden', !noGateway);
+    if (trainsContent) trainsContent.classList.toggle('hidden', noGateway);
+    if (noTrainsMsg) noTrainsMsg.classList.toggle('hidden', noGateway);
+    if (feedContent) feedContent.classList.toggle('hidden', noGateway);
   },
 };

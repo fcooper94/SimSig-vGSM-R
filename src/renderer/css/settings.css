@@ -4,7 +4,7 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -16,64 +16,63 @@
 }
 
 .modal-content {
-  background: var(--bg-secondary);
-  border: 2px solid var(--border);
-  border-radius: 4px;
-  padding: 24px;
-  width: 480px;
+  background: var(--bg-panel);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  padding: 16px;
+  width: 460px;
   max-height: 80vh;
   overflow-y: auto;
 }
 
 .modal-content h2 {
-  margin-bottom: 16px;
-  color: var(--text-light);
-  font-size: 18px;
+  margin-bottom: 12px;
+  color: var(--text);
+  font-size: 14px;
 }
 
 fieldset {
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 12px;
-  margin-bottom: 12px;
+  padding: 10px;
+  margin-bottom: 10px;
 }
 
 legend {
-  color: var(--warning);
-  font-size: 13px;
+  color: #000080;
+  font-size: 11px;
   font-weight: bold;
-  padding: 0 8px;
+  padding: 0 6px;
 }
 
 label {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
-  font-size: 13px;
-  color: var(--text-light);
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--text);
 }
 
 label input, label select {
   background: var(--bg-input);
   color: var(--text);
-  border: 1px solid var(--border);
-  padding: 6px 10px;
-  border-radius: 4px;
+  border: 2px solid;
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+  padding: 3px 8px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 11px;
   width: 260px;
 }
 
 label input:focus, label select:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: #000080;
 }
 
 label input[type="range"] {
   width: 160px;
   cursor: pointer;
-  accent-color: var(--accent);
+  accent-color: #000080;
   padding: 0;
   border: none;
   background: transparent;
@@ -82,62 +81,75 @@ label input[type="range"] {
 label input[type="range"] + span {
   min-width: 36px;
   text-align: right;
-  color: var(--border-light);
-  font-size: 12px;
-  margin-left: 8px;
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-left: 6px;
 }
 
 #ptt-rebind-btn {
   background: var(--bg-panel);
   color: var(--text);
-  border: 1px solid var(--border);
-  padding: 6px 12px;
-  border-radius: 4px;
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  padding: 4px 10px;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 11px;
   width: 100%;
   margin-top: 4px;
 }
 
 #ptt-rebind-btn:hover {
-  border-color: var(--accent);
+  background: #e0dcd4;
+}
+
+#ptt-rebind-btn:active {
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
 }
 
 #ptt-rebind-btn.listening {
-  border-color: #ffd600;
-  color: #ffd600;
+  border-color: #000080;
+  color: #000080;
+  font-weight: bold;
   animation: pulse 1s infinite;
 }
 
 .modal-actions {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   justify-content: flex-end;
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
 .modal-actions button {
   background: var(--bg-panel);
   color: var(--text);
-  border: 1px solid var(--border);
-  padding: 8px 20px;
-  border-radius: 4px;
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  padding: 4px 16px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .modal-actions button:hover {
-  background: #b0b0b0;
+  background: #e0dcd4;
+}
+
+.modal-actions button:active {
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
 }
 
 #settings-save {
-  background: var(--accent) !important;
-  color: var(--text-light) !important;
-  border-color: var(--accent-dim) !important;
+  background: #000080 !important;
+  color: #ffffff !important;
+  border-color: #4040c0 #000040 #000040 #4040c0 !important;
 }
 
 #settings-save:hover {
-  background: var(--accent-dim) !important;
+  background: #0000a0 !important;
+}
+
+#settings-save:active {
+  border-color: #000040 #4040c0 #4040c0 #000040 !important;
 }
 
 /* API key input with info icon */
@@ -159,12 +171,12 @@ label input[type="range"] + span {
 }
 
 .info-icon {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: var(--accent);
-  color: var(--text-light);
-  font-size: 11px;
+  background: #000080;
+  color: #ffffff;
+  font-size: 10px;
   font-weight: bold;
   font-style: italic;
   display: flex;
@@ -180,16 +192,16 @@ label input[type="range"] + span {
   position: absolute;
   bottom: calc(100% + 8px);
   right: -8px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 10px 14px;
+  background: var(--bg-panel);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  padding: 8px 12px;
   width: 220px;
   font-style: normal;
   font-weight: normal;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.3);
   z-index: 200;
   line-height: 1.5;
 }
@@ -200,7 +212,7 @@ label input[type="range"] + span {
   top: 100%;
   right: 14px;
   border: 6px solid transparent;
-  border-top-color: var(--border);
+  border-top-color: var(--bevel-dark);
 }
 
 .info-icon:hover .info-tooltip {
@@ -208,14 +220,14 @@ label input[type="range"] + span {
 }
 
 .info-tooltip a {
-  color: var(--accent);
+  color: #000080;
   text-decoration: underline;
   font-weight: 600;
 }
 
 .info-tooltip ol {
-  margin: 6px 0 0 0;
-  padding-left: 18px;
+  margin: 4px 0 0 0;
+  padding-left: 16px;
 }
 
 .info-tooltip ol li {
@@ -224,9 +236,8 @@ label input[type="range"] + span {
 
 /* TTS credit status */
 #tts-credit-status {
-  font-size: 12px;
-  padding: 6px 10px;
-  border-radius: 4px;
+  font-size: 11px;
+  padding: 4px 8px;
   margin-top: 4px;
 }
 
@@ -249,237 +260,63 @@ label input[type="range"] + span {
   color: var(--text-dim);
 }
 
-/* Emergency view — in-panel tab */
-#emrg-panel-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: bold;
-  color: var(--text);
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-#emrg-panel-body {
-  flex: 1;
-  background: var(--bg-panel);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: 12px;
-  gap: 8px;
-}
-
-#emrg-stop-all {
-  background: #6b1a1a;
-  color: #fff;
-  border: 3px solid #cc0000;
-  width: 120px;
-  height: 120px;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: bold;
-  border-radius: 6px;
-  cursor: pointer;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  line-height: 1.3;
-  text-align: center;
-}
-
-#emrg-stop-all:hover {
-  background: #8b2a2a;
-  border-color: #ee0000;
-}
-
-#emrg-stop-all:active {
-  background: #cc0000;
-}
-
-
-#emrg-feedback {
-  font-size: 11px;
-  color: #cc0000;
-  font-weight: bold;
-  min-height: 16px;
-}
-
 /* Confirmation modal */
 .confirm-content {
-  background: var(--tab-bg);
-  border: 2px solid var(--border);
-  border-radius: 4px;
-  padding: 24px;
-  min-width: 320px;
+  background: var(--bg-panel);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  padding: 16px;
+  min-width: 300px;
   text-align: center;
   color: var(--text);
 }
 
 .confirm-content h3 {
-  margin-bottom: 12px;
-  color: var(--accent);
-  font-size: 16px;
+  margin-bottom: 10px;
+  color: #000080;
+  font-size: 13px;
 }
 
 .confirm-content p {
-  margin-bottom: 16px;
-  font-size: 14px;
+  margin-bottom: 12px;
+  font-size: 11px;
 }
 
 .confirm-actions {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   justify-content: center;
 }
 
 .confirm-actions button {
-  padding: 6px 24px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  padding: 4px 20px;
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
   cursor: pointer;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: bold;
 }
 
 #emrg-confirm-yes {
-  background: var(--accent);
-  color: var(--text-light);
-  border-color: var(--accent-dim);
+  background: #cc0000;
+  color: #ffffff;
+  border-color: #ff4444 #880000 #880000 #ff4444;
 }
 
 #emrg-confirm-yes:hover {
-  background: var(--accent-dim);
+  background: #dd2222;
+}
+
+#emrg-confirm-yes:active {
+  border-color: #880000 #ff4444 #ff4444 #880000;
 }
 
 #emrg-confirm-no {
-  background: var(--tab-bg);
+  background: var(--bg-panel);
   color: var(--text);
 }
 
 #emrg-confirm-no:hover {
-  background: #b0b0b0;
-}
-
-/* Phone Book view */
-#phonebook-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: bold;
-  color: var(--text);
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-#phonebook-refresh {
-  margin-left: auto;
-  background: var(--tab-bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  padding: 2px 8px;
-  border-radius: 3px;
-  font-family: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-#phonebook-refresh:hover {
-  background: #b0b0b0;
-}
-
-#phonebook-list {
-  flex: 1;
-  overflow-y: auto;
-  background: var(--bg-panel);
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.phonebook-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  background: #fff;
-  border: 1px solid var(--border-light);
-  border-radius: 4px;
-  cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.phonebook-item:hover {
-  border-color: var(--accent);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
-}
-
-.phonebook-item:active {
-  background: #f0f0f0;
-}
-
-.phonebook-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--bg-secondary);
-  color: var(--text-light);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  font-weight: bold;
-  flex-shrink: 0;
-}
-
-.phonebook-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.phonebook-dial-icon {
-  margin-left: auto;
-  font-size: 16px;
-  color: var(--border);
-  flex-shrink: 0;
-}
-
-.phonebook-item:hover .phonebook-dial-icon {
-  color: var(--accent);
-}
-
-.phonebook-item.dialing {
-  border-color: var(--accent);
-  background: #fff5f5;
-}
-
-.phonebook-item.dialing .phonebook-name {
-  color: var(--accent);
-}
-
-.phonebook-item.dialing .phonebook-dial-icon {
-  color: var(--accent);
-}
-
-.phonebook-dial-icon.in-call {
-  color: #2266cc;
-  font-size: 11px;
-  font-weight: bold;
-}
-
-#phonebook-status {
-  padding: 6px 10px;
-  font-size: 11px;
-  color: var(--text-dim);
-  background: var(--bg-panel);
-  flex-shrink: 0;
-  min-height: 24px;
+  background: #e0dcd4;
 }

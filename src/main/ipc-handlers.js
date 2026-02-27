@@ -110,6 +110,7 @@ function registerIpcHandlers() {
 
       const config = settings.getAll();
       console.log('[Gateway] Connecting to', config.gateway.host + ':' + config.gateway.port);
+      let gatewayConnected = false;
 
       stompManager = new StompConnectionManager({
         host: config.gateway.host,
@@ -145,15 +146,47 @@ function registerIpcHandlers() {
           sendToAllWindows(channels.MESSAGE_RECEIVED, msg);
         },
         onStatusChange: (status) => {
+          if (status === 'connected') gatewayConnected = true;
+          // Stop retrying and show amber warning if gateway was never reached
+          if (status === 'reconnecting' && !gatewayConnected) {
+            sendToMainWindow(channels.CONNECTION_STATUS, { status: 'no-gateway' });
+            // Deactivate STOMP to stop the endless reconnect loop
+            if (stompManager && stompManager.client) {
+              stompManager.client.deactivate();
+              console.log('[Gateway] Stopped reconnection — no gateway available');
+            }
+            return;
+          }
           sendToMainWindow(channels.CONNECTION_STATUS, status);
         },
         onError: (error) => {
           console.error('[Gateway] Error:', error);
-          sendToMainWindow(channels.CONNECTION_STATUS, { status: 'error', error });
+          sendToMainWindow(channels.CONNECTION_STATUS, { status: 'no-gateway', error });
         },
       });
 
       stompManager.connect();
+
+      // Start polling for phone calls from the SimSig window (independent of gateway)
+      if (phoneReader) phoneReader.stopPolling();
+      phoneReader = new PhoneReader(
+        (calls) => sendToMainWindow(channels.PHONE_CALLS_UPDATE, calls),
+        (simName) => {
+          sendToMainWindow(channels.SIM_NAME, simName);
+          settings.set('signaller.panelName', simName);
+        },
+        () => {
+          console.log('[IPC] SimSig closed — quitting app');
+          app.quit();
+        },
+        (paused) => {
+          sendToMainWindow(channels.CLOCK_UPDATE, { paused, clockSeconds: 0, interval: 500 });
+        },
+        () => {
+          sendToMainWindow(channels.PHONE_DRIVER_HUNG_UP);
+        },
+      );
+      phoneReader.startPolling(2000);
 
       // Briefly pause/unpause SimSig to trigger a clock_msg so the clock starts
       setTimeout(() => {
@@ -168,21 +201,6 @@ function registerIpcHandlers() {
         });
       }, 2000);
 
-      // Start polling for phone calls from the SimSig window
-      if (phoneReader) phoneReader.stopPolling();
-      phoneReader = new PhoneReader(
-        (calls) => sendToMainWindow(channels.PHONE_CALLS_UPDATE, calls),
-        (simName) => {
-          sendToMainWindow(channels.SIM_NAME, simName);
-          settings.set('signaller.panelName', simName);
-        },
-        () => {
-          console.log('[IPC] SimSig closed — quitting app');
-          app.quit();
-        },
-      );
-      phoneReader.startPolling(2000);
-
       // Pre-warm Edge TTS instances in background so first TTS is instant
       const ttsProvider = settings.get('tts.provider') || 'edge';
       if (ttsProvider === 'edge') {
@@ -190,7 +208,7 @@ function registerIpcHandlers() {
       }
     } catch (err) {
       console.error('[Gateway] Connection failed:', err);
-      sendToMainWindow(channels.CONNECTION_STATUS, { status: 'error', error: err.message });
+      sendToMainWindow(channels.CONNECTION_STATUS, { status: 'no-gateway', error: err.message });
     }
   });
 
@@ -465,42 +483,126 @@ function registerIpcHandlers() {
   // TTS — ElevenLabs (premium paid voices, requires API key)
   const ELEVENLABS_API_BASE = 'https://api.elevenlabs.io';
 
-  // Only show British accents relevant to UK railway workers
-  const ELEVENLABS_ALLOWED_ACCENTS = [
-    'british', 'british-essex', 'british-swedish',
-    'english-italian', 'english-swedish',
+  // Reject voices whose name/description sounds posh, formal, or RP
+  const POSH_NAME_WORDS = [
+    'smooth', 'calm', 'velvety', 'velvet', 'elegant', 'refined', 'regal',
+    'posh', 'formal', 'sophisticated', 'polished', 'narrator', 'narration',
+    'newsreader', 'announcer', 'documentary', 'storyteller', 'captivating',
+    'broadcaster', 'dramatic', 'authoritative', 'educator', 'steady',
+    'engaging', 'inviting', 'surrey', 'suspense', 'clear,',
   ];
+
+  // Search the ElevenLabs shared voice library for working-class voices
+  async function searchSharedVoices(apiKey) {
+    // Search for conversational/character voices with various British-adjacent accents
+    const searchAccents = ['british', 'irish', 'scottish'];
+    const searchUseCases = ['conversational', 'characters'];
+    const allVoices = [];
+    const seenIds = new Set();
+
+    for (const accent of searchAccents) {
+      for (const useCase of searchUseCases) {
+        try {
+          const url = `${ELEVENLABS_API_BASE}/v1/shared-voices?page_size=30&language=en&accent=${accent}&use_cases=${useCase}&sort=usage_character_count_7d&min_notice_period_days=0`;
+          const resp = await fetch(url, { headers: { 'xi-api-key': apiKey } });
+          if (!resp.ok) continue;
+          const data = await resp.json();
+          for (const v of (data.voices || [])) {
+            if (!seenIds.has(v.voice_id)) {
+              seenIds.add(v.voice_id);
+              allVoices.push(v);
+            }
+          }
+        } catch (err) {
+          console.warn(`[TTS] Shared voice search failed for ${accent}/${useCase}:`, err.message);
+        }
+      }
+    }
+    return allVoices;
+  }
 
   async function fetchElevenLabsVoices(apiKey) {
     if (elevenLabsVoicesCache) return elevenLabsVoicesCache;
 
-    const response = await fetch(`${ELEVENLABS_API_BASE}/v2/voices?page_size=100`, {
-      headers: { 'xi-api-key': apiKey },
-    });
-    if (!response.ok) {
-      throw new Error(`ElevenLabs API error: ${response.status} ${response.statusText}`);
+    // 1) Fetch shared/community voices (much bigger pool, more regional variety)
+    let sharedRaw = [];
+    try {
+      sharedRaw = await searchSharedVoices(apiKey);
+      console.log(`[TTS] Found ${sharedRaw.length} shared community voices`);
+    } catch (err) {
+      console.warn('[TTS] Shared voice search failed, falling back to library only:', err.message);
     }
-    const data = await response.json();
 
-    // Log all accents found so we can refine the filter
-    const allAccents = [...new Set((data.voices || []).map((v) => v.labels?.accent).filter(Boolean))];
-    console.log('[TTS] ElevenLabs accents available:', allAccents.join(', '));
+    // 2) Also fetch user's own library voices
+    let libraryRaw = [];
+    try {
+      const resp = await fetch(`${ELEVENLABS_API_BASE}/v2/voices?page_size=100`, {
+        headers: { 'xi-api-key': apiKey },
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        libraryRaw = data.voices || [];
+        console.log(`[TTS] Found ${libraryRaw.length} library voices`);
+      }
+    } catch (err) {
+      console.warn('[TTS] Library voice fetch failed:', err.message);
+    }
 
-    const voices = (data.voices || [])
+    // 3) Merge and deduplicate (shared format differs slightly from library)
+    const seenIds = new Set();
+    const merged = [];
+
+    // Shared voices: {voice_id, name, accent, gender, description, use_case, ...}
+    for (const v of sharedRaw) {
+      const id = v.voice_id || v.public_owner_id;
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
+      merged.push({
+        voiceId: v.voice_id,
+        name: v.name || '',
+        accent: (v.accent || '').toLowerCase(),
+        gender: (v.gender || '').toLowerCase(),
+        desc: `${v.name || ''} ${v.description || ''} ${v.use_case || ''}`.toLowerCase(),
+      });
+    }
+
+    // Library voices: {voice_id, name, labels: {accent, gender, description, use_case, ...}}
+    for (const v of libraryRaw) {
+      if (seenIds.has(v.voice_id)) continue;
+      seenIds.add(v.voice_id);
+      const lang = (v.labels?.language || '').toLowerCase();
+      if (lang && lang !== 'english' && !lang.startsWith('en')) continue;
+      merged.push({
+        voiceId: v.voice_id,
+        name: v.name || '',
+        accent: (v.labels?.accent || '').toLowerCase(),
+        gender: (v.labels?.gender || '').toLowerCase(),
+        desc: `${v.name || ''} ${v.labels?.description || ''} ${v.labels?.use_case || ''}`.toLowerCase(),
+      });
+    }
+
+    // 4) Filter: reject posh, keep only relevant accents
+    const voices = merged
       .filter((v) => {
-        const lang = (v.labels?.language || '').toLowerCase();
-        if (lang !== 'english' && !lang.startsWith('en')) return false;
-        const accent = (v.labels?.accent || '').toLowerCase();
-        return ELEVENLABS_ALLOWED_ACCENTS.some((a) => accent.includes(a));
+        // Reject posh-sounding voices
+        if (POSH_NAME_WORDS.some((kw) => v.desc.includes(kw))) return false;
+        return true;
       })
       .map((v) => ({
-        id: `el-${v.voice_id}`,
+        id: `el-${v.voiceId}`,
         name: v.name,
-        accent: v.labels?.accent || 'unknown',
-        gender: v.labels?.gender || 'unknown',
+        accent: v.accent,
+        gender: v.gender || 'male',
       }));
 
-    console.log(`[TTS] ${voices.length} ElevenLabs British voices loaded (from ${(data.voices || []).length} total)`);
+    // Log what we got
+    const accentCounts = {};
+    voices.forEach((v) => { accentCounts[v.accent] = (accentCounts[v.accent] || 0) + 1; });
+    console.log('[TTS] ElevenLabs voice accent breakdown:', JSON.stringify(accentCounts));
+    voices.forEach((v) => {
+      console.log(`[TTS]   ${v.name} (${v.accent}, ${v.gender})`);
+    });
+    console.log(`[TTS] ${voices.length} ElevenLabs voices loaded (from ${merged.length} merged)`);
     elevenLabsVoicesCache = voices;
     return voices;
   }
@@ -520,9 +622,9 @@ function registerIpcHandlers() {
           text,
           model_id: 'eleven_flash_v2_5',
           voice_settings: {
-            stability: 0.3,
-            similarity_boost: 0.75,
-            style: 0.4,
+            stability: 0.35,
+            similarity_boost: 0.5,
+            style: 0.6,
             speed: 1.2,
           },
         }),

@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="css/settings.css">
 </head>
 <body>
+  <!-- ── HEADER ─────────────────────────────────────────────── -->
   <header id="top-bar">
     <div id="panel-name-tab">-</div>
     <div id="connection-area">
@@ -17,32 +18,53 @@
       <span id="status-text">Disconnected</span>
       <button id="connect-btn">Connect</button>
     </div>
-    <div id="clock-display">--:--:--</div>
+    <div class="header-status-icons">
+      <span class="header-icon" title="Messages">&#9993;</span>
+      <span class="header-icon" title="Status">&#10004;OK</span>
+    </div>
     <button id="settings-btn" title="Settings">&#9881;</button>
   </header>
+  <div id="panel-subtitle-row">
+    <span id="panel-subtitle"></span>
+  </div>
 
+  <!-- ── MAIN CONTENT ───────────────────────────────────────── -->
   <main id="app-content">
-    <!-- LEFT: Incoming calls table + placeholder grids -->
+    <!-- LEFT: tab-switched views -->
     <div id="left-panel">
+      <!-- Incoming (default view) — 2 stacked sections with icon gutters -->
       <section id="phone-calls" class="tab-view active-view">
-        <div id="phone-calls-header">
-          <span>Incoming Calls</span>
-          <span id="phone-calls-count" class="hidden">0</span>
+        <div class="gsm-section" id="section-calls">
+          <div class="gsm-section-icon"><span class="icon-envelope-arrows"></span></div>
+          <div class="gsm-section-content">
+            <div id="phone-calls-header">
+              <span>Incoming Calls</span>
+              <span id="phone-calls-count" class="hidden">0</span>
+            </div>
+            <div id="calls-table-wrapper">
+              <table id="calls-table">
+                <thead>
+                  <tr>
+                    <th class="col-train">Train</th>
+                    <th class="col-signal">Signal</th>
+                    <th class="col-action">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="phone-calls-list"></tbody>
+              </table>
+            </div>
+            <div id="no-calls-message" class="no-calls">No outstanding calls</div>
+          </div>
         </div>
-        <div id="calls-table-wrapper">
-          <table id="calls-table">
-            <thead>
-              <tr>
-                <th class="col-train">Train</th>
-                <th class="col-signal">Signal</th>
-                <th class="col-action">Action</th>
-              </tr>
-            </thead>
-            <tbody id="phone-calls-list"></tbody>
-          </table>
+        <div class="gsm-section" id="section-messages">
+          <div class="gsm-section-icon"><span class="icon-envelope-x"></span></div>
+          <div class="gsm-section-content">
+            <div class="empty-grid"></div>
+          </div>
         </div>
-        <div id="no-calls-message" class="no-calls">No outstanding calls</div>
       </section>
+
+      <!-- Trains Mobiles (tab-switched) -->
       <section id="trains-mobiles" class="tab-view">
         <div id="trains-header">
           <span>Trains in Area</span>
@@ -60,7 +82,10 @@
           </table>
         </div>
         <div id="no-trains-message">No trains in area</div>
+        <div id="trains-no-gateway" class="no-gateway-message hidden">No Gateway information available</div>
       </section>
+
+      <!-- Emergency (tab-switched) -->
       <section id="emergency-view" class="tab-view">
         <div id="emrg-panel-header">
           <span>Emergency</span>
@@ -70,6 +95,8 @@
           <div id="emrg-feedback"></div>
         </div>
       </section>
+
+      <!-- Phone Book (tab-switched) -->
       <section id="phonebook-view" class="tab-view">
         <div id="phonebook-header">
           <span>Phone Book</span>
@@ -78,6 +105,8 @@
         <div id="phonebook-list"></div>
         <div id="phonebook-status"></div>
       </section>
+
+      <!-- Message Log (tab-switched) -->
       <section id="message-log" class="tab-view">
         <div id="feed-header">
           <span>Message Log</span>
@@ -94,10 +123,11 @@
           <button id="feed-clear">Clear</button>
         </div>
         <div id="feed-log"></div>
+        <div id="feed-no-gateway" class="no-gateway-message hidden">No Gateway information available</div>
       </section>
     </div>
 
-    <!-- RIGHT: Comms chat + notification -->
+    <!-- RIGHT: Comms chat (always visible) -->
     <div id="right-panel">
       <div id="chat-header">
         <span>Comms</span>
@@ -106,52 +136,52 @@
     </div>
   </main>
 
-  <!-- TAB BAR -->
+  <!-- ── TAB BAR ────────────────────────────────────────────── -->
   <div id="tab-bar">
-    <span class="tab-item active">Area</span>
-    <span class="tab-item">FTs</span>
-    <span class="tab-item">Other</span>
+    <span class="tab-item">Speed Dial</span>
+    <span class="tab-item">Speed Dial</span>
     <span class="tab-item">&nbsp;&nbsp;&nbsp;</span>
     <span class="tab-item" id="tab-log">Log</span>
     <span class="tab-item" id="tab-trains">Trains Mobiles (0)</span>
     <span class="tab-item highlight" id="tab-incoming">Incoming (0)</span>
   </div>
 
-  <!-- BOTTOM TOOLBAR -->
+  <!-- ── BOTTOM TOOLBAR ─────────────────────────────────────── -->
   <footer id="bottom-bar">
-    <div id="radio-display">
+    <!-- Hidden but kept in DOM for JS -->
+    <div id="radio-display" style="display:none">
       <div class="display-line" id="display-line-1">GSM-R</div>
       <div class="display-line" id="display-line-2">Ready</div>
     </div>
-    <div class="toolbar-separator"></div>
     <button class="toolbar-btn ptt-toolbar" id="ptt-btn">
       <div class="toolbar-icon">&#9743;</div>
       <span>PTT</span>
     </button>
     <div id="ptt-status" class="toolbar-ptt-status">OFF</div>
-    <div class="toolbar-separator"></div>
+
+    <!-- Visible toolbar buttons -->
     <button class="toolbar-btn emrg" id="emrg-btn">
       <div class="toolbar-icon">&#9888;</div>
-      <span>Emrg.</span>
+      <span>Emerg.</span>
     </button>
     <button class="toolbar-btn" disabled>
-      <div class="toolbar-icon">&#8943;</div>
+      <div class="toolbar-icon">&#9654;</div>
       <span>More</span>
     </button>
     <button class="toolbar-btn" disabled>
-      <div class="toolbar-icon">&#128266;</div>
+      <div class="toolbar-icon">&#9998;</div>
       <span>Broadc.</span>
     </button>
-    <button class="toolbar-btn" id="phonebook-btn">
-      <div class="toolbar-icon">&#128214;</div>
-      <span>PhoneBk</span>
+    <button class="toolbar-btn" id="settings-toolbar-btn">
+      <div class="toolbar-icon">&#128203;</div>
+      <span>Setting</span>
     </button>
-    <button class="toolbar-btn" disabled>
+    <button class="toolbar-btn" id="phonebook-btn">
       <div class="toolbar-icon">&#128222;</div>
       <span>Dial</span>
     </button>
     <button class="toolbar-btn" disabled>
-      <div class="toolbar-icon">&#128101;</div>
+      <div class="toolbar-icon">&#9881;</div>
       <span>Conf.</span>
     </button>
     <button class="toolbar-btn" disabled>
@@ -162,6 +192,11 @@
       <div class="toolbar-icon">&#9208;</div>
       <span>Hold</span>
     </button>
+    <button class="toolbar-btn" disabled>
+      <div class="toolbar-icon">&#9993;</div>
+      <span></span>
+    </button>
+    <div class="toolbar-spacer"></div>
     <button id="silence-btn" class="silence-btn hidden" title="Silence ring">&#128264;</button>
     <div id="incoming-notification" class="hidden">
       <div id="notification-train"></div>
@@ -171,6 +206,7 @@
     </div>
   </footer>
 
+  <!-- ── SETTINGS MODAL ─────────────────────────────────────── -->
   <div id="settings-modal" class="modal hidden">
     <div class="modal-content">
       <h2>Settings</h2>
@@ -233,6 +269,7 @@
     </div>
   </div>
 
+  <!-- ── EMERGENCY CONFIRM MODAL ────────────────────────────── -->
   <div id="emrg-confirm-modal" class="modal hidden">
     <div class="confirm-content">
       <h3>Stop All Trains</h3>
@@ -244,12 +281,12 @@
     </div>
   </div>
 
-  <!-- Initialising overlay — shown until pause/unpause sync completes -->
+  <!-- Initialising overlay -->
   <div id="init-overlay" class="hidden">
     <div id="init-text">Initialising...</div>
   </div>
 
-  <!-- Sim Paused overlay — covers everything except settings/log buttons -->
+  <!-- Sim Paused overlay -->
   <div id="paused-overlay" class="hidden">
     <div id="paused-text">SIM PAUSED</div>
   </div>
