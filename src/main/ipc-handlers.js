@@ -333,11 +333,12 @@ function registerIpcHandlers() {
   });
 
   // Place Call — send a reply
-  ipcMain.handle(channels.PHONE_PLACE_CALL_REPLY, (_event, replyIndex) => {
+  ipcMain.handle(channels.PHONE_PLACE_CALL_REPLY, (_event, replyIndex, headCode) => {
     const args = [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', REPLY_PLACE_CALL_SCRIPT, '-ReplyIndex', String(replyIndex || 0),
     ];
+    if (headCode) args.push('-HeadCode', String(headCode));
     return new Promise((resolve) => {
       execFile('powershell', args, { timeout: 30000 }, (err, stdout, stderr) => {
         const win = BrowserWindow.getAllWindows()[0];

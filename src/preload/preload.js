@@ -91,7 +91,7 @@ contextBridge.exposeInMainWorld('simsigAPI', {
     readPhoneBook: () => ipcRenderer.invoke(channels.PHONE_BOOK_READ),
     dialPhoneBook: (index) => ipcRenderer.invoke(channels.PHONE_BOOK_DIAL, index),
     placeCallStatus: () => ipcRenderer.invoke(channels.PHONE_PLACE_CALL_STATUS),
-    placeCallReply: (replyIndex) => ipcRenderer.invoke(channels.PHONE_PLACE_CALL_REPLY, replyIndex),
+    placeCallReply: (replyIndex, headCode) => ipcRenderer.invoke(channels.PHONE_PLACE_CALL_REPLY, replyIndex, headCode),
     placeCallHangup: () => ipcRenderer.invoke(channels.PHONE_PLACE_CALL_HANGUP),
     hideAnswerDialog: () => ipcRenderer.invoke(channels.PHONE_HIDE_ANSWER),
   },

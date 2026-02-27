@@ -121,7 +121,8 @@ try {
         [void][PhoneBook]::HideOffScreen($dialogHwnd)
     }
 
-    # Find ALL ComboBox controls — dialog has multiple (contacts + message type)
+    # Find ALL TComboBox controls — use the one with items that look like contacts
+    # (FindFirst doesn't guarantee visual order in UI Automation)
     $comboCond = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::ClassNameProperty,
         "TComboBox"
@@ -131,27 +132,20 @@ try {
         $comboCond
     )
 
-    # Pick the ComboBox with the most items (that's the contacts list)
     $contacts = @()
-    $bestCount = 0
-    $bestHwnd = [IntPtr]::Zero
-
     foreach ($combo in $allCombos) {
         $hw = [IntPtr]$combo.Current.NativeWindowHandle
-        if ($hw -ne [IntPtr]::Zero) {
-            $cnt = [PhoneBook]::GetComboCount($hw)
-            if ($cnt -gt $bestCount) {
-                $bestCount = $cnt
-                $bestHwnd = $hw
-            }
-        }
-    }
-
-    if ($bestHwnd -ne [IntPtr]::Zero -and $bestCount -gt 0) {
-        for ($i = 0; $i -lt $bestCount; $i++) {
-            $text = [PhoneBook]::GetComboText($bestHwnd, $i)
-            if ($text) {
-                $contacts += $text
+        if ($hw -eq [IntPtr]::Zero) { continue }
+        $cnt = [PhoneBook]::GetComboCount($hw)
+        if ($cnt -gt 0) {
+            # Check if first item looks like a contact (not a request/message keyword)
+            $firstItem = [PhoneBook]::GetComboText($hw, 0)
+            if ($firstItem -and $firstItem -notmatch "^(Request|Message|Send|Cancel|Pass|Hold|Block|Continue)") {
+                for ($i = 0; $i -lt $cnt; $i++) {
+                    $text = [PhoneBook]::GetComboText($hw, $i)
+                    if ($text) { $contacts += $text }
+                }
+                break
             }
         }
     }

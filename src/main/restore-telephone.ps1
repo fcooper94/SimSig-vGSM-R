@@ -34,6 +34,21 @@ try {
         public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
         [DllImport("user32.dll")]
         public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+        [DllImport("user32.dll")]
+        public static extern bool SetCursorPos(int X, int Y);
+        [DllImport("user32.dll")]
+        public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, IntPtr dwExtraInfo);
+        [DllImport("user32.dll")]
+        public static extern bool IsWindow(IntPtr hWnd);
+
+        public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+        public const uint MOUSEEVENTF_LEFTUP = 0x0004;
+
+        public static void ClickAt(int x, int y) {
+            SetCursorPos(x, y);
+            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, IntPtr.Zero);
+            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, IntPtr.Zero);
+        }
 
         public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -121,8 +136,9 @@ try {
         # (moving first ensures SimSig saves a visible position for future dialogs)
         $WM_CLOSE = 0x0010
 
-        # Split into telephone windows (keep open) and others (close after restoring)
+        # Split into categories: telephone (keep), answer call (close off-screen), others (restore then close)
         $telephoneWindows = @()
+        $answerCallWindows = @()
         $otherWindows = @()
         foreach ($wnd in $offScreenWindows) {
             if ($wnd -eq $simsigHwnd) { continue }
@@ -131,6 +147,8 @@ try {
             $cls = $clsSb.ToString()
             if ($cls -eq "TTelephoneForm") {
                 $telephoneWindows += $wnd
+            } elseif ($cls -eq "TAnswerCallForm") {
+                $answerCallWindows += $wnd
             } else {
                 $otherWindows += $wnd
             }
@@ -138,9 +156,18 @@ try {
 
         $offset = 0
 
-        # First: close non-telephone dialogs (Place Call, Answer Call, etc.)
-        # Send WM_CLOSE while still off-screen — don't show them first,
-        # because SimSig may ignore WM_CLOSE and leave them visible.
+        # TAnswerCallForm: restore on-screen so SimSig can reuse it for future calls.
+        # We cannot close it (SimSig ignores WM_CLOSE, clicking X breaks state).
+        # Just move it back to a visible position — SimSig will update its content
+        # when the user answers the next call.
+        foreach ($wnd in $answerCallWindows) {
+            [void][WinRestore2]::ShowWindow($wnd, 9)
+            [void][WinRestore2]::SetWindowPos($wnd, [WinRestore2]::HWND_TOPMOST, ($centerX + $offset), ($centerY + $offset), 0, 0, $flags)
+            $log += "Restored [TAnswerCallForm] on-screen at ($($centerX + $offset), $($centerY + $offset))"
+            $offset += 30
+        }
+
+        # Other dialogs (Place Call, etc.): restore on-screen then close
         foreach ($wnd in $otherWindows) {
             $clsSb = New-Object System.Text.StringBuilder 256
             [void][WinRestore2]::GetClassName($wnd, $clsSb, 256)
@@ -149,8 +176,12 @@ try {
             [void][WinRestore2]::GetWindowText($wnd, $titleSb, 256)
             $title = $titleSb.ToString()
 
+            [void][WinRestore2]::ShowWindow($wnd, 9)
+            [void][WinRestore2]::SetWindowPos($wnd, [WinRestore2]::HWND_TOPMOST, ($centerX + $offset), ($centerY + $offset), 0, 0, $flags)
+            Start-Sleep -Milliseconds 100
             [void][WinRestore2]::PostMessage($wnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
-            $log += "Closed (off-screen) [$cls] '$title'"
+            $log += "Restored then closed [$cls] '$title' at ($($centerX + $offset), $($centerY + $offset))"
+            $offset += 30
         }
 
         # Wait for dialogs to close before restoring TTelephoneForm

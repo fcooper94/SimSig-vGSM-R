@@ -261,9 +261,10 @@ const PhoneCallsUI = {
       const blob = new Blob([new Uint8Array(audioData)], { type: 'audio/mpeg' });
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
-      audio.onended = () => { URL.revokeObjectURL(url); resolve(true); };
-      audio.onerror = () => { URL.revokeObjectURL(url); resolve(false); };
-      audio.play().catch(() => { resolve(false); });
+      this._currentAudio = audio;
+      audio.onended = () => { this._currentAudio = null; URL.revokeObjectURL(url); resolve(true); };
+      audio.onerror = () => { this._currentAudio = null; URL.revokeObjectURL(url); resolve(false); };
+      audio.play().catch(() => { this._currentAudio = null; resolve(false); });
     });
   },
 
@@ -295,6 +296,16 @@ const PhoneCallsUI = {
       utterance.onerror = () => { resolve(); };
       speechSynthesis.speak(utterance);
     });
+  },
+
+  // Stop any currently playing TTS (ElevenLabs audio or browser speech)
+  stopTTS() {
+    if (this._currentAudio) {
+      this._currentAudio.pause();
+      this._currentAudio.currentTime = 0;
+      this._currentAudio = null;
+    }
+    speechSynthesis.cancel();
   },
 
   // Parse CSD (Carriage Sidings) entry permission messages
@@ -768,39 +779,43 @@ const PhoneCallsUI = {
 
   // After reply is sent, listen for goodbye on incoming calls
   async showHangUpInChat() {
-    if (!this.inCall) return;
-    this.addMessage({ type: 'greeting', text: 'Hold PTT to say goodbye...' });
+    this._replyClicked = false;
+    while (this.inCall) {
+      this.addMessage({ type: 'greeting', text: 'Hold PTT to say goodbye...' });
 
-    try {
-      const transcript = await this.recordAndTranscribe();
-      if (!this.inCall) return;
-      if (transcript) {
-        const lower = transcript.toLowerCase();
-        const goodbyeWords = ['bye', 'goodbye', 'thanks', 'thank', 'cheers', 'ta', 'cheerio'];
-        const isGoodbye = goodbyeWords.some((w) => lower.includes(w));
-        if (isGoodbye) {
-          const voiceKey = this._activeCallVoiceKey || this._activeCallTrain || '';
-          const goodbyes = [
-            'Right, cheers mate, bye.',
-            'Ta, bye now.',
-            'Sound, cheers, bye bye.',
-            'Nice one, ta, bye.',
-            'Alright mate, cheers, bye.',
-            'Lovely, ta, see ya.',
-            'Right oh, cheers, bye.',
-            'Sweet, ta mate, bye bye.',
-            'Alright, cheers ears, bye.',
-            'Sorted, ta, bye now.',
-          ];
-          const reply = goodbyes[Math.floor(Math.random() * goodbyes.length)];
-          this.addMessage({ type: 'driver', caller: this.shortenCaller(voiceKey), text: reply });
-          await this.speakAsDriver(reply, voiceKey);
-          this.hangUp();
-          return;
+      try {
+        const transcript = await this.recordAndTranscribe();
+        if (!this.inCall) return;
+        if (transcript) {
+          const lower = transcript.toLowerCase();
+          const goodbyeWords = ['bye', 'goodbye', 'thanks', 'thank', 'cheers', 'ta', 'cheerio'];
+          const isGoodbye = goodbyeWords.some((w) => lower.includes(w));
+          if (isGoodbye) {
+            const voiceKey = this._activeCallVoiceKey || this._activeCallTrain || '';
+            const goodbyes = [
+              'Right, cheers mate, bye.',
+              'Ta, bye now.',
+              'Sound, cheers, bye bye.',
+              'Nice one, ta, bye.',
+              'Alright mate, cheers, bye.',
+              'Lovely, ta, see ya.',
+              'Right oh, cheers, bye.',
+              'Sweet, ta mate, bye bye.',
+              'Alright, cheers ears, bye.',
+              'Sorted, ta, bye now.',
+            ];
+            const reply = goodbyes[Math.floor(Math.random() * goodbyes.length)];
+            this.addMessage({ type: 'driver', caller: this.shortenCaller(voiceKey), text: reply });
+            await this.speakAsDriver(reply, voiceKey);
+            this.hangUp();
+            return;
+          }
+          // Not a goodbye — show what they said and keep listening
+          this.addMessage({ type: 'signaller', text: transcript });
         }
+      } catch (e) {
+        // PTT cancelled or error — loop back and try again
       }
-    } catch (e) {
-      // PTT cancelled or error — just continue
     }
   },
 
@@ -890,6 +905,9 @@ const PhoneCallsUI = {
   },
 
   hangUp() {
+    // Stop any TTS immediately
+    this.stopTTS();
+
     // Remove the active call from the list
     const activeTrain = this._activeCallTrain;
     if (activeTrain) {
@@ -1074,9 +1092,12 @@ const PhoneCallsUI = {
     }
     console.log(`[Phone] Title: "${result.title}", Train: "${result.train}", HeadCode: "${this.currentHeadCode}"`);
 
-    // Handle reply if reply options available
+    // Handle reply if reply options available, then listen for goodbye
     if (result.replies && result.replies.length > 0) {
       await this.handleReply(result.replies, caller);
+    } else {
+      // No reply options — go straight to goodbye
+      await this.showHangUpInChat();
     }
   },
 
@@ -1185,7 +1206,7 @@ const PhoneCallsUI = {
     };
   },
 
-  stopDialing() {
+  stopDialing(keepDialog) {
     this._dialingActive = false;
     if (this._ringingOutTimer) {
       clearTimeout(this._ringingOutTimer);
@@ -1195,8 +1216,10 @@ const PhoneCallsUI = {
       try { this._ringOutSource.stop(); } catch (e) {}
       this._ringOutSource = null;
     }
-    // Close the Place Call dialog if we were dialing
-    window.simsigAPI.phone.placeCallHangup().catch(() => {});
+    // Only close the Place Call dialog if we're cancelling (not when connected)
+    if (!keepDialog) {
+      window.simsigAPI.phone.placeCallHangup().catch(() => {});
+    }
     this.hideNotification();
   },
 
@@ -1318,23 +1341,121 @@ const PhoneCallsUI = {
     return 'Ok, lovely, thanks';
   },
 
+  // Check if a reply option needs a headcode parameter (e.g. "permission for train")
+  replyNeedsHeadcode(replyText) {
+    const lower = replyText.toLowerCase();
+    return /train|permission|pass.*signal|hold.*back/i.test(lower);
+  },
+
+  // Reverse NATO map: spoken word → single character
+  NATO_REVERSE: {
+    alpha: 'A', bravo: 'B', charlie: 'C', delta: 'D', echo: 'E',
+    foxtrot: 'F', golf: 'G', hotel: 'H', india: 'I', juliet: 'J',
+    kilo: 'K', lima: 'L', leema: 'L', mike: 'M', november: 'N',
+    oscar: 'O', papa: 'P', quebec: 'Q', romeo: 'R', sierra: 'S',
+    tango: 'T', uniform: 'U', victor: 'V', whiskey: 'W', xray: 'X',
+    'x-ray': 'X', yankee: 'Y', zulu: 'Z',
+    zero: '0', one: '1', two: '2', three: '3', four: '4',
+    five: '5', six: '6', seven: '7', eight: '8', nine: '9', niner: '9',
+  },
+
+  // Extract a headcode (e.g. 1F32) from spoken text
+  // Handles NATO phonetics ("three echo nine zero" → "3E90") and direct text
+  extractHeadcode(transcript) {
+    // First, convert NATO phonetic words and number words to characters
+    const words = transcript.toLowerCase().split(/[\s,.-]+/);
+    let decoded = '';
+    for (const w of words) {
+      if (this.NATO_REVERSE[w]) {
+        decoded += this.NATO_REVERSE[w];
+      } else if (/^[0-9A-Za-z]$/.test(w)) {
+        decoded += w.toUpperCase();
+      }
+      // skip unrecognised words
+    }
+    // Try headcode pattern on decoded NATO string
+    const natoMatch = decoded.match(/([0-9][A-Z][0-9]{2})/);
+    if (natoMatch) return natoMatch[1];
+
+    // Direct match on original transcript: "1F32", "4M95" etc.
+    const direct = transcript.match(/([0-9]\s*[A-Z]\s*[0-9]\s*[0-9])/i);
+    if (direct) return direct[1].replace(/\s/g, '').toUpperCase();
+    // Strip spaces and try again on the whole string
+    const stripped = transcript.replace(/\s+/g, '');
+    const stripped2 = stripped.match(/([0-9][A-Z][0-9]{2})/i);
+    if (stripped2) return stripped2[1].toUpperCase();
+    // If NATO decoding produced at least 4 chars, use that
+    if (decoded.length >= 4) return decoded.slice(0, 4);
+    // Return raw cleaned text as fallback
+    return transcript.replace(/\s+/g, '').toUpperCase();
+  },
+
   async sendOutgoingReply(replyIndex, replies, contactName) {
+    const replyText = replies[replyIndex] || '';
+    const shortName = this.shortenCaller(contactName);
+    let headCode = '';
+
+    // Check if the reply already contains a headcode
+    const hcMatch = replyText.match(/([0-9][A-Z][0-9]{2})/i);
+    if (hcMatch) {
+      headCode = hcMatch[1].toUpperCase();
+    } else if (this.replyNeedsHeadcode(replyText)) {
+      // Ask the user for the headcode via conversation
+      const askMsg = 'Ok, what is their headcode?';
+      this.addMessage({ type: 'driver', caller: shortName, text: askMsg });
+      await this.speakAsDriver(askMsg, contactName);
+
+      // Wait for user to speak the headcode
+      let gotHeadcode = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        this.addMessage({ type: 'greeting', text: 'Hold PTT and say the headcode...' });
+        try {
+          const transcript = await this.recordAndTranscribe();
+          if (transcript) {
+            headCode = this.extractHeadcode(transcript);
+            this.addMessage({ type: 'signaller', text: transcript });
+            // Validate: must be digit-letter-digit-digit (e.g. 3E90)
+            if (headCode && /^[0-9][A-Z][0-9]{2}$/.test(headCode)) {
+              gotHeadcode = true;
+              break;
+            }
+            headCode = '';
+          }
+        } catch (e) {
+          // PTT cancelled — try again
+        }
+        if (!this._outgoingCall) return;
+        const retry = "I didn't catch that. Can you give me the headcode? It's a number, letter, then two numbers.";
+        this.addMessage({ type: 'driver', caller: shortName, text: retry });
+        await this.speakAsDriver(retry, contactName);
+      }
+      if (!gotHeadcode) headCode = '0000';
+    }
+
+    // Show what we're sending
     this.addMessage({ type: 'loading', text: 'Sending...' });
 
-    // Send reply to SimSig via Place Call dialog (physical mouse click)
-    const result = await window.simsigAPI.phone.placeCallReply(replyIndex);
+    // Send reply to SimSig via Place Call dialog (keyboard input)
+    const result = await window.simsigAPI.phone.placeCallReply(replyIndex, headCode);
     console.log('[OutgoingReply] result:', JSON.stringify(result));
 
     // Remove loading spinner
     this.messages = this.messages.filter((m) => m.type !== 'loading');
 
     // Show what we selected as a signaller message
-    const replyText = replies[replyIndex] || '';
-    this.addMessage({ type: 'signaller', text: replyText });
+    const displayReply = headCode && !hcMatch
+      ? `${replyText} — ${headCode}`
+      : replyText;
+    this.addMessage({ type: 'signaller', text: displayReply });
 
-    // Generate confirmation — dialog response text is inaccessible (Delphi TLabel, no HWND)
-    const confirmation = this.generateConfirmationFromReply(replyText);
-    this.addMessage({ type: 'driver', text: confirmation });
+    // Show the real response from the Place Call dialog (TMemo), or fall back to generated
+    let confirmation = '';
+    if (result && result.response && result.response.trim()) {
+      confirmation = result.response.trim();
+    } else {
+      confirmation = this.generateConfirmationFromReply(replyText);
+    }
+    this.addMessage({ type: 'driver', caller: shortName, text: confirmation });
     await this.speakAsDriver(confirmation, contactName);
 
     // Listen for goodbye — user says "ok thanks bye" etc., TTS replies "Bye"
@@ -1344,45 +1465,49 @@ const PhoneCallsUI = {
   },
 
   async _listenForGoodbye(contactName) {
-    if (!this._outgoingCall) return;
-    this.addMessage({ type: 'greeting', text: 'Hold PTT to say goodbye...' });
+    while (this._outgoingCall) {
+      this.addMessage({ type: 'greeting', text: 'Hold PTT to say goodbye...' });
 
-    try {
-      const transcript = await this.recordAndTranscribe();
-      if (!this._outgoingCall) return;
-      if (transcript) {
-        const lower = transcript.toLowerCase();
-        const goodbyeWords = ['bye', 'goodbye', 'thanks', 'thank', 'cheers', 'ta', 'cheerio'];
-        const isGoodbye = goodbyeWords.some((w) => lower.includes(w));
-        if (isGoodbye) {
+      try {
+        const transcript = await this.recordAndTranscribe();
+        if (!this._outgoingCall) return;
+        if (transcript) {
+          const lower = transcript.toLowerCase();
+          const goodbyeWords = ['bye', 'goodbye', 'thanks', 'thank', 'cheers', 'ta', 'cheerio'];
+          const isGoodbye = goodbyeWords.some((w) => lower.includes(w));
+          if (isGoodbye) {
+            this.addMessage({ type: 'signaller', text: transcript });
+            const goodbyes = [
+              'Ok, speak later, bye.',
+              'Thanks, bye now.',
+              'Bye bye.',
+              'Cheers, bye.',
+              'Right, thanks, bye.',
+              'Ok, bye now.',
+              'Ok, thanks for that, bye.',
+              'Right oh, bye.',
+              'Ok, thank you, bye now.',
+              'Very good, thanks, bye.',
+            ];
+            const reply = goodbyes[Math.floor(Math.random() * goodbyes.length)];
+            this.addMessage({ type: 'driver', text: reply });
+            await this.speakAsDriver(reply, contactName);
+            this.endOutgoingCall();
+            return;
+          }
+          // Not a goodbye — show what they said and keep listening
           this.addMessage({ type: 'signaller', text: transcript });
-          const goodbyes = [
-            'Ok, speak later, bye.',
-            'Thanks, bye now.',
-            'Bye bye.',
-            'Cheers, bye.',
-            'Right, thanks, bye.',
-            'Ok, bye now.',
-            'Ok, thanks for that, bye.',
-            'Right oh, bye.',
-            'Ok, thank you, bye now.',
-            'Very good, thanks, bye.',
-          ];
-          const reply = goodbyes[Math.floor(Math.random() * goodbyes.length)];
-          this.addMessage({ type: 'driver', text: reply });
-          await this.speakAsDriver(reply, contactName);
-          this.endOutgoingCall();
-          return;
         }
-        // Not a goodbye — show what they said and carry on
-        this.addMessage({ type: 'signaller', text: transcript });
+      } catch (e) {
+        // PTT cancelled or error — loop back and try again
       }
-    } catch (e) {
-      // PTT cancelled or error — just continue
     }
   },
 
   endOutgoingCall() {
+    // Stop any TTS immediately
+    this.stopTTS();
+
     // Click "Hang up and close" on the Place Call dialog
     window.simsigAPI.phone.placeCallHangup().catch(() => {});
 

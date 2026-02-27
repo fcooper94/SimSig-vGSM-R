@@ -19,6 +19,9 @@ public class PhoneBookDial {
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
+    [DllImport("user32.dll", EntryPoint = "SendMessage", CharSet = CharSet.Auto)]
+    public static extern IntPtr SendMessageSb(IntPtr hWnd, int msg, IntPtr wParam, StringBuilder lParam);
+
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
@@ -40,6 +43,8 @@ public class PhoneBookDial {
 
     public const int CB_SETCURSEL = 0x014E;
     public const int CB_GETCOUNT = 0x0146;
+    public const int CB_GETLBTEXT = 0x0148;
+    public const int CB_GETLBTEXTLEN = 0x0149;
     public const int BM_CLICK = 0x00F5;
     public const uint WM_KEYDOWN = 0x0100;
     public const uint WM_KEYUP = 0x0101;
@@ -59,6 +64,14 @@ public class PhoneBookDial {
 
     public static int GetComboCount(IntPtr hWnd) {
         return (int)SendMessage(hWnd, CB_GETCOUNT, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    public static string GetComboText(IntPtr hWnd, int index) {
+        int len = (int)SendMessage(hWnd, CB_GETLBTEXTLEN, (IntPtr)index, IntPtr.Zero);
+        if (len <= 0) return "";
+        StringBuilder sb = new StringBuilder(len + 1);
+        SendMessageSb(hWnd, CB_GETLBTEXT, (IntPtr)index, sb);
+        return sb.ToString();
     }
 
     public static void ClickButton(IntPtr hWnd) {
@@ -138,7 +151,8 @@ try {
         [void][PhoneBookDial]::HideOffScreen($dialogHwnd)
     }
 
-    # Find ALL ComboBoxes and pick the one with the most items (contacts list)
+    # Find the contacts ComboBox (the one whose first item isn't a request keyword)
+    # FindFirst doesn't guarantee visual order in UI Automation
     $comboCond = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::ClassNameProperty,
         "TComboBox"
@@ -148,15 +162,16 @@ try {
         $comboCond
     )
 
-    $bestCount = 0
     $bestHwnd = [IntPtr]::Zero
     foreach ($combo in $allCombos) {
         $hw = [IntPtr]$combo.Current.NativeWindowHandle
-        if ($hw -ne [IntPtr]::Zero) {
-            $cnt = [PhoneBookDial]::GetComboCount($hw)
-            if ($cnt -gt $bestCount) {
-                $bestCount = $cnt
+        if ($hw -eq [IntPtr]::Zero) { continue }
+        $cnt = [PhoneBookDial]::GetComboCount($hw)
+        if ($cnt -gt 0) {
+            $firstItem = [PhoneBookDial]::GetComboText($hw, 0)
+            if ($firstItem -and $firstItem -notmatch "^(Request|Message|Send|Cancel|Pass|Hold|Block|Continue)") {
                 $bestHwnd = $hw
+                break
             }
         }
     }
@@ -165,6 +180,8 @@ try {
         Write-Output '{"error":"ComboBox not found"}'
         exit 0
     }
+
+    $bestCount = [PhoneBookDial]::GetComboCount($bestHwnd)
 
     if ($Index -ge $bestCount) {
         Write-Output '{"error":"Contact index out of range"}'

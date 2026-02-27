@@ -164,7 +164,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               const status = await window.simsigAPI.phone.placeCallStatus();
               if (status.connected) {
                 row.classList.remove('dialing');
-                PhoneCallsUI.stopDialing();
+                PhoneCallsUI.stopDialing(true);  // keep Place Call dialog open for replies
                 PhoneCallsUI.showOutgoingCallNotification(name, status.message, status.replies);
                 return;
               }

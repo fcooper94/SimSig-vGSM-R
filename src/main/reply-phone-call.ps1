@@ -1,5 +1,6 @@
 # reply-phone-call.ps1
-# Selects a reply option in SimSig's Answer Call dialog and clicks Reply.
+# Selects a reply option in SimSig's Answer Call dialog and clicks Reply
+# using physical mouse/keyboard simulation (same approach as place-call).
 # Usage: powershell -File reply-phone-call.ps1 -ReplyIndex 0 [-HeadCode 1F32]
 
 param(
@@ -13,7 +14,7 @@ Add-Type -AssemblyName UIAutomationTypes
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
-using System.Collections.Generic;
+using System.Text;
 
 public class Win32Reply {
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
@@ -25,58 +26,110 @@ public class Win32Reply {
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    public static extern IntPtr FindWindow(string className, string windowName);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string windowName);
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumCallback callback, IntPtr lParam);
 
     [DllImport("user32.dll")]
     public static extern bool EnumChildWindows(IntPtr parent, EnumCallback callback, IntPtr lParam);
 
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int maxLength);
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxLength);
 
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder className, int maxLength);
-
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetForegroundWindow();
-
-    [DllImport("user32.dll")]
-    public static extern bool EnumWindows(EnumCallback callback, IntPtr lParam);
+    public static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxLength);
 
     [DllImport("user32.dll")]
     public static extern bool IsWindowVisible(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int cmd);
+
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int X, int Y);
+
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, IntPtr dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, IntPtr dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindow(IntPtr hWnd);
+
+    // Thread input attachment for cross-process SetFocus
+    [DllImport("user32.dll")]
+    public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    [DllImport("kernel32.dll")]
+    public static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetFocus(IntPtr hWnd);
+
     public delegate bool EnumCallback(IntPtr hWnd, IntPtr lParam);
 
-    public const int LB_SETCURSEL = 0x0186;
-    public const int BM_CLICK = 0x00F5;
-    public const int WM_SETTEXT = 0x000C;
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left, Top, Right, Bottom; }
 
-    public static void SelectItem(IntPtr hWnd, int index) {
-        SendMessage(hWnd, LB_SETCURSEL, (IntPtr)index, IntPtr.Zero);
+    public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    public const uint MOUSEEVENTF_LEFTUP   = 0x0004;
+    public const uint KEYEVENTF_KEYUP      = 0x0002;
+    public const byte VK_DOWN = 0x28;
+    public const byte VK_HOME = 0x24;
+    public const int  LB_GETCOUNT = 0x018B;
+    public const int  WM_SETTEXT  = 0x000C;
+    public const int  SW_RESTORE  = 9;
+
+    public static void ClickAt(int x, int y) {
+        SetCursorPos(x, y);
+        System.Threading.Thread.Sleep(50);
+        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, IntPtr.Zero);
+        System.Threading.Thread.Sleep(30);
+        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, IntPtr.Zero);
     }
 
-    public static void ClickButton(IntPtr hWnd) {
-        SendMessage(hWnd, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+    public static void PressKey(byte vk) {
+        keybd_event(vk, 0, 0, IntPtr.Zero);
+        System.Threading.Thread.Sleep(30);
+        keybd_event(vk, 0, KEYEVENTF_KEYUP, IntPtr.Zero);
     }
 
-    // Async click — does not block if the button opens a modal dialog
-    public static void ClickButtonAsync(IntPtr hWnd) {
-        PostMessage(hWnd, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+    public static int GetListCount(IntPtr hWnd) {
+        return (int)SendMessage(hWnd, LB_GETCOUNT, IntPtr.Zero, IntPtr.Zero);
     }
 
     public static void SetText(IntPtr hWnd, string text) {
         SendMessageStr(hWnd, WM_SETTEXT, IntPtr.Zero, text);
     }
 
-    // Find an edit control anywhere in the window hierarchy (recursive)
+    public static void HideOffScreen(IntPtr hWnd) {
+        SetWindowPos(hWnd, IntPtr.Zero, -32000, -32000, 0, 0, 0x0001 | 0x0004 | 0x0010);
+    }
+
+    // Cross-process SetFocus via thread input attachment
+    public static void FocusControl(IntPtr dialogHwnd, IntPtr controlHwnd) {
+        uint pid;
+        uint targetThread = GetWindowThreadProcessId(dialogHwnd, out pid);
+        uint ourThread = GetCurrentThreadId();
+        AttachThreadInput(ourThread, targetThread, true);
+        SetFocus(controlHwnd);
+        AttachThreadInput(ourThread, targetThread, false);
+    }
+
+    // Find an edit control anywhere in the window hierarchy
     public static IntPtr FindEditControl(IntPtr parent) {
         IntPtr result = IntPtr.Zero;
         EnumChildWindows(parent, (hWnd, lParam) => {
-            var sb = new System.Text.StringBuilder(256);
+            var sb = new StringBuilder(256);
             GetClassName(hWnd, sb, 256);
             string cls = sb.ToString();
             if (cls == "TEdit" || cls == "Edit") {
@@ -88,16 +141,15 @@ public class Win32Reply {
         return result;
     }
 
-    // Find a visible top-level window titled "Message" or "Confirmation" with an Ok/OK button
+    // Find a visible top-level window titled "Message" or "Confirmation" with an OK button
     public static IntPtr FindMessageDialog(string[] buttonTexts) {
         IntPtr result = IntPtr.Zero;
         EnumWindows((hWnd, lParam) => {
             if (!IsWindowVisible(hWnd)) return true;
-            var sb = new System.Text.StringBuilder(256);
+            var sb = new StringBuilder(256);
             GetWindowText(hWnd, sb, 256);
             string title = sb.ToString();
             if (title == "Message" || title.Contains("onfirmation")) {
-                // Verify it has a matching button
                 IntPtr btn = FindButtonByText(hWnd, buttonTexts);
                 if (btn != IntPtr.Zero) {
                     result = hWnd;
@@ -109,16 +161,15 @@ public class Win32Reply {
         return result;
     }
 
-    // Find a visible top-level window that has a TEdit child and "onfirmation" in its title
+    // Find a visible top-level window with a TEdit child and "onfirmation" in title
     public static IntPtr FindConfirmationDialog() {
         IntPtr result = IntPtr.Zero;
         EnumWindows((hWnd, lParam) => {
             if (!IsWindowVisible(hWnd)) return true;
-            var sb = new System.Text.StringBuilder(256);
+            var sb = new StringBuilder(256);
             GetWindowText(hWnd, sb, 256);
             string title = sb.ToString();
             if (title.Contains("onfirmation")) {
-                // Verify it has an edit control
                 IntPtr edit = FindEditControl(hWnd);
                 if (edit != IntPtr.Zero) {
                     result = hWnd;
@@ -130,18 +181,11 @@ public class Win32Reply {
         return result;
     }
 
-    [DllImport("user32.dll")]
-    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-
-    public static void HideOffScreen(IntPtr hWnd) {
-        SetWindowPos(hWnd, IntPtr.Zero, -32000, -32000, 0, 0, 0x0001 | 0x0004 | 0x0010);
-    }
-
-    // Find a child button by text (OK, &OK, Close)
+    // Find a child button by text
     public static IntPtr FindButtonByText(IntPtr parent, string[] texts) {
         IntPtr result = IntPtr.Zero;
         EnumChildWindows(parent, (hWnd, lParam) => {
-            var sb = new System.Text.StringBuilder(256);
+            var sb = new StringBuilder(256);
             GetClassName(hWnd, sb, 256);
             string cls = sb.ToString();
             if (cls == "TButton" || cls == "Button") {
@@ -151,11 +195,11 @@ public class Win32Reply {
                 foreach (string t in texts) {
                     if (btnText == t) {
                         result = hWnd;
-                        return false; // stop enumerating
+                        return false;
                     }
                 }
             }
-            return true; // continue
+            return true;
         }, IntPtr.Zero);
         return result;
     }
@@ -180,8 +224,8 @@ try {
         exit 0
     }
 
-    # Save SimSig's process ID so we can send F6 later if needed
     $simsigPid = $dialog.Current.ProcessId
+    $dialogHwnd = [IntPtr]$dialog.Current.NativeWindowHandle
 
     # Find the TListBox (reply options)
     $listBoxCond = New-Object System.Windows.Automation.PropertyCondition(
@@ -200,11 +244,7 @@ try {
 
     $listBoxHwnd = [IntPtr]$listBox.Current.NativeWindowHandle
 
-    # Select the reply option
-    [Win32Reply]::SelectItem($listBoxHwnd, $ReplyIndex)
-    Start-Sleep -Milliseconds 100
-
-    # Find and click the Reply button
+    # Find the Reply button
     $replyBtnCond = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::NameProperty,
         "Reply"
@@ -220,72 +260,103 @@ try {
     }
 
     $replyBtnHwnd = [IntPtr]$replyBtn.Current.NativeWindowHandle
-    # Use async PostMessage — Reply button may open a modal dialog that
-    # would block a synchronous SendMessage(BM_CLICK) indefinitely
-    [Win32Reply]::ClickButtonAsync($replyBtnHwnd)
 
-    $okTexts = @("OK", "&OK", "Ok", "Close")
+    # Keep dialog off-screen — just restore and foreground for keyboard focus
+    [Win32Reply]::ShowWindow($dialogHwnd, [Win32Reply]::SW_RESTORE) | Out-Null
+    [Win32Reply]::SetForegroundWindow($dialogHwnd) | Out-Null
+    Start-Sleep -Milliseconds 300
 
-    # If a headcode was provided, handle the confirmation dialog
-    if ($HeadCode -ne "") {
-        for ($attempt = 0; $attempt -lt 15; $attempt++) {
-            Start-Sleep -Milliseconds 200
+    # Focus the ListBox, select reply with Home + Down arrows
+    [Win32Reply]::FocusControl($dialogHwnd, $listBoxHwnd)
+    Start-Sleep -Milliseconds 150
+    [Win32Reply]::PressKey([Win32Reply]::VK_HOME)
+    Start-Sleep -Milliseconds 150
 
-            # Search ALL top-level windows for the confirmation dialog
-            $confirmHwnd = [Win32Reply]::FindConfirmationDialog()
-            if ($confirmHwnd -eq [IntPtr]::Zero) { continue }
+    for ($i = 0; $i -lt $ReplyIndex; $i++) {
+        [Win32Reply]::PressKey([Win32Reply]::VK_DOWN)
+        Start-Sleep -Milliseconds 100
+    }
+    Start-Sleep -Milliseconds 150
 
-            # We found it — get the edit control and type the headcode
-            $editHwnd = [Win32Reply]::FindEditControl($confirmHwnd)
-            if ($editHwnd -ne [IntPtr]::Zero) {
-                [Win32Reply]::SetText($editHwnd, $HeadCode)
-                Start-Sleep -Milliseconds 50
-
-                $okHwnd = [Win32Reply]::FindButtonByText($confirmHwnd, $okTexts)
-                if ($okHwnd -ne [IntPtr]::Zero) {
-                    # Async click — OK may open another modal dialog
-                    [Win32Reply]::ClickButtonAsync($okHwnd)
-                }
-                break
-            }
+    # Press Enter to click Reply, then poll rapidly to catch confirmation dialog before it renders
+    [Win32Reply]::PressKey(0x0D)  # VK_RETURN
+    $confirmDlg = [IntPtr]::Zero
+    for ($poll = 0; $poll -lt 40; $poll++) {
+        Start-Sleep -Milliseconds 25
+        $confirmDlg = [Win32Reply]::FindConfirmationDialog()
+        if ($confirmDlg -ne [IntPtr]::Zero) {
+            [Win32Reply]::HideOffScreen($confirmDlg)
+            [Win32Reply]::SetForegroundWindow($confirmDlg) | Out-Null
+            Start-Sleep -Milliseconds 100
+            break
         }
     }
 
-    # Wait for any subsequent OK/Close dialog and dismiss it
-    # SimSig shows a "Message" popup after the reply is processed
+    # Type headcode and press Enter
+    Add-Type -AssemblyName System.Windows.Forms
+    $hc = if ($HeadCode -ne "") { $HeadCode } else { "0000" }
+    [System.Windows.Forms.SendKeys]::SendWait($hc)
     Start-Sleep -Milliseconds 500
-    for ($attempt = 0; $attempt -lt 15; $attempt++) {
-        # Use EnumWindows to find a "Message" or "Confirmation" dialog with an Ok button
-        $popupHwnd = [Win32Reply]::FindMessageDialog($okTexts)
+    [Win32Reply]::PressKey(0x0D)  # VK_RETURN
 
-        if ($popupHwnd -ne [IntPtr]::Zero) {
-            $okHwnd = [Win32Reply]::FindButtonByText($popupHwnd, $okTexts)
-            if ($okHwnd -ne [IntPtr]::Zero) {
-                [Win32Reply]::ClickButton($okHwnd)
-                break
-            }
+    # Poll for message/OK dialog and hide instantly
+    $msgDlg = [IntPtr]::Zero
+    for ($poll = 0; $poll -lt 40; $poll++) {
+        Start-Sleep -Milliseconds 25
+        $msgDlg = [Win32Reply]::FindMessageDialog(@("OK", "Ok", "&OK", "Close"))
+        if ($msgDlg -ne [IntPtr]::Zero) {
+            [Win32Reply]::HideOffScreen($msgDlg)
+            [Win32Reply]::SetForegroundWindow($msgDlg) | Out-Null
+            Start-Sleep -Milliseconds 100
+            break
         }
-
-        Start-Sleep -Milliseconds 200
     }
+    [Win32Reply]::PressKey(0x0D)  # VK_RETURN
 
-    # Close the TAnswerCallForm (it may still be open after reply)
-    $answerFormCond2 = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-        "TAnswerCallForm"
-    )
+    # Poll for any second message dialog
+    $msgDlg2 = [IntPtr]::Zero
+    for ($poll = 0; $poll -lt 20; $poll++) {
+        Start-Sleep -Milliseconds 25
+        $msgDlg2 = [Win32Reply]::FindMessageDialog(@("OK", "Ok", "&OK", "Close"))
+        if ($msgDlg2 -ne [IntPtr]::Zero) {
+            [Win32Reply]::HideOffScreen($msgDlg2)
+            [Win32Reply]::SetForegroundWindow($msgDlg2) | Out-Null
+            Start-Sleep -Milliseconds 100
+            break
+        }
+    }
+    [Win32Reply]::PressKey(0x0D)  # VK_RETURN
+    Start-Sleep -Milliseconds 300
+
+    # Soft close: if TAnswerCallForm is still open, try Escape then hide off-screen
+    Start-Sleep -Milliseconds 300
     $answerForm2 = $root.FindFirst(
         [System.Windows.Automation.TreeScope]::Children,
-        $answerFormCond2
+        $answerFormCond
     )
     if ($null -ne $answerForm2) {
         $aHwnd = [IntPtr]$answerForm2.Current.NativeWindowHandle
         if ($aHwnd -ne [IntPtr]::Zero) {
-            [Win32Reply]::PostMessage($aHwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+            [Win32Reply]::SetForegroundWindow($aHwnd) | Out-Null
+            Start-Sleep -Milliseconds 100
+            [Win32Reply]::PressKey(0x1B)  # VK_ESCAPE
+            Start-Sleep -Milliseconds 500
+
+            # Check if it closed — if not, hide off-screen
+            $answerForm3 = $root.FindFirst(
+                [System.Windows.Automation.TreeScope]::Children,
+                $answerFormCond
+            )
+            if ($null -ne $answerForm3) {
+                $aHwnd2 = [IntPtr]$answerForm3.Current.NativeWindowHandle
+                if ($aHwnd2 -ne [IntPtr]::Zero) {
+                    [Win32Reply]::HideOffScreen($aHwnd2)
+                }
+            }
         }
     }
 
-    # Hide any lingering Place Call dialog (may be left from phone book read)
+    # Hide any lingering Place Call dialog
     $placeCallCond = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::NameProperty,
         "Place Call"
@@ -318,11 +389,9 @@ try {
             $proc = Get-Process -Id $simsigPid -ErrorAction Stop
             $mainHwnd = $proc.MainWindowHandle
             if ($mainHwnd -ne [IntPtr]::Zero) {
-                # WM_KEYDOWN=0x0100, VK_F6=0x75
                 [Win32Reply]::PostMessage($mainHwnd, 0x0100, [IntPtr]0x75, [IntPtr]::Zero) | Out-Null
                 Start-Sleep -Milliseconds 50
                 [Win32Reply]::PostMessage($mainHwnd, 0x0101, [IntPtr]0x75, [IntPtr]::Zero) | Out-Null
-                # Wait for it to open, then hide off-screen
                 Start-Sleep -Milliseconds 500
                 $telWindow = $root.FindFirst(
                     [System.Windows.Automation.TreeScope]::Children,
@@ -337,7 +406,6 @@ try {
             }
         } catch {}
     } elseif ($null -ne $telWindow) {
-        # Window exists — make sure it's hidden off-screen
         $tHwnd = [IntPtr]$telWindow.Current.NativeWindowHandle
         if ($tHwnd -ne [IntPtr]::Zero) {
             [Win32Reply]::HideOffScreen($tHwnd)

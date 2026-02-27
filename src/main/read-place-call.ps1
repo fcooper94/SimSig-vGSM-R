@@ -89,43 +89,52 @@ try {
         $comboCond
     )
 
-    # Identify the reply ComboBox vs the contacts ComboBox.
-    # The contacts ComboBox has the most items (all callable locations).
-    # The reply ComboBox is the OTHER one — when connected it has >0 items.
-    $maxCount = 0
-    $contactsHwnd = [IntPtr]::Zero
-    $comboList = @()
+    # Identify the reply ComboBox by keyword matching on first item.
+    # The reply combo has request/message items; the contacts combo has location names.
+    $replyComboHwnd = [IntPtr]::Zero
+    $replyItems = @()
+    $replyKeywords = "^(Request|Message|Send|Cancel|Pass|Hold|Block|Continue|Ask|Authoris|Please)"
 
     foreach ($combo in $allCombos) {
         $hw = [IntPtr]$combo.Current.NativeWindowHandle
         if ($hw -eq [IntPtr]::Zero) { continue }
         $cnt = [PlaceCallReader]::GetComboCount($hw)
-        $comboList += ,@($hw, $cnt)
-        if ($cnt -gt $maxCount) {
-            $maxCount = $cnt
-            $contactsHwnd = $hw
-        }
-    }
-
-    # The reply ComboBox is the one that ISN'T the contacts ComboBox and has >0 items
-    $replyComboHwnd = [IntPtr]::Zero
-    $replyItems = @()
-
-    foreach ($entry in $comboList) {
-        $hw = $entry[0]
-        $cnt = $entry[1]
-        if ($hw -ne $contactsHwnd -and $cnt -gt 0) {
-            $replyComboHwnd = $hw
-            for ($i = 0; $i -lt $cnt; $i++) {
-                $text = [PlaceCallReader]::GetComboText($hw, $i)
-                if ($text) { $replyItems += $text }
+        if ($cnt -gt 0) {
+            $firstItem = [PlaceCallReader]::GetComboText($hw, 0)
+            if ($firstItem -match $replyKeywords) {
+                $replyComboHwnd = $hw
+                for ($i = 0; $i -lt $cnt; $i++) {
+                    $text = [PlaceCallReader]::GetComboText($hw, $i)
+                    if ($text) { $replyItems += $text }
+                }
+                break
             }
-            break
         }
     }
 
+    # Fallback: pick the combo with the longest first item (request text vs location name)
+    if ($replyComboHwnd -eq [IntPtr]::Zero -and $allCombos.Count -ge 2) {
+        foreach ($combo in $allCombos) {
+            $hw = [IntPtr]$combo.Current.NativeWindowHandle
+            if ($hw -eq [IntPtr]::Zero) { continue }
+            $cnt = [PlaceCallReader]::GetComboCount($hw)
+            if ($cnt -gt 0) {
+                $firstItem = [PlaceCallReader]::GetComboText($hw, 0)
+                if ($firstItem.Length -gt 20) {
+                    $replyComboHwnd = $hw
+                    for ($i = 0; $i -lt $cnt; $i++) {
+                        $text = [PlaceCallReader]::GetComboText($hw, $i)
+                        if ($text) { $replyItems += $text }
+                    }
+                    break
+                }
+            }
+        }
+    }
+
+    # Connected = reply combo found with items
     if ($replyComboHwnd -eq [IntPtr]::Zero -or $replyItems.Count -eq 0) {
-        # Not connected yet — dump debug info about all combos and buttons
+        # Not connected yet — dump debug info
         $debugParts = @("combos=$($allCombos.Count)")
         $ci = 0
         foreach ($combo in $allCombos) {
@@ -138,7 +147,6 @@ try {
             if ($first) { $debugParts += "c${ci}first=$first" }
             $ci++
         }
-        # List all buttons
         $btnCond = New-Object System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::ClassNameProperty,
             "TButton"
@@ -156,7 +164,7 @@ try {
         exit 0
     }
 
-    # Connected — read message from TMemo
+    # Connected — read TMemo message text
     $messageText = ""
     $memoCond = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::ClassNameProperty,
@@ -167,16 +175,18 @@ try {
         $memoCond
     )
     if ($null -ne $memo) {
-        $messageText = $memo.Current.Name
+        $messageText = ($memo.Current.Name).Trim()
     }
 
-    $result = @{
-        connected = $true
-        message   = $messageText
-        replies   = $replyItems
+    # Build JSON manually to guarantee replies is always a JSON array
+    $escapedMsg = ($messageText -replace '\\', '\\\\' -replace '"', '\"' -replace "`n", '\n' -replace "`r", '')
+    $repliesJson = @()
+    foreach ($r in $replyItems) {
+        $escaped = ($r -replace '\\', '\\\\' -replace '"', '\"' -replace "`n", '\n' -replace "`r", '')
+        $repliesJson += "`"$escaped`""
     }
-    $json = $result | ConvertTo-Json -Compress -Depth 3
-    Write-Output $json
+    $repliesArr = "[" + ($repliesJson -join ",") + "]"
+    Write-Output "{`"connected`":true,`"message`":`"$escapedMsg`",`"replies`":$repliesArr}"
 } catch {
     Write-Output "{`"connected`":false,`"error`":`"$($_.Exception.Message)`"}"
 }
