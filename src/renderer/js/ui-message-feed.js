@@ -126,4 +126,11 @@ const MessageFeed = {
   clear() {
     this.feedLog.innerHTML = '';
   },
+
+  // Full reset — called on disconnect to dump all state
+  reset() {
+    this.clear();
+    this.currentFilter = 'all';
+    this.feedFilter.value = 'all';
+  },
 };

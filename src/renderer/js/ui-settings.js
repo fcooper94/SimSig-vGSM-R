@@ -82,8 +82,10 @@ const SettingsUI = {
 
     const inputSelect = document.getElementById('setting-audio-input');
     const outputSelect = document.getElementById('setting-audio-output');
+    const ringSelect = document.getElementById('setting-ring-output');
     await window.simsigAPI.settings.set('audio.inputDeviceId', inputSelect.value);
     await window.simsigAPI.settings.set('audio.outputDeviceId', outputSelect.value);
+    await window.simsigAPI.settings.set('audio.ringDeviceId', ringSelect.value);
 
     const micVolume = parseInt(document.getElementById('setting-mic-volume').value, 10);
     const outputVolume = parseInt(document.getElementById('setting-output-volume').value, 10);
@@ -124,31 +126,48 @@ const SettingsUI = {
       PhoneCallsUI.voiceCache = {};
     }
 
+    // Apply ring output device in real-time
+    if (typeof PhoneCallsUI !== 'undefined') {
+      PhoneCallsUI.setRingDevice(ringSelect.value);
+    }
+
     this.close();
   },
 
   async enumerateAudioDevices() {
     const inputSelect = document.getElementById('setting-audio-input');
     const outputSelect = document.getElementById('setting-audio-output');
+    const ringSelect = document.getElementById('setting-ring-output');
 
     inputSelect.innerHTML = '<option value="default">Default</option>';
     outputSelect.innerHTML = '<option value="default">Default</option>';
+    ringSelect.innerHTML = '<option value="default">Default</option>';
 
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const settings = await window.simsigAPI.settings.getAll();
 
       devices.forEach((device) => {
-        const option = document.createElement('option');
-        option.value = device.deviceId;
-        option.textContent = device.label || `${device.kind} (${device.deviceId.substring(0, 8)}...)`;
+        const label = device.label || `${device.kind} (${device.deviceId.substring(0, 8)}...)`;
 
         if (device.kind === 'audioinput') {
+          const option = document.createElement('option');
+          option.value = device.deviceId;
+          option.textContent = label;
           if (device.deviceId === settings.audio?.inputDeviceId) option.selected = true;
           inputSelect.appendChild(option);
         } else if (device.kind === 'audiooutput') {
+          const option = document.createElement('option');
+          option.value = device.deviceId;
+          option.textContent = label;
           if (device.deviceId === settings.audio?.outputDeviceId) option.selected = true;
           outputSelect.appendChild(option);
+
+          const ringOption = document.createElement('option');
+          ringOption.value = device.deviceId;
+          ringOption.textContent = label;
+          if (device.deviceId === settings.audio?.ringDeviceId) ringOption.selected = true;
+          ringSelect.appendChild(ringOption);
         }
       });
     } catch (err) {

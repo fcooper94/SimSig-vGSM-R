@@ -22,9 +22,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Register event listeners from main process
   window.simsigAPI.connection.onStatusChange((status) => {
     ConnectionUI.setStatus(status);
+
+    // On disconnect, dump all data from every UI module
+    const statusStr = typeof status === 'object' ? status.status : status;
+    if (statusStr === 'disconnected') {
+      PhoneCallsUI.reset();
+      TrainTracker.reset();
+      MessageFeed.reset();
+      // Reset panel name
+      document.getElementById('panel-name-tab').textContent = '-';
+      document.getElementById('panel-subtitle').textContent = '';
+      // Hide paused overlay
+      document.getElementById('paused-overlay').classList.add('hidden');
+      // Clear phonebook cache so it re-fetches on next connect
+      phonebookContacts = [];
+      phonebookList.innerHTML = '';
+      phonebookStatus.textContent = '';
+    }
   });
 
   window.simsigAPI.clock.onUpdate((data) => {
+    if (!ConnectionUI.isConnected && ConnectionUI.indicator.className !== 'no-gateway') return;
     const overlay = document.getElementById('paused-overlay');
     if (data.paused) {
       overlay.classList.remove('hidden');
@@ -33,13 +51,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       overlay.classList.add('hidden');
       PhoneCallsUI.resumeRinging();
     }
+    // Track game time for chat message timestamps
+    if (data.formatted) PhoneCallsUI.gameTime = data.formatted;
   });
 
   window.simsigAPI.phone.onCallsUpdate((calls) => {
+    if (!ConnectionUI.isConnected && ConnectionUI.indicator.className !== 'no-gateway') return;
     PhoneCallsUI.update(calls);
   });
 
   window.simsigAPI.phone.onDriverHungUp(() => {
+    if (!ConnectionUI.isConnected && ConnectionUI.indicator.className !== 'no-gateway') return;
     if (PhoneCallsUI.inCall) {
       // If we already sent a reply, the dialog closing is expected (not a driver hang-up)
       if (PhoneCallsUI._replySent) return;
@@ -50,6 +72,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Feed STOMP messages to TrainTracker and MessageFeed
   window.simsigAPI.messages.onMessage((msg) => {
+    if (!ConnectionUI.isConnected && ConnectionUI.indicator.className !== 'no-gateway') return;
     TrainTracker.handleMessage(msg);
     MessageFeed.handleMessage(msg);
   });
@@ -120,7 +143,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     emrgConfirmModal.classList.add('hidden');
   });
 
-  // Phone Book view
+  // Phone Book view (declared here; also cleared on disconnect above)
   const phonebookList = document.getElementById('phonebook-list');
   const phonebookStatus = document.getElementById('phonebook-status');
   let phonebookContacts = [];

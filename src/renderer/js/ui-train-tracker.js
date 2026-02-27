@@ -128,6 +128,13 @@ const TrainTracker = {
     }
   },
 
+  // Full reset — called on disconnect to dump all state
+  reset() {
+    this.trains = {};
+    this.signals = {};
+    this.render();
+  },
+
   _esc(text) {
     const div = document.createElement('div');
     div.textContent = text;

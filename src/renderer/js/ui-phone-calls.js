@@ -7,6 +7,7 @@ const PhoneCallsUI = {
   ringingAudio: null,
   wasRinging: false,
   inCall: false,
+  gameTime: '',         // formatted game time from gateway (empty = no connection)
   voiceCache: {},       // caller → voice ID (Edge TTS) or local profile
   ttsVoices: null,   // cached list of voices from TTS provider
   trainSignalCache: {}, // headcode → last known signal ID
@@ -28,6 +29,13 @@ const PhoneCallsUI = {
 
     this.ringingAudio = new Audio('../../sounds/ringing.wav');
     this.ringingAudio.loop = true;
+
+    // Apply saved ring output device
+    window.simsigAPI.settings.getAll().then((s) => {
+      if (s.audio?.ringDeviceId && s.audio.ringDeviceId !== 'default') {
+        this.setRingDevice(s.audio.ringDeviceId);
+      }
+    });
 
     // Silence ring for this call only
     this.silenceBtn.addEventListener('click', (e) => {
@@ -159,6 +167,14 @@ const PhoneCallsUI = {
     this.silenceBtn.classList.add('hidden');
     this.ringingAudio.pause();
     this.ringingAudio.currentTime = 0;
+  },
+
+  setRingDevice(deviceId) {
+    if (this.ringingAudio.setSinkId) {
+      this.ringingAudio.setSinkId(deviceId || 'default').catch((e) => {
+        console.warn('[Phone] Could not set ring output device:', e.message);
+      });
+    }
   },
 
   // Silence all audio immediately (called when sim pauses)
@@ -1335,8 +1351,7 @@ const PhoneCallsUI = {
   },
 
   addMessage(msg) {
-    const now = new Date();
-    const time = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const time = this.gameTime || '';
     this.messages.push({ ...msg, time });
     this.renderChat();
   },
@@ -1820,6 +1835,62 @@ const PhoneCallsUI = {
     this.notificationEl.classList.add('flashing');
   },
 
+  // Full reset — called on disconnect to dump all state
+  reset() {
+    // End any active call or outgoing call
+    this.stopTTS();
+    this.stopBgNoise();
+    this.stopRinging();
+    this.stopDialing();
+
+    if (this._outgoingContactName) {
+      this._updatePhonebookInCall(this._outgoingContactName, false);
+    }
+
+    // Clear all call state
+    this.calls = [];
+    this.messages = [];
+    this.inCall = false;
+    this.initReady = false;
+    this._callSeq++;
+    this._replyClicked = false;
+    this._hasReplyOptions = false;
+    this._replySent = false;
+    this._hangUpLocked = false;
+    this._activeCallTrain = '';
+    this._activeCallVoiceKey = '';
+    this.currentHeadCode = '';
+    this.currentSignalId = null;
+    this.isShunterCall = false;
+    this.bgCallerType = 'train';
+    this.gameTime = '';
+    this.trainSignalCache = {};
+
+    // Clear outgoing call state
+    this._outgoingCall = false;
+    this._outgoingContactName = '';
+    this._outgoingReplySent = false;
+    this._outgoingReplies = null;
+    this._dialingActive = false;
+
+    // Remove delegated click handlers
+    if (this._replyDelegateHandler) {
+      this.chatEl.removeEventListener('click', this._replyDelegateHandler);
+      this._replyDelegateHandler = null;
+    }
+    if (this._outgoingReplyHandler) {
+      this.chatEl.removeEventListener('click', this._outgoingReplyHandler);
+      this._outgoingReplyHandler = null;
+    }
+
+    window.simsigAPI.keys.setInCall(false);
+
+    // Reset UI
+    this.renderCalls();
+    this.renderChat();
+    this.hideNotification();
+  },
+
   hideNotification() {
     if (!this.notificationEl) return;
     this.notificationEl.classList.add('hidden');
@@ -1853,7 +1924,7 @@ const PhoneCallsUI = {
         return `<div class="chat-message chat-greeting">
           <div class="chat-message-label">SPEAK NOW</div>
           <div class="chat-message-text">${this.escapeHtml(msg.text)}</div>
-          <div class="chat-message-time">${this.escapeHtml(msg.time)}</div>
+          ${msg.time ? `<div class="chat-message-time">${this.escapeHtml(msg.time)}</div>` : ''}
         </div>`;
       }
       if (msg.type === 'loading') {
@@ -1866,7 +1937,7 @@ const PhoneCallsUI = {
         return `<div class="chat-message chat-driver">
           <div class="chat-message-caller">${this.escapeHtml(msg.caller)}</div>
           <div class="chat-message-text">${this.escapeHtml(msg.text)}</div>
-          <div class="chat-message-time">${this.escapeHtml(msg.time)}</div>
+          ${msg.time ? `<div class="chat-message-time">${this.escapeHtml(msg.time)}</div>` : ''}
         </div>`;
       }
       if (msg.type === 'reply-options') {
@@ -1918,7 +1989,7 @@ const PhoneCallsUI = {
         return `<div class="chat-message chat-reply-options">
           <div class="chat-message-label">YOUR REPLY OPTIONS</div>
           <ol class="reply-options-list">${optionsHtml}</ol>
-          <div class="chat-message-time">${this.escapeHtml(msg.time)}</div>
+          ${msg.time ? `<div class="chat-message-time">${this.escapeHtml(msg.time)}</div>` : ''}
         </div>`;
       }
       return '';

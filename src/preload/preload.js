@@ -83,7 +83,7 @@ contextBridge.exposeInMainWorld('simsigAPI', {
       return () => ipcRenderer.removeListener(channels.SIM_NAME, listener);
     },
     onReady: (callback) => {
-      ipcRenderer.once(channels.INIT_READY, () => callback());
+      ipcRenderer.on(channels.INIT_READY, () => callback());
     },
   },
 
