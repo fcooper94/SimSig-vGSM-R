@@ -11,6 +11,11 @@ const channels = {
   CONNECTION_STATUS: 'connection:status-changed',
   PTT_STATE: 'ptt:state-changed',
   PTT_SET_KEYBIND: 'ptt:set-keybind',
+  ANSWER_CALL_KEY: 'keys:answer-call',
+  ANSWER_CALL_SET_KEYBIND: 'keys:answer-call-set-keybind',
+  HANGUP_KEY: 'keys:hangup',
+  HANGUP_SET_KEYBIND: 'keys:hangup-set-keybind',
+  PHONE_IN_CALL: 'keys:phone-in-call',
   MESSAGE_RECEIVED: 'message:received',
   CLOCK_UPDATE: 'clock:update',
   CMD_ALL_SIGNALS_DANGER: 'cmd:all-signals-danger',
@@ -116,6 +121,22 @@ contextBridge.exposeInMainWorld('simsigAPI', {
       return () => ipcRenderer.removeListener(channels.PTT_STATE, listener);
     },
     setKeybind: (code) => ipcRenderer.invoke(channels.PTT_SET_KEYBIND, code),
+  },
+
+  keys: {
+    onAnswerCall: (callback) => {
+      const listener = () => callback();
+      ipcRenderer.on(channels.ANSWER_CALL_KEY, listener);
+      return () => ipcRenderer.removeListener(channels.ANSWER_CALL_KEY, listener);
+    },
+    onHangUp: (callback) => {
+      const listener = () => callback();
+      ipcRenderer.on(channels.HANGUP_KEY, listener);
+      return () => ipcRenderer.removeListener(channels.HANGUP_KEY, listener);
+    },
+    setAnswerCallKeybind: (code) => ipcRenderer.invoke(channels.ANSWER_CALL_SET_KEYBIND, code),
+    setHangUpKeybind: (code) => ipcRenderer.invoke(channels.HANGUP_SET_KEYBIND, code),
+    setInCall: (state) => ipcRenderer.invoke(channels.PHONE_IN_CALL, state),
   },
 
   stt: {

@@ -34,6 +34,12 @@ module.exports = {
       outputVolume: 50,
     },
     ptt: {
+      keybind: 'ControlLeft',
+    },
+    answerCall: {
+      keybind: 'Space',
+    },
+    hangUp: {
       keybind: 'Space',
     },
     signaller: {

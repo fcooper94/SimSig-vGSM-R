@@ -86,7 +86,7 @@ label input[type="range"] + span {
   margin-left: 6px;
 }
 
-#ptt-rebind-btn {
+.rebind-btn {
   background: var(--bg-panel);
   color: var(--text);
   border: 2px solid;
@@ -96,17 +96,18 @@ label input[type="range"] + span {
   font-size: 11px;
   width: 100%;
   margin-top: 4px;
+  margin-bottom: 6px;
 }
 
-#ptt-rebind-btn:hover {
+.rebind-btn:hover {
   background: #e0dcd4;
 }
 
-#ptt-rebind-btn:active {
+.rebind-btn:active {
   border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
 }
 
-#ptt-rebind-btn.listening {
+.rebind-btn.listening {
   border-color: #000080;
   color: #000080;
   font-weight: bold;

@@ -238,7 +238,7 @@ public class Win32Reply {
         return result;
     }
 
-    // Find a child button by a single text label
+    // Find a child button by a single text label (strips & accelerator prefix)
     public static IntPtr FindButtonByLabel(IntPtr parent, string text) {
         IntPtr result = IntPtr.Zero;
         EnumChildWindows(parent, (hWnd, lParam) => {
@@ -248,7 +248,8 @@ public class Win32Reply {
             if (cls == "TButton" || cls == "Button") {
                 sb.Clear();
                 GetWindowText(hWnd, sb, 256);
-                if (sb.ToString() == text) {
+                string btnText = sb.ToString().Replace("&", "");
+                if (btnText.Equals(text, StringComparison.OrdinalIgnoreCase)) {
                     result = hWnd;
                     return false;
                 }

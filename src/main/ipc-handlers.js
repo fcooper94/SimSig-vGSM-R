@@ -95,10 +95,23 @@ function registerIpcHandlers() {
 
   // Global PTT keyboard hook
   const allSettings = settings.getAll();
-  globalPtt.start(allSettings.ptt?.keybind || 'Space');
+  globalPtt.start({
+    ptt: allSettings.ptt?.keybind || 'ControlLeft',
+    answerCall: allSettings.answerCall?.keybind || 'Space',
+    hangUp: allSettings.hangUp?.keybind || 'Space',
+  });
 
   ipcMain.handle(channels.PTT_SET_KEYBIND, (_event, code) => {
     globalPtt.setKeybind(code);
+  });
+  ipcMain.handle(channels.ANSWER_CALL_SET_KEYBIND, (_event, code) => {
+    globalPtt.setAnswerCallKeybind(code);
+  });
+  ipcMain.handle(channels.HANGUP_SET_KEYBIND, (_event, code) => {
+    globalPtt.setHangUpKeybind(code);
+  });
+  ipcMain.handle(channels.PHONE_IN_CALL, (_event, state) => {
+    globalPtt.setInCall(state);
   });
 
   // Connection

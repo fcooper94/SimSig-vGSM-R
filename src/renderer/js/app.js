@@ -41,6 +41,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.simsigAPI.phone.onDriverHungUp(() => {
     if (PhoneCallsUI.inCall) {
+      // If we already sent a reply, the dialog closing is expected (not a driver hang-up)
+      if (PhoneCallsUI._replySent) return;
       console.log('[App] Driver hung up — ending call');
       PhoneCallsUI.hangUp();
     }

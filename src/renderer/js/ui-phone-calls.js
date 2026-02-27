@@ -12,6 +12,7 @@ const PhoneCallsUI = {
   trainSignalCache: {}, // headcode → last known signal ID
 
   init() {
+    this._callSeq = 0; // monotonic counter to detect stale async continuations
     this.initReady = false;
     this.listEl = document.getElementById('phone-calls-list');
     this.countEl = document.getElementById('phone-calls-count');
@@ -44,15 +45,41 @@ const PhoneCallsUI = {
         this.endOutgoingCall();
       } else if (this.inCall) {
         if (this._hasReplyOptions && !this._replySent) return; // must reply first
+        if (this._hangUpLocked) return; // reply/goodbye still in progress
         this.hangUp();
       } else if (this.calls.length > 0 && !this._dialingActive) {
         this.answerCall(this.calls.length - 1);
       }
     });
 
-    // Prevent PTT key from triggering button clicks on notification elements
+    // Prevent PTT / Answer / HangUp keys from triggering button clicks on notification elements
     this.notificationEl.addEventListener('keydown', (e) => {
       if (typeof PTTUI !== 'undefined' && e.code === PTTUI.keybind) e.preventDefault();
+      // Space (default answer/hangup keybind) would trigger a click on focused buttons — block it
+      if (e.code === 'Space') e.preventDefault();
+    });
+
+    // Global keybind: Answer Call
+    window.simsigAPI.keys.onAnswerCall(() => {
+      if (typeof SettingsUI !== 'undefined' && SettingsUI.isListeningForKeybind) return;
+      if (typeof SettingsUI !== 'undefined' && !SettingsUI.modal.classList.contains('hidden')) return;
+      if (!this.inCall && !this._outgoingCall && this.calls.length > 0 && !this._dialingActive) {
+        this.answerCall(this.calls.length - 1);
+      }
+    });
+
+    // Global keybind: Hang Up
+    window.simsigAPI.keys.onHangUp(() => {
+      if (typeof SettingsUI !== 'undefined' && SettingsUI.isListeningForKeybind) return;
+      if (typeof SettingsUI !== 'undefined' && !SettingsUI.modal.classList.contains('hidden')) return;
+      if (this._outgoingCall) {
+        if (this._outgoingReplies && this._outgoingReplies.length > 0 && !this._outgoingReplySent) return;
+        this.endOutgoingCall();
+      } else if (this.inCall) {
+        if (this._hasReplyOptions && !this._replySent) return;
+        if (this._hangUpLocked) return; // reply/goodbye still in progress
+        this.hangUp();
+      }
     });
 
     // Gapless background noise via Web Audio API — alternate between two clips
@@ -396,6 +423,37 @@ const PhoneCallsUI = {
     return 'signaller';
   },
 
+  // Parse simple "ready at" messages (e.g. "Train 5N53 is ready at Wall Sidings")
+  // These lack the "entry point" keyword and signal code that CSD messages have.
+  // May include timetable data on subsequent lines — if so, extract next stop and platform.
+  parseReadyAtMessage(msg) {
+    // Match first line only (location ends at newline or end-of-string)
+    const match = msg.match(/(\w+)\s+is ready at\s+(.+?)\.?\s*(?:\n|$)/i);
+    if (!match) return null;
+
+    const headcode = match[1];
+    const location = match[2].trim();
+
+    // Try to extract next stop + platform from timetable lines
+    // Timetable lines look like: "    Preston Park --:--    05:21    1    --- ---"
+    // or "    Brighton 05:25    05:25    5    --- ---    N: 2T02"
+    // Format: leading whitespace, station name, times, platform number
+    let nextStop = '';
+    let platform = '';
+    const lines = msg.split('\n');
+    for (const line of lines) {
+      // Match timetable detail lines: station name followed by times and a platform number
+      const platMatch = line.match(/^\s+(.+?)\s+(?:--:--|\d{2}:\d{2})\s+\d{2}:\d{2}\s+(\d+)/);
+      if (platMatch) {
+        nextStop = platMatch[1].trim();
+        platform = platMatch[2];
+        break; // first timetable stop is the next stop
+      }
+    }
+
+    return { headcode, location, nextStop, platform };
+  },
+
   // Parse "early running" advisory messages from other signallers
   // "I have 4022 running early via Aynho Junction (Up Main).\nIt can be in your area at about 05:00 if I let it continue.\nDo you want me to hold it until its booked time of 05:22?"
   parseEarlyRunningMessage(msg) {
@@ -435,6 +493,7 @@ const PhoneCallsUI = {
     { pattern: /understood|continue|obey|speaking.*control/, fragment: 'continue after speaking' },
     { pattern: /run\s*early|let.*run|let.*continue/, fragment: 'run early' },
     { pattern: /hold.*back|hold.*booked/, fragment: 'hold' },
+    { pattern: /\bok\b|thanks|thank\s*you|cheers/, fragment: 'ok' },
   ],
 
   // "danger" and "stop" are interchangeable in SimSig signalling terminology
@@ -682,6 +741,10 @@ const PhoneCallsUI = {
       const who = this.isShunterCall ? 'Shunter' : 'Driver';
       return `${who}, Please call back in ${callBackMatch[1]} minutes`;
     }
+    // Simple "Ok" reply (e.g. ready-at-location acknowledgement)
+    if (/^\s*ok\s*$/i.test(raw)) {
+      return 'Ok Thanks';
+    }
     // Default: swap "at stop" → "at danger"
     return raw.replace(/\bat stop\b/gi, 'at danger');
   },
@@ -744,16 +807,23 @@ const PhoneCallsUI = {
     if (/permission\s+granted/i.test(lower)) {
       return `Permission granted, ${hc} can enter`;
     }
+    // Simple "Ok Thanks" acknowledgement (ready-at-location etc.)
+    if (/ok\s*thanks/i.test(lower)) {
+      return `Ok Thanks${trainRef}`;
+    }
     return `Understood${trainRef}`;
   },
 
   // Send a reply by index — shared by speech, click, and fallback button paths
   async sendReply(replyIndex, replies, caller) {
+    const myCallId = this._callSeq;
+    this._hangUpLocked = true; // prevent hangup keybind/click during reply flow
     // Show loading spinner immediately, send reply + fetch TTS in parallel
     this.addMessage({ type: 'loading', text: 'Replying...' });
     const confirmation = this.buildConfirmation(replies[replyIndex]);
 
     const voices = await this.getTTSVoices();
+    if (myCallId !== this._callSeq) return;
     let audioPromise = null;
     if (voices && voices.length > 0) {
       const voiceId = this.getTTSVoiceId(caller, voices);
@@ -762,6 +832,7 @@ const PhoneCallsUI = {
 
     // Send reply to SimSig while TTS generates
     await window.simsigAPI.phone.replyCall(replyIndex, this.currentHeadCode);
+    if (myCallId !== this._callSeq) return;
     this._replySent = true;
 
     // Remove loading spinner, show confirmation text
@@ -771,12 +842,52 @@ const PhoneCallsUI = {
     // Play audio (already fetched or nearly done)
     if (audioPromise) {
       const audioData = await audioPromise;
+      if (myCallId !== this._callSeq) return;
       const ok = await this.playAudioData(audioData);
-      if (!ok) await this.speakLocal(this.phoneticize(confirmation), caller);
+      if (myCallId !== this._callSeq) return;
+      if (!ok) { await this.speakLocal(this.phoneticize(confirmation), caller); if (myCallId !== this._callSeq) return; }
     } else {
       await this.speakLocal(this.phoneticize(confirmation), caller);
+      if (myCallId !== this._callSeq) return;
     }
-    await this.showHangUpInChat();
+    this._hangUpLocked = false;
+    await this.showHangUpInChat(myCallId);
+  },
+
+  // Send "Ok" reply to SimSig, show "Ok, Thanks", driver says "Ok, Bye", then hang up
+  async sendOkAndHangUp(caller) {
+    const myCallId = this._callSeq;
+    this._replyClicked = true;
+    this._hangUpLocked = true; // prevent hangup keybind/click during reply flow
+    this.addMessage({ type: 'loading', text: 'Replying...' });
+    await window.simsigAPI.phone.replyCall(0, this.currentHeadCode);
+    if (myCallId !== this._callSeq) return;
+    this._replySent = true;
+    this.messages = this.messages.filter((m) => m.type !== 'loading');
+    this.addMessage({ type: 'signaller', text: 'Ok, Thanks' });
+    this.renderChat();
+    // Driver replies "Ok, Bye" then call ends
+    const goodbye = 'Ok, Bye';
+    this.addMessage({ type: 'driver', caller: this.shortenCaller(caller), text: goodbye });
+    await this.speakAsDriver(goodbye, caller);
+    if (myCallId !== this._callSeq) return;
+    this._hangUpLocked = false;
+    this.hangUp();
+  },
+
+  // Click handler for the Ok-only reply option — sends reply and hangs up directly
+  setupOkOnlyClickHandler(caller) {
+    if (this._replyDelegateHandler) {
+      this.chatEl.removeEventListener('click', this._replyDelegateHandler);
+    }
+    this._replyDelegateHandler = (e) => {
+      if (this._replyClicked) return;
+      const li = e.target.closest('.reply-options-list li');
+      if (li) {
+        this.sendOkAndHangUp(caller);
+      }
+    };
+    this.chatEl.addEventListener('click', this._replyDelegateHandler);
   },
 
   // Set up delegated click handler for reply options (survives renderChat DOM rebuilds)
@@ -816,48 +927,56 @@ const PhoneCallsUI = {
   },
 
   // Full reply flow: show options, listen for speech, match keywords, send to SimSig
-  async handleReply(replies, caller) {
-    // If only "Ok" is available, auto-reply and hang up
-    if (replies.length === 1 && /^ok$/i.test(replies[0].trim())) {
-      await window.simsigAPI.phone.replyCall(0, this.currentHeadCode);
-      this._replySent = true;
-      await this.showHangUpInChat();
-      return;
-    }
+  async handleReply(replies, caller, callId) {
+    // If only "Ok" is available, show as speak prompt then send reply and hang up (no goodbye)
+    const okOnly = replies.length === 1 && /^ok$/i.test(replies[0].trim());
+    if (okOnly) replies = ['Ok, Thanks'];
 
     this._replyClicked = false;
     this.addMessage({ type: 'reply-options', replies });
-    this.setupReplyClickHandlers(replies, caller);
+
+    if (okOnly) {
+      // Set up click handler that sends reply and hangs up directly
+      this.setupOkOnlyClickHandler(caller);
+    } else {
+      this.setupReplyClickHandlers(replies, caller);
+    }
 
     const MAX_ATTEMPTS = 3;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      if (this._replyClicked) return;
+      if (this._replyClicked || callId !== this._callSeq) return;
       this.addMessage({ type: 'greeting', text: 'Hold PTT and speak your reply...' });
 
       let transcript = '';
       try {
         transcript = await this.recordAndTranscribe();
       } catch (e) {
-        if (this._replyClicked) return;
+        if (this._replyClicked || callId !== this._callSeq) return;
         break;
       }
-      if (this._replyClicked) return;
+      if (this._replyClicked || callId !== this._callSeq) return;
 
       if (transcript) {
         const replyIndex = this.matchReply(transcript, replies);
         if (replyIndex >= 0) {
+          if (okOnly) {
+            await this.sendOkAndHangUp(caller);
+            return;
+          }
           await this.sendReply(replyIndex, replies, caller);
           return;
         }
       }
 
       // Not understood
+      if (callId !== this._callSeq) return;
       const sorry = "Can you say again please";
       this.addMessage({ type: 'driver', caller, text: sorry });
       await this.speakAsDriver(sorry, caller);
+      if (callId !== this._callSeq) return;
     }
 
-    if (this._replyClicked) return;
+    if (this._replyClicked || callId !== this._callSeq) return;
 
     // After max attempts, re-show the clickable reply options
     this.addMessage({ type: 'reply-options', replies });
@@ -865,14 +984,14 @@ const PhoneCallsUI = {
   },
 
   // After reply is sent, listen for goodbye on incoming calls
-  async showHangUpInChat() {
+  async showHangUpInChat(callId) {
     this._replyClicked = false;
-    while (this.inCall) {
+    while (this.inCall && callId === this._callSeq) {
       this.addMessage({ type: 'greeting', text: 'Hold PTT to say goodbye...' });
 
       try {
         const transcript = await this.recordAndTranscribe();
-        if (!this.inCall) return;
+        if (!this.inCall || callId !== this._callSeq) return;
         if (transcript) {
           // At the goodbye stage, any speech is treated as goodbye
           // (user has already sent their reply — they're just ending the call)
@@ -892,6 +1011,7 @@ const PhoneCallsUI = {
           const reply = goodbyes[Math.floor(Math.random() * goodbyes.length)];
           this.addMessage({ type: 'driver', caller: this.shortenCaller(voiceKey), text: reply });
           await this.speakAsDriver(reply, voiceKey);
+          if (callId !== this._callSeq) return;
           this.hangUp();
           return;
         }
@@ -994,10 +1114,12 @@ const PhoneCallsUI = {
     }
 
     this.inCall = false;
+    window.simsigAPI.keys.setInCall(false);
     this.isShunterCall = false;
     this._replyClicked = false;
     this._hasReplyOptions = false;
     this._replySent = false;
+    this._hangUpLocked = false;
     this._activeCallTrain = '';
     this._activeCallVoiceKey = '';
     this.stopBgNoise();
@@ -1022,7 +1144,10 @@ const PhoneCallsUI = {
   },
 
   async answerCall(index) {
+    if (this.inCall) return; // prevent double-answer race condition
     this.inCall = true;
+    const callId = ++this._callSeq; // unique ID to detect stale async continuations
+    window.simsigAPI.keys.setInCall(true);
     this._replyClicked = false;
     this._hasReplyOptions = false;
     this._replySent = false;
@@ -1054,10 +1179,12 @@ const PhoneCallsUI = {
       window.simsigAPI.settings.getAll(),
       this.getTTSVoices(),
     ]);
+    if (callId !== this._callSeq) return; // call was hung up while awaiting
 
     if (result.error) {
       // Call no longer exists — remove it from local list and reset state
       this.inCall = false;
+      window.simsigAPI.keys.setInCall(false);
       this.calls = this.calls.filter((c, i) => i !== index);
       this.renderCalls();
       if (this.calls.length > 0) {
@@ -1084,6 +1211,7 @@ const PhoneCallsUI = {
     this._activeCallVoiceKey = caller; // consistent key for voice selection during this call
     const driverMsg = result.message || '';
     const csd = this.parseCsdMessage(driverMsg);
+    const readyAt = !csd ? this.parseReadyAtMessage(driverMsg) : null;
     const earlyRun = this.parseEarlyRunningMessage(driverMsg);
 
     // Start background noise for the duration of the call
@@ -1117,6 +1245,28 @@ const PhoneCallsUI = {
     if (csd) {
       displayMsg = `${csd.headcode} is ready at entry point ${csd.entryPoint} (${csd.signal}). Permission required to enter.`;
       spokenMsg = this.buildCsdSpokenMessage(panelName, position, csd, caller);
+    } else if (readyAt) {
+      const isShunter = /shunter/i.test(caller);
+      const isDriverAtSidings = /^Driver\s*\(/i.test(caller) && /\b(siding|yard|goods|depot)\b/i.test(readyAt.location);
+      if (isShunter || isDriverAtSidings) {
+        // Shunter-style message for shunters or drivers calling from sidings
+        this.isShunterCall = true;
+        if (this.bgCallerType !== 'yard') {
+          this.bgCallerType = 'yard';
+          this.stopBgNoise();
+          this.startBgNoise();
+        }
+        let msg = `Hello, this is the Shunter in ${readyAt.location}. Train ${readyAt.headcode} is ready`;
+        if (readyAt.nextStop) {
+          msg += `. Next stop is ${readyAt.nextStop}`;
+          if (readyAt.platform) msg += ` Platform ${readyAt.platform}`;
+        }
+        spokenMsg = msg;
+        displayMsg = msg;
+      } else {
+        displayMsg = `Driver of ${readyAt.headcode}. I am waiting to enter at ${readyAt.location}.`;
+        spokenMsg = `Hello ${panelName} Signaller. This is driver of ${readyAt.headcode}. I am waiting to enter at ${readyAt.location}`;
+      }
     } else if (earlyRun) {
       const bookedPart = earlyRun.booked ? ` with booked time of ${earlyRun.booked}` : '';
       displayMsg = `${caller}. ${earlyRun.headcode} is early. Estimate is ${earlyRun.estimate}${bookedPart}. Continue or hold back?`;
@@ -1153,10 +1303,12 @@ const PhoneCallsUI = {
       // Show greeting and wait for user speech AT THE SAME TIME as audio generates
       this.addMessage({ type: 'greeting', text: greeting });
       const [audio] = await Promise.all([audioPromise, this.waitForUserSpeech()]);
+      if (callId !== this._callSeq) return;
       prefetchedAudio = audio;
     } else {
       this.addMessage({ type: 'greeting', text: greeting });
       await this.waitForUserSpeech();
+      if (callId !== this._callSeq) return;
     }
 
     // Show driver message and play TTS
@@ -1165,18 +1317,20 @@ const PhoneCallsUI = {
 
     if (prefetchedAudio) {
       const ok = await this.playAudioData(prefetchedAudio);
-      if (!ok) await this.speakLocal(this.phoneticize(spokenMsg), caller);
+      if (callId !== this._callSeq) return;
+      if (!ok) { await this.speakLocal(this.phoneticize(spokenMsg), caller); if (callId !== this._callSeq) return; }
     } else {
       await this.speakLocal(this.phoneticize(spokenMsg), caller);
+      if (callId !== this._callSeq) return;
     }
     console.log(`[Phone] Title: "${result.title}", Train: "${result.train}", HeadCode: "${this.currentHeadCode}"`);
 
     // Handle reply if reply options available, then listen for goodbye
     if (result.replies && result.replies.length > 0) {
-      await this.handleReply(result.replies, caller);
+      await this.handleReply(result.replies, caller, callId);
     } else {
       // No reply options — go straight to goodbye
-      await this.showHangUpInChat();
+      await this.showHangUpInChat(callId);
     }
   },
 
@@ -1229,6 +1383,7 @@ const PhoneCallsUI = {
 
     this.listEl.querySelectorAll('.call-answer-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
+        if (this.inCall) return; // already in a call
         const idx = parseInt(e.target.dataset.index, 10);
         this.answerCall(idx);
       });
@@ -1305,6 +1460,7 @@ const PhoneCallsUI = {
   async showOutgoingCallNotification(contactName, message, replies) {
     if (!this.notificationEl) return;
     this._outgoingCall = true;
+    window.simsigAPI.keys.setInCall(true);
     this._outgoingContactName = contactName;
     this._outgoingReplySent = false;
     this.notificationEl.classList.remove('hidden');
@@ -1592,6 +1748,7 @@ const PhoneCallsUI = {
       this._updatePhonebookInCall(this._outgoingContactName, false);
     }
     this._outgoingCall = false;
+    window.simsigAPI.keys.setInCall(false);
     this._outgoingContactName = '';
     this._outgoingReplySent = false;
     this._outgoingReplies = null;

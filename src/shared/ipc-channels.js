@@ -21,6 +21,11 @@ module.exports = {
   AUDIO_DEVICES: 'audio:get-devices',
   PTT_STATE: 'ptt:state-changed',
   PTT_SET_KEYBIND: 'ptt:set-keybind',
+  ANSWER_CALL_KEY: 'keys:answer-call',
+  ANSWER_CALL_SET_KEYBIND: 'keys:answer-call-set-keybind',
+  HANGUP_KEY: 'keys:hangup',
+  HANGUP_SET_KEYBIND: 'keys:hangup-set-keybind',
+  PHONE_IN_CALL: 'keys:phone-in-call',
 
   // Phone calls
   PHONE_CALLS_UPDATE: 'phone:calls-update',

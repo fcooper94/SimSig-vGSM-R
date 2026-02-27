@@ -40,16 +40,46 @@ CODE_TO_UIOHOOK['NumpadEnter'] = UiohookKey.NumpadEnter;
 let currentKeyCode = null; // uiohook key code we're watching
 let isDown = false;
 
+// Answer Call / Hang Up keybinds (single-press, not hold)
+let answerCallKeyCode = null;
+let hangUpKeyCode = null;
+let answerKeyHeld = false; // prevent repeat-firing while key is held
+let hangUpKeyHeld = false;
+let inCall = false; // tracks renderer call state so we only send the relevant event
+
 function sendPttState(active) {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(channels.PTT_STATE, active);
   }
 }
 
+function sendToAllWindows(channel) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send(channel);
+  }
+}
+
 function onKeyDown(e) {
+  // PTT (hold-to-talk)
   if (currentKeyCode !== null && e.keycode === currentKeyCode && !isDown) {
     isDown = true;
     sendPttState(true);
+  }
+
+  // Answer Call (single press, only when not in a call, no repeats)
+  if (answerCallKeyCode !== null && e.keycode === answerCallKeyCode) {
+    if (!answerKeyHeld && !inCall) {
+      sendToAllWindows(channels.ANSWER_CALL_KEY);
+    }
+    answerKeyHeld = true;
+  }
+
+  // Hang Up (single press, only when in a call, no repeats)
+  if (hangUpKeyCode !== null && e.keycode === hangUpKeyCode) {
+    if (!hangUpKeyHeld && inCall) {
+      sendToAllWindows(channels.HANGUP_KEY);
+    }
+    hangUpKeyHeld = true;
   }
 }
 
@@ -57,6 +87,12 @@ function onKeyUp(e) {
   if (currentKeyCode !== null && e.keycode === currentKeyCode && isDown) {
     isDown = false;
     sendPttState(false);
+  }
+  if (answerCallKeyCode !== null && e.keycode === answerCallKeyCode) {
+    answerKeyHeld = false;
+  }
+  if (hangUpKeyCode !== null && e.keycode === hangUpKeyCode) {
+    hangUpKeyHeld = false;
   }
 }
 
@@ -74,8 +110,28 @@ function setKeybind(domCode) {
   }
 }
 
-function start(initialKeybind) {
-  setKeybind(initialKeybind || 'Space');
+function setAnswerCallKeybind(domCode) {
+  answerCallKeyCode = CODE_TO_UIOHOOK[domCode] ?? null;
+  if (answerCallKeyCode === null) {
+    console.warn(`[GlobalKeys] Unknown answer-call keybind code: "${domCode}"`);
+  } else {
+    console.log(`[GlobalKeys] Answer Call keybind set to "${domCode}" (uiohook code ${answerCallKeyCode})`);
+  }
+}
+
+function setHangUpKeybind(domCode) {
+  hangUpKeyCode = CODE_TO_UIOHOOK[domCode] ?? null;
+  if (hangUpKeyCode === null) {
+    console.warn(`[GlobalKeys] Unknown hang-up keybind code: "${domCode}"`);
+  } else {
+    console.log(`[GlobalKeys] Hang Up keybind set to "${domCode}" (uiohook code ${hangUpKeyCode})`);
+  }
+}
+
+function start(initialKeybinds) {
+  setKeybind(initialKeybinds.ptt || 'ControlLeft');
+  setAnswerCallKeybind(initialKeybinds.answerCall || 'Space');
+  setHangUpKeybind(initialKeybinds.hangUp || 'Space');
   uIOhook.on('keydown', onKeyDown);
   uIOhook.on('keyup', onKeyUp);
   uIOhook.start();
@@ -91,4 +147,8 @@ function stop() {
   console.log('[GlobalPTT] Global keyboard hook stopped');
 }
 
-module.exports = { start, stop, setKeybind };
+function setInCall(state) {
+  inCall = state;
+}
+
+module.exports = { start, stop, setKeybind, setAnswerCallKeybind, setHangUpKeybind, setInCall };

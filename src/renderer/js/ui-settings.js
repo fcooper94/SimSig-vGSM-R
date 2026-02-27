@@ -10,7 +10,9 @@ const SettingsUI = {
     document.getElementById('settings-btn').addEventListener('click', () => this.open());
     document.getElementById('settings-save').addEventListener('click', () => this.save());
     document.getElementById('settings-cancel').addEventListener('click', () => this.close());
-    document.getElementById('ptt-rebind-btn').addEventListener('click', () => this.startKeybindListen());
+    document.querySelectorAll('.rebind-btn').forEach((btn) => {
+      btn.addEventListener('click', () => this.startKeybindListen(btn));
+    });
 
     // Live volume percentage display
     document.getElementById('setting-mic-volume').addEventListener('input', (e) => {
@@ -55,7 +57,9 @@ const SettingsUI = {
     document.getElementById('setting-port').value = settings.gateway?.port || 51515;
     document.getElementById('setting-username').value = settings.credentials?.username || '';
     document.getElementById('setting-password').value = settings.credentials?.password || '';
-    document.getElementById('setting-ptt-keybind').value = settings.ptt?.keybind || 'Space';
+    document.getElementById('setting-ptt-keybind').value = settings.ptt?.keybind || 'ControlLeft';
+    document.getElementById('setting-answer-keybind').value = settings.answerCall?.keybind || 'Space';
+    document.getElementById('setting-hangup-keybind').value = settings.hangUp?.keybind || 'Space';
     const micVol = settings.audio?.micVolume ?? 50;
     const outVol = settings.audio?.outputVolume ?? 50;
     document.getElementById('setting-mic-volume').value = micVol;
@@ -94,6 +98,14 @@ const SettingsUI = {
       PTTUI.keybind = keybind;
     }
     await window.simsigAPI.ptt.setKeybind(keybind);
+
+    // Answer Call / Hang Up keybinds
+    const answerKeybind = document.getElementById('setting-answer-keybind').value;
+    const hangUpKeybind = document.getElementById('setting-hangup-keybind').value;
+    await window.simsigAPI.settings.set('answerCall.keybind', answerKeybind);
+    await window.simsigAPI.settings.set('hangUp.keybind', hangUpKeybind);
+    await window.simsigAPI.keys.setAnswerCallKeybind(answerKeybind);
+    await window.simsigAPI.keys.setHangUpKeybind(hangUpKeybind);
 
     // Update audio pipeline volumes in real-time
     if (typeof AudioPipeline !== 'undefined') {
@@ -144,8 +156,12 @@ const SettingsUI = {
     }
   },
 
-  startKeybindListen() {
-    const btn = document.getElementById('ptt-rebind-btn');
+  startKeybindListen(btn) {
+    // Stop any existing listen first
+    this.stopKeybindListen();
+
+    const targetId = btn.dataset.target;
+    this._activeRebindBtn = btn;
     btn.textContent = 'Press any key...';
     btn.classList.add('listening');
     this.isListeningForKeybind = true;
@@ -153,7 +169,7 @@ const SettingsUI = {
     this._keybindHandler = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      document.getElementById('setting-ptt-keybind').value = e.code;
+      document.getElementById(targetId).value = e.code;
       this.stopKeybindListen();
     };
 
@@ -205,9 +221,11 @@ const SettingsUI = {
   },
 
   stopKeybindListen() {
-    const btn = document.getElementById('ptt-rebind-btn');
-    btn.textContent = 'Press to rebind...';
-    btn.classList.remove('listening');
+    if (this._activeRebindBtn) {
+      this._activeRebindBtn.textContent = 'Press to rebind...';
+      this._activeRebindBtn.classList.remove('listening');
+      this._activeRebindBtn = null;
+    }
     this.isListeningForKeybind = false;
 
     if (this._keybindHandler) {
