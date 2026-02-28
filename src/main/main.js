@@ -5,6 +5,7 @@ const channels = require('../shared/ipc-channels');
 
 let mainWindow = null;
 let msgLogWindow = null;
+let setupWindow = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -43,6 +44,33 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+}
+
+function createSetupWindow() {
+  setupWindow = new BrowserWindow({
+    width: 750,
+    height: 600,
+    resizable: false,
+    title: 'vGSM-R Setup',
+    icon: path.join(__dirname, '../../images/icon.png'),
+    backgroundColor: '#000000',
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/preload-setup.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  setupWindow.setMenu(null);
+  setupWindow.loadFile(path.join(__dirname, '../renderer/setup.html'));
+
+  if (process.argv.includes('--dev')) {
+    setupWindow.webContents.openDevTools();
+  }
+
+  setupWindow.on('closed', () => {
+    setupWindow = null;
   });
 }
 
@@ -119,14 +147,44 @@ function stopWebServer() {
   removeFirewallRule();
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Check for updates before anything else (skips in dev mode)
+  const { checkForUpdates } = require('./updater');
+  await checkForUpdates();
+
   const { initSettings } = require('./settings');
   const settings = require('./settings');
   const { registerIpcHandlers } = require('./ipc-handlers');
 
   initSettings();
   registerIpcHandlers();
-  createWindow();
+
+  // Show setup wizard on first launch, otherwise go straight to main window
+  if (settings.get('setupComplete') === false) {
+    createSetupWindow();
+  } else {
+    createWindow();
+  }
+
+  // Setup wizard completion handler
+  ipcMain.handle(channels.SETUP_COMPLETE, async (_event, allSettings) => {
+    for (const [key, value] of Object.entries(allSettings)) {
+      settings.set(key, value);
+    }
+    settings.set('setupComplete', true);
+
+    // Close setup window and open main window
+    createWindow();
+    if (setupWindow) {
+      setupWindow.close();
+    }
+
+    // Auto-start web server if enabled during setup
+    const webCfg = settings.get('web') || {};
+    if (webCfg.enabled) {
+      startWebServer(webCfg.port || 3000);
+    }
+  });
 
   // Web server IPC handlers
   ipcMain.handle(channels.WEB_START, (_event, port) => {
@@ -159,10 +217,12 @@ app.whenReady().then(() => {
     return { success: true };
   });
 
-  // Auto-start web server if enabled in settings
-  const webSettings = settings.get('web') || {};
-  if (webSettings.enabled) {
-    startWebServer(webSettings.port || 3000);
+  // Auto-start web server if enabled in settings (skip during setup)
+  if (settings.get('setupComplete') !== false) {
+    const webSettings = settings.get('web') || {};
+    if (webSettings.enabled) {
+      startWebServer(webSettings.port || 3000);
+    }
   }
 
   app.on('activate', () => {
@@ -193,6 +253,8 @@ app.on('before-quit', () => {
 app.on('will-quit', restoreTelephoneWindow);
 
 app.on('window-all-closed', () => {
+  // Don't quit if we're transitioning from setup to main window
+  if (mainWindow || setupWindow) return;
   restoreTelephoneWindow();
   app.quit();
 });

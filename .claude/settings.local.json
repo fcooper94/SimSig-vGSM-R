@@ -38,7 +38,11 @@
       "WebFetch(domain:app.unpkg.com)",
       "Bash(powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ':*)",
       "Bash(node -c \"c:/dev/SimSig-Comms/src/renderer/js/ui-phone-calls.js\")",
-      "Bash(gh repo rename SimSig-vGSM-R --yes)"
+      "Bash(gh repo rename SimSig-vGSM-R --yes)",
+      "Bash(xargs -I {} basename {})",
+      "Bash(echo $APPDATA)",
+      "Bash(npm ls electron)",
+      "Bash(git -C \"c:\\\\dev\\\\SimSig-vGSM-R\" remote -v)"
     ]
   }
 }

@@ -65,4 +65,7 @@ module.exports = {
   // Web server (browser access)
   WEB_START: 'web:start',
   WEB_STOP: 'web:stop',
+
+  // Setup wizard
+  SETUP_COMPLETE: 'setup:complete',
 };

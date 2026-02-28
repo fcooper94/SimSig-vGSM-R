@@ -1,34 +1,39 @@
 {
   "name": "simsig-comms",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "SimSig VGSM-R Radio Communications Simulator",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev"
+    "dev": "electron . --dev",
+    "build": "electron-builder --win --dir --config electron-builder.json",
+    "dist": "electron-builder --win --config electron-builder.json",
+    "publish": "electron-builder --win --config electron-builder.json --publish always"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fcooper94/SimSig-Comms.git"
+    "url": "git+https://github.com/fcooper94/SimSig-vGSM-R.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/fcooper94/SimSig-Comms/issues"
+    "url": "https://github.com/fcooper94/SimSig-vGSM-R/issues"
   },
-  "homepage": "https://github.com/fcooper94/SimSig-Comms#readme",
+  "homepage": "https://github.com/fcooper94/SimSig-vGSM-R#readme",
   "dependencies": {
     "@stomp/stompjs": "^7.3.0",
     "@stomp/tcp-wrapper": "^1.0.1",
     "electron-conf": "^1.3.0",
+    "electron-updater": "^6.8.3",
     "msedge-tts": "^2.0.4",
     "uiohook-napi": "^1.5.4",
     "vosk-browser": "^0.0.8",
     "ws": "^8.19.0"
   },
   "devDependencies": {
-    "electron": "^40.6.1"
+    "electron": "^40.6.1",
+    "electron-builder": "^26.8.1"
   }
 }
