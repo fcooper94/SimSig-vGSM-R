@@ -24,32 +24,99 @@ body {
 }
 
 .splash-logo {
-  max-width: 340px;
+  max-width: 400px;
   width: 80%;
-  margin-bottom: 40px;
+  margin-bottom: 56px;
 }
 
-#splash-status {
-  font-size: 15px;
-  font-weight: 500;
-  color: #cccccc;
-  margin-bottom: 6px;
-}
-
-#splash-detail {
-  font-size: 13px;
-  color: #666;
+/* ── Step list ── */
+#splash-steps {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
   margin-bottom: 20px;
-  min-height: 18px;
 }
 
+.splash-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: #444;
+  transition: color 0.4s ease, opacity 0.4s ease;
+}
+
+.splash-step.active {
+  color: #cccccc;
+}
+
+.splash-step.done {
+  color: #4ade80;
+}
+
+/* ── Spinner ── */
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid transparent;
+  border-top-color: transparent;
+  border-radius: 50%;
+  opacity: 0;
+  flex-shrink: 0;
+}
+
+.splash-step.active .spinner {
+  border-color: rgba(0, 180, 216, 0.2);
+  border-top-color: #00b4d8;
+  opacity: 1;
+  animation: spin 0.8s linear infinite;
+}
+
+.splash-step.done .spinner {
+  border: none;
+  opacity: 1;
+  position: relative;
+}
+
+.splash-step.done .spinner::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 1px;
+  width: 10px;
+  height: 5px;
+  border-left: 2px solid #4ade80;
+  border-bottom: 2px solid #4ade80;
+  transform: rotate(-45deg);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Detail text (download %) ── */
+#splash-detail {
+  font-size: 12px;
+  color: #555;
+  margin-bottom: 20px;
+  min-height: 16px;
+}
+
+/* ── Progress bar (visible during download) ── */
 #progress-bar-container {
   height: 3px;
   background: #1a1a1a;
   border-radius: 2px;
   overflow: hidden;
-  max-width: 300px;
+  max-width: 280px;
   margin: 0 auto;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+#progress-bar-container.visible {
+  opacity: 1;
 }
 
 #progress-bar-fill {

@@ -77,8 +77,10 @@ function createSetupWindow() {
 
 function createSplashWindow() {
   splashWindow = new BrowserWindow({
-    width: 500,
-    height: 350,
+    width: 1194,
+    height: 834,
+    minWidth: 700,
+    minHeight: 400,
     resizable: false,
     frame: false,
     center: true,
@@ -198,15 +200,22 @@ app.whenReady().then(async () => {
   // Show splash screen immediately
   createSplashWindow();
 
-  // Check for updates (splash shows progress)
+  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // Phase 1: Checking for updates (1.5s visible minimum)
+  sendSplashStatus('checking');
+  const updateStart = Date.now();
   const { checkForUpdates } = require('./updater');
   await checkForUpdates({
-    onStatus: (message, detail) => sendSplashStatus(message, detail),
+    onStatus: (message, detail) => sendSplashStatus('checking', detail),
     onProgress: (percent) => sendSplashProgress(percent),
   });
+  const elapsed = Date.now() - updateStart;
+  if (elapsed < 1500) await delay(1500 - elapsed);
 
-  // Initialise app
-  sendSplashStatus('Initialising...');
+  // Phase 2: Initialising (1.5s visible minimum)
+  sendSplashStatus('initialising');
+  const initStart = Date.now();
 
   const { initSettings } = require('./settings');
   const settings = require('./settings');
@@ -215,8 +224,8 @@ app.whenReady().then(async () => {
   initSettings();
   registerIpcHandlers();
 
-  // Brief pause so the user sees "Initialising..." before transition
-  await new Promise((r) => setTimeout(r, 800));
+  const initElapsed = Date.now() - initStart;
+  if (initElapsed < 1500) await delay(1500 - initElapsed);
 
   // Close splash and open the appropriate window
   closeSplash();

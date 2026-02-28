@@ -10,8 +10,20 @@
 <body>
   <div id="splash-container">
     <img src="../../images/branding.png" alt="vGSM-R" class="splash-logo">
-    <div id="splash-status">Starting...</div>
+
+    <div id="splash-steps">
+      <div class="splash-step active" id="step-checking">
+        <div class="spinner"></div>
+        <span>Checking for updates</span>
+      </div>
+      <div class="splash-step" id="step-initialising">
+        <div class="spinner"></div>
+        <span>Initialising</span>
+      </div>
+    </div>
+
     <div id="splash-detail"></div>
+
     <div id="progress-bar-container">
       <div id="progress-bar-fill"></div>
     </div>
