@@ -7,7 +7,8 @@ const SettingsUI = {
     this.modal = document.getElementById('settings-modal');
     this.form = document.getElementById('settings-form');
 
-    document.getElementById('settings-btn').addEventListener('click', () => this.open());
+    const settingsBtn = document.getElementById('settings-btn');
+    if (settingsBtn) settingsBtn.addEventListener('click', () => this.open());
     document.getElementById('settings-save').addEventListener('click', () => this.save());
     document.getElementById('settings-cancel').addEventListener('click', () => this.close());
     document.querySelectorAll('.rebind-btn').forEach((btn) => {

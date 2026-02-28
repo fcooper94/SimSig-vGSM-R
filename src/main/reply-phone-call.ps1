@@ -51,6 +51,9 @@ public class Win32Reply {
     public static extern bool SetCursorPos(int X, int Y);
 
     [DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32.dll")]
     public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, IntPtr dwExtraInfo);
 
     [DllImport("user32.dll")]
@@ -76,6 +79,9 @@ public class Win32Reply {
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X, Y; }
 
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP   = 0x0004;
@@ -287,6 +293,10 @@ public class Win32Reply {
 "@
 
 try {
+    # Save cursor position so we can restore it after BM_CLICK interactions
+    $savedCursor = New-Object Win32Reply+POINT
+    [Win32Reply]::GetCursorPos([ref]$savedCursor) | Out-Null
+
     # Find the TAnswerCallForm dialog using pure Win32 API
     $dialogHwnd = [Win32Reply]::FindTopWindowByClass("TAnswerCallForm")
 
@@ -411,7 +421,12 @@ try {
         [Win32Reply]::HideOffScreen($telHwnd)
     }
 
+    # Restore cursor to original position
+    [Win32Reply]::SetCursorPos($savedCursor.X, $savedCursor.Y) | Out-Null
+
     Write-Output '{"success":true}'
 } catch {
+    # Restore cursor on error too
+    try { [Win32Reply]::SetCursorPos($savedCursor.X, $savedCursor.Y) | Out-Null } catch {}
     Write-Output "{`"error`":`"$($_.Exception.Message)`"}"
 }

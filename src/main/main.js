@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
 
 let mainWindow = null;
@@ -21,6 +21,7 @@ function createWindow() {
   });
 
   mainWindow.setAlwaysOnTop(true, 'floating');
+  mainWindow.setMenu(null);
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 
   if (process.argv.includes('--dev')) {

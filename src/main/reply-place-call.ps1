@@ -44,6 +44,14 @@ public class PlaceCallReply {
     [DllImport("user32.dll")]
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
+    [DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out POINT lpPoint);
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int X, int Y);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X, Y; }
+
     // Thread input attachment for cross-process SetFocus
     [DllImport("user32.dll")]
     public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
@@ -211,6 +219,10 @@ public class PlaceCallReply {
 "@
 
 try {
+    # Save cursor position so we can restore it after BM_CLICK interactions
+    $savedCursor = New-Object PlaceCallReply+POINT
+    [PlaceCallReply]::GetCursorPos([ref]$savedCursor) | Out-Null
+
     $root = [System.Windows.Automation.AutomationElement]::RootElement
 
     # Find the "Place Call" dialog by title
@@ -400,9 +412,14 @@ try {
         }
     }
 
+    # Restore cursor to original position
+    [PlaceCallReply]::SetCursorPos($savedCursor.X, $savedCursor.Y) | Out-Null
+
     $escapedResp = ($responseText -replace '\\', '\\\\' -replace '"', '\"' -replace "`n", '\n' -replace "`r", '')
     Write-Output "{`"success`":true,`"response`":`"$escapedResp`"}"
 } catch {
+    # Restore cursor on error too
+    try { [PlaceCallReply]::SetCursorPos($savedCursor.X, $savedCursor.Y) | Out-Null } catch {}
     $escapedErr = ($_.Exception.Message -replace '\\', '\\\\' -replace '"', '\"' -replace "`n", ' ' -replace "`r", '')
     Write-Output "{`"error`":`"$escapedErr`"}"
 }

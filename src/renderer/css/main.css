@@ -115,28 +115,29 @@ body {
 }
 
 
-#connect-btn, #settings-btn, #msglog-btn {
+#connect-btn, #fullscreen-btn, #settings-btn, #msglog-btn {
   background: var(--bg-panel);
   color: var(--text);
   border: 2px solid;
   border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
-  padding: 2px 8px;
+  padding: 6px 14px;
   cursor: pointer;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
+  min-height: 32px;
 }
 
-#connect-btn:hover, #settings-btn:hover, #msglog-btn:hover {
+#connect-btn:hover, #fullscreen-btn:hover, #settings-btn:hover, #msglog-btn:hover {
   background: #e0dcd4;
 }
 
-#connect-btn:active, #settings-btn:active, #msglog-btn:active {
+#connect-btn:active, #fullscreen-btn:active, #settings-btn:active, #msglog-btn:active {
   border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
 }
 
-#settings-btn, #msglog-btn {
-  font-size: 11px;
-  padding: 2px 6px;
+#msglog-btn {
+  font-size: 12px;
+  padding: 6px 10px;
 }
 
 /* Panel subtitle row */
@@ -248,8 +249,8 @@ body {
 }
 
 .tab-item {
-  padding: 3px 10px;
-  font-size: 11px;
+  padding: 8px 12px;
+  font-size: 12px;
   background: var(--tab-bg);
   border: 2px solid;
   border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
@@ -258,6 +259,9 @@ body {
   color: var(--text);
   user-select: none;
   white-space: nowrap;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
 }
 
 .tab-item.active {
@@ -265,7 +269,7 @@ body {
   font-weight: bold;
   position: relative;
   bottom: -1px;
-  padding-bottom: 4px;
+  padding-bottom: 9px;
 }
 
 .tab-item.highlight {
@@ -470,7 +474,7 @@ button {
   user-select: none;
 }
 
-#settings-btn, #msglog-btn {
+#msglog-btn {
   position: relative;
   z-index: 950;
 }

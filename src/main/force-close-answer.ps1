@@ -21,12 +21,17 @@ public class ForceDismiss {
     [DllImport("user32.dll")]
     public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, IntPtr dwExtraInfo);
     [DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out POINT lpPoint);
+    [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")]
     public static extern bool ShowWindow(IntPtr hWnd, int cmd);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X, Y; }
 
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
@@ -38,6 +43,10 @@ public class ForceDismiss {
     }
 }
 "@
+
+# Save cursor position so we can restore it after physical click
+$savedCursor = New-Object ForceDismiss+POINT
+[ForceDismiss]::GetCursorPos([ref]$savedCursor) | Out-Null
 
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 $cond = New-Object System.Windows.Automation.PropertyCondition(
@@ -85,5 +94,8 @@ if ($null -ne $replyBtn) {
 } else {
     Write-Host "Reply button not found"
 }
+
+# Restore cursor to original position
+[ForceDismiss]::SetCursorPos($savedCursor.X, $savedCursor.Y) | Out-Null
 
 Write-Host "Done"

@@ -52,4 +52,7 @@ module.exports = {
 
   // STT
   STT_TRANSCRIBE: 'stt:transcribe',
+
+  // Window
+  WINDOW_TOGGLE_FULLSCREEN: 'window:toggle-fullscreen',
 };

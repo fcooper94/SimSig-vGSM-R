@@ -20,6 +20,13 @@ const ConnectionUI = {
         if (initOverlay) initOverlay.classList.remove('hidden');
       }
     });
+
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
+    if (fullscreenBtn) {
+      fullscreenBtn.addEventListener('click', () => {
+        window.simsigAPI.window.toggleFullscreen();
+      });
+    }
   },
 
   setStatus(status) {

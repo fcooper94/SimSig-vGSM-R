@@ -36,6 +36,7 @@ const channels = {
   STT_TRANSCRIBE: 'stt:transcribe',
   SIM_NAME: 'sim:name',
   INIT_READY: 'init:ready',
+  WINDOW_TOGGLE_FULLSCREEN: 'window:toggle-fullscreen',
 };
 
 contextBridge.exposeInMainWorld('simsigAPI', {
@@ -141,5 +142,9 @@ contextBridge.exposeInMainWorld('simsigAPI', {
 
   stt: {
     transcribe: (audioData) => ipcRenderer.invoke(channels.STT_TRANSCRIBE, audioData),
+  },
+
+  window: {
+    toggleFullscreen: () => ipcRenderer.invoke(channels.WINDOW_TOGGLE_FULLSCREEN),
   },
 });

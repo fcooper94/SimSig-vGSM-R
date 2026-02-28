@@ -493,6 +493,11 @@ function registerIpcHandlers() {
     createMessageLogWindow();
   });
 
+  ipcMain.handle(channels.WINDOW_TOGGLE_FULLSCREEN, () => {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (win) win.setFullScreen(!win.isFullScreen());
+  });
+
   // TTS — ElevenLabs (premium paid voices, requires API key)
   const ELEVENLABS_API_BASE = 'https://api.elevenlabs.io';
 

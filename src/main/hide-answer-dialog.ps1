@@ -32,8 +32,15 @@ public class HideAnswer {
     public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, IntPtr dwExtraInfo);
     [DllImport("user32.dll")]
     public static extern bool IsWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out POINT lpPoint);
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int X, int Y);
 
     public delegate bool EnumCallback(IntPtr hWnd, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X, Y; }
 
     public const uint WM_KEYDOWN = 0x0100;
     public const uint WM_KEYUP = 0x0101;
@@ -96,6 +103,10 @@ public class HideAnswer {
 }
 "@
 
+# Save cursor position so we can restore it after BM_CLICK interactions
+$savedCursor = New-Object HideAnswer+POINT
+[HideAnswer]::GetCursorPos([ref]$savedCursor) | Out-Null
+
 $answerHwnd = [HideAnswer]::FindByClass("TAnswerCallForm")
 if ($answerHwnd -eq [IntPtr]::Zero) {
     Write-Output '{"success":true,"action":"none"}'
@@ -151,5 +162,8 @@ if ($teleHwnd2 -eq [IntPtr]::Zero) {
 if ($teleHwnd2 -ne [IntPtr]::Zero) {
     [HideAnswer]::HideOffScreen($teleHwnd2)
 }
+
+# Restore cursor to original position
+[HideAnswer]::SetCursorPos($savedCursor.X, $savedCursor.Y) | Out-Null
 
 Write-Output '{"success":true,"action":"closed"}'
