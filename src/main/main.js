@@ -6,6 +6,7 @@ const channels = require('../shared/ipc-channels');
 let mainWindow = null;
 let msgLogWindow = null;
 let setupWindow = null;
+let splashWindow = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -72,6 +73,52 @@ function createSetupWindow() {
   setupWindow.on('closed', () => {
     setupWindow = null;
   });
+}
+
+function createSplashWindow() {
+  splashWindow = new BrowserWindow({
+    width: 500,
+    height: 350,
+    resizable: false,
+    frame: false,
+    center: true,
+    show: false,
+    icon: path.join(__dirname, '../../images/icon.png'),
+    backgroundColor: '#000000',
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/preload-update.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  splashWindow.setMenu(null);
+  splashWindow.loadFile(path.join(__dirname, '../renderer/update.html'));
+  splashWindow.once('ready-to-show', () => splashWindow.show());
+
+  splashWindow.on('closed', () => {
+    splashWindow = null;
+  });
+
+  return splashWindow;
+}
+
+function sendSplashStatus(message, detail) {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.webContents.send('update:status', { message, detail });
+  }
+}
+
+function sendSplashProgress(percent) {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.webContents.send('update:progress', { percent });
+  }
+}
+
+function closeSplash() {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.close();
+  }
 }
 
 function createMessageLogWindow() {
@@ -148,9 +195,18 @@ function stopWebServer() {
 }
 
 app.whenReady().then(async () => {
-  // Check for updates before anything else (skips in dev mode)
+  // Show splash screen immediately
+  createSplashWindow();
+
+  // Check for updates (splash shows progress)
   const { checkForUpdates } = require('./updater');
-  await checkForUpdates();
+  await checkForUpdates({
+    onStatus: (message, detail) => sendSplashStatus(message, detail),
+    onProgress: (percent) => sendSplashProgress(percent),
+  });
+
+  // Initialise app
+  sendSplashStatus('Initialising...');
 
   const { initSettings } = require('./settings');
   const settings = require('./settings');
@@ -159,7 +215,12 @@ app.whenReady().then(async () => {
   initSettings();
   registerIpcHandlers();
 
-  // Show setup wizard on first launch, otherwise go straight to main window
+  // Brief pause so the user sees "Initialising..." before transition
+  await new Promise((r) => setTimeout(r, 800));
+
+  // Close splash and open the appropriate window
+  closeSplash();
+
   if (settings.get('setupComplete') === false) {
     createSetupWindow();
   } else {
@@ -253,8 +314,8 @@ app.on('before-quit', () => {
 app.on('will-quit', restoreTelephoneWindow);
 
 app.on('window-all-closed', () => {
-  // Don't quit if we're transitioning from setup to main window
-  if (mainWindow || setupWindow) return;
+  // Don't quit if we're transitioning between windows
+  if (mainWindow || setupWindow || splashWindow) return;
   restoreTelephoneWindow();
   app.quit();
 });

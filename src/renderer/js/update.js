@@ -1,6 +1,6 @@
 window.updateAPI.onStatus(({ message, detail }) => {
-  document.getElementById('update-message').textContent = message;
-  document.getElementById('update-detail').textContent = detail || '';
+  document.getElementById('splash-status').textContent = message;
+  document.getElementById('splash-detail').textContent = detail || '';
 });
 
 window.updateAPI.onProgress(({ percent }) => {

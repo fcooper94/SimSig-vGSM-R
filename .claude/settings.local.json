@@ -44,7 +44,8 @@
       "Bash(npm ls electron)",
       "Bash(git -C \"c:\\\\dev\\\\SimSig-vGSM-R\" remote -v)",
       "Bash(gh run list --limit 5)",
-      "Bash(cmd.exe /c \"where gh\")"
+      "Bash(cmd.exe /c \"where gh\")",
+      "WebFetch(domain:api.github.com)"
     ]
   }
 }

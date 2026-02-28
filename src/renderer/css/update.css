@@ -16,32 +16,35 @@ body {
   -webkit-app-region: drag;
 }
 
-#update-container {
+#splash-container {
   text-align: center;
-  padding: 24px 32px;
   width: 100%;
+  max-width: 500px;
+  padding: 0 32px;
 }
 
-.update-logo {
-  max-width: 180px;
-  margin-bottom: 20px;
+.splash-logo {
+  max-width: 340px;
+  width: 80%;
+  margin-bottom: 40px;
 }
 
-#update-message {
+#splash-status {
   font-size: 15px;
   font-weight: 500;
+  color: #cccccc;
   margin-bottom: 6px;
 }
 
-#update-detail {
+#splash-detail {
   font-size: 13px;
-  color: #777;
-  margin-bottom: 16px;
+  color: #666;
+  margin-bottom: 20px;
   min-height: 18px;
 }
 
 #progress-bar-container {
-  height: 4px;
+  height: 3px;
   background: #1a1a1a;
   border-radius: 2px;
   overflow: hidden;
