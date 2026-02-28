@@ -12,6 +12,11 @@ const PhoneCallsUI = {
   ttsVoices: null,   // cached list of voices from TTS provider
   trainSignalCache: {}, // headcode → last known signal ID
 
+  // True when running in a browser (not Electron) — display-only mirror mode
+  get _isBrowser() {
+    return !!window.simsigAPI._isBrowser;
+  },
+
   init() {
     this._callSeq = 0; // monotonic counter to detect stale async continuations
     this.initReady = false;
@@ -27,6 +32,74 @@ const PhoneCallsUI = {
     this.silenceBtn = document.getElementById('silence-btn');
     this.silenced = false;
 
+    // ── Browser mirror mode ──────────────────────────────────────────
+    // Browser is display-only: no audio, no local call flow.
+    // It receives chat/notification state from the host and forwards clicks.
+    if (this._isBrowser) {
+      // Receive chat state from host
+      window.simsigAPI.phone.onChatSync((state) => {
+        this.messages = state.messages || [];
+        this.inCall = state.inCall || false;
+        this._activeCallTrain = state.activeCallTrain || '';
+        this._outgoingCall = state.outgoingCall || false;
+        this.currentHeadCode = state.currentHeadCode || '';
+        this.currentSignalId = state.currentSignalId || '';
+        this.isShunterCall = state.isShunterCall || false;
+        this.isSignallerCall = state.isSignallerCall || false;
+        this.isThirdPartyCall = state.isThirdPartyCall || false;
+        this.renderChat();
+        this.renderCalls(); // re-render call list so In Call badge matches
+        if (state.notification) this._applyNotification(state.notification);
+        // Sync silence button visibility
+        if (this.silenceBtn) {
+          this.silenceBtn.classList.toggle('hidden', !state.silenceBtnVisible);
+        }
+        // Update radio display
+        const radioDisplay = document.getElementById('radio-display');
+        const line1 = document.getElementById('display-line-1');
+        const line2 = document.getElementById('display-line-2');
+        if (radioDisplay) radioDisplay.classList.toggle('in-call', this.inCall || this._outgoingCall);
+        if (line1) line1.textContent = (this.inCall || this._outgoingCall) ? 'In Call' : 'Ready';
+        if (line2) line2.textContent = state.activeCallTrain || '';
+      });
+
+      // Forward reply clicks to host
+      this.chatEl.addEventListener('click', (e) => {
+        const chip = e.target.closest('.wait-time-choice');
+        if (chip) {
+          window.simsigAPI.phone.remoteAction({ type: 'reply', replyIndex: parseInt(chip.dataset.index, 10) });
+          return;
+        }
+        const li = e.target.closest('.reply-options-list li');
+        if (li) {
+          const idx = parseInt(li.dataset.replyIndex, 10);
+          if (idx < 0) return; // wait row — use time chips
+          window.simsigAPI.phone.remoteAction({ type: 'reply', replyIndex: idx });
+        }
+      });
+
+      // Notification click — forward answer/hangup to host
+      this.notificationEl.addEventListener('click', () => {
+        if (this.inCall || this._outgoingCall) {
+          window.simsigAPI.phone.remoteAction({ type: 'hangup' });
+        } else if (this.calls.length > 0) {
+          window.simsigAPI.phone.remoteAction({ type: 'answer' });
+        }
+      });
+
+      // Silence button — still forward to host
+      this.silenceBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.simsigAPI.phone.silenceRing();
+      });
+
+      // No audio, TTS, or keybind setup on browser
+      this.renderChat();
+      return; // Skip all host-only init below
+    }
+
+    // ── Host mode (Electron) ─────────────────────────────────────────
+
     this.ringingAudio = new Audio('../../sounds/ringing.wav');
     this.ringingAudio.loop = true;
 
@@ -37,13 +110,59 @@ const PhoneCallsUI = {
       }
     });
 
-    // Silence ring for this call only
+    // Silence ring for this call only — broadcast to all clients
     this.silenceBtn.addEventListener('click', (e) => {
       e.stopPropagation();
+      window.simsigAPI.phone.silenceRing();
+    });
+
+    // Listen for silence events (from this client or remote clients)
+    window.simsigAPI.phone.onSilenceRing(() => {
       this.silenced = true;
       this.ringingAudio.pause();
       this.ringingAudio.currentTime = 0;
       this.silenceBtn.classList.add('hidden');
+      this._syncToRemote();
+    });
+
+    // Listen for call-answered from another client — stop ringing
+    window.simsigAPI.phone.onCallAnswered((train) => {
+      if (this.inCall) return; // this client answered, already handled
+      this.stopRinging();
+      this._activeCallTrain = train || '';
+      this.renderCalls();
+      this.hideNotification();
+    });
+
+    // Listen for remote actions from the browser (answer/reply/hangup)
+    window.simsigAPI.phone.onRemoteAction((action) => {
+      if (action.type === 'answer' && !this.inCall && !this._outgoingCall && this.calls.length > 0) {
+        this.answerCall(action.index != null ? action.index : this.calls.length - 1);
+      } else if (action.type === 'reply' && this.inCall && !this._replySent && !this._replyClicked) {
+        this._replyClicked = true;
+        if (this._isOkOnly) {
+          this.sendOkAndHangUp(this._replyCaller || this._activeCallVoiceKey || '');
+        } else if (this._replyReplies) {
+          this.sendReply(action.replyIndex, this._replyReplies, this._replyCaller);
+        }
+      } else if (action.type === 'reply' && this._outgoingCall && !this._outgoingReplySent) {
+        this._outgoingReplySent = true;
+        if (this._outgoingReplies) {
+          this.sendOutgoingReply(action.replyIndex, this._outgoingReplies, this._outgoingContactName);
+        }
+      } else if (action.type === 'hangup') {
+        if (this._outgoingCall) {
+          if (this._outgoingReplies && this._outgoingReplies.length > 0 && !this._outgoingReplySent) return;
+          this.endOutgoingCall();
+        } else if (this.inCall) {
+          if (this._hasReplyOptions && !this._replySent) return;
+          if (this._hangUpLocked) return;
+          this.hangUp();
+        }
+      } else if (action.type === 'dial' && ConnectionUI.isConnected && !this.inCall && !this._outgoingCall && !this._dialingActive) {
+        // Browser requested a phonebook dial — run the full flow on the host
+        this._handleRemoteDial(action.index, action.name);
+      }
     });
 
     // Click the notification box to answer the latest call or end the current call
@@ -137,6 +256,12 @@ const PhoneCallsUI = {
       }
     }
 
+    // Browser: don't ring — host handles all audio
+    if (this._isBrowser) {
+      this.renderCalls();
+      return;
+    }
+
     if (this.calls.length > 0 && !this.wasRinging && !this.inCall && !this._outgoingCall && !this._dialingActive) {
       this.startRinging();
     }
@@ -153,24 +278,28 @@ const PhoneCallsUI = {
   },
 
   startRinging() {
+    if (this._isBrowser) return; // no audio on browser
     this.wasRinging = true;
     this.silenced = false;
     this.silenceBtn.classList.remove('hidden');
+    this._syncToRemote();
     if (this.isPaused() || !this.initReady) return;
     this.ringingAudio.currentTime = 0;
     this.ringingAudio.play().catch(() => {});
   },
 
   stopRinging() {
+    if (this._isBrowser) return; // no audio on browser
     this.wasRinging = false;
     this.silenced = false;
     this.silenceBtn.classList.add('hidden');
+    this._syncToRemote();
     this.ringingAudio.pause();
     this.ringingAudio.currentTime = 0;
   },
 
   setRingDevice(deviceId) {
-    if (this.ringingAudio.setSinkId) {
+    if (this.ringingAudio && this.ringingAudio.setSinkId) {
       this.ringingAudio.setSinkId(deviceId || 'default').catch((e) => {
         console.warn('[Phone] Could not set ring output device:', e.message);
       });
@@ -179,12 +308,14 @@ const PhoneCallsUI = {
 
   // Silence all audio immediately (called when sim pauses)
   muteAll() {
+    if (this._isBrowser) return; // no audio on browser
     this.ringingAudio.pause();
     this.ringingAudio.currentTime = 0;
   },
 
   // Resume ringing if calls are waiting (called when sim unpauses)
   resumeRinging() {
+    if (this._isBrowser) return; // no audio on browser
     if (this.calls.length > 0 && this.wasRinging && !this.inCall && !this._outgoingCall && !this._dialingActive && !this.silenced) {
       this.ringingAudio.currentTime = 0;
       this.ringingAudio.play().catch(() => {});
@@ -249,7 +380,7 @@ const PhoneCallsUI = {
     }
   },
 
-  // Pick a consistent TTS voice for a caller (80% male, 20% female)
+  // Pick a consistent TTS voice for a caller (90% male, 10% female)
   getTTSVoiceId(caller, voices) {
     if (this.voiceCache[caller]) return this.voiceCache[caller];
     const hash = this.hashString(caller);
@@ -257,8 +388,8 @@ const PhoneCallsUI = {
     const females = voices.filter((v) => v.gender !== 'male');
     let voice;
     if (males.length && females.length) {
-      // Use hash to deterministically assign ~80% male
-      const useMale = (hash % 10) < 8;
+      // Use hash to deterministically assign ~90% male
+      const useMale = (hash % 10) < 9;
       const pool = useMale ? males : females;
       voice = pool[hash % pool.length];
     } else {
@@ -276,6 +407,7 @@ const PhoneCallsUI = {
 
   // Start background noise (cab for trains, office for signallers, yard for shunters/CSD)
   startBgNoise() {
+    if (!this.bgCtx) return; // no audio context on browser
     let buffer;
     if (this.bgCallerType === 'yard' && this.bgYardBuffer) {
       buffer = this.bgYardBuffer;
@@ -300,7 +432,7 @@ const PhoneCallsUI = {
 
   // Fade out and stop cab background noise
   stopBgNoise() {
-    if (!this.bgSource) return;
+    if (!this.bgSource || !this.bgCtx) return;
     const now = this.bgCtx.currentTime;
     this.bgGain.gain.setValueAtTime(this.bgGain.gain.value, now);
     this.bgGain.gain.linearRampToValueAtTime(0, now + 0.5);
@@ -360,7 +492,7 @@ const PhoneCallsUI = {
       this._currentAudio.currentTime = 0;
       this._currentAudio = null;
     }
-    speechSynthesis.cancel();
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
   },
 
   // Parse CSD (Carriage Sidings) entry permission messages
@@ -470,6 +602,18 @@ const PhoneCallsUI = {
     return { headcode, location, nextStop, platform };
   },
 
+  // Parse signaller advisory messages — another signaller advising a train is waiting
+  // SimSig formats: "I have train 1L33 waiting", "1L33 is waiting", "I have 1L33 waiting at Honiton"
+  parseSignallerAdvisory(msg) {
+    // "I have (train)? X waiting (at Y)?"
+    const haveMatch = msg.match(/I\s+have\s+(?:train\s+)?(\w+)\s+waiting(?:\s+at\s+(.+?))?\.?\s*(?:\n|$)/i);
+    if (haveMatch) return { headcode: haveMatch[1], location: haveMatch[2] ? haveMatch[2].trim() : null };
+    // "X is waiting (at Y)?"
+    const isMatch = msg.match(/(\w+)\s+is\s+waiting(?:\s+at\s+(.+?))?\.?\s*(?:\n|$)/i);
+    if (isMatch) return { headcode: isMatch[1], location: isMatch[2] ? isMatch[2].trim() : null };
+    return null;
+  },
+
   // Parse "early running" advisory messages from other signallers
   // "I have 4022 running early via Aynho Junction (Up Main).\nIt can be in your area at about 05:00 if I let it continue.\nDo you want me to hold it until its booked time of 05:22?"
   parseEarlyRunningMessage(msg) {
@@ -509,6 +653,7 @@ const PhoneCallsUI = {
     { pattern: /understood|continue|obey|speaking.*control/, fragment: 'continue after speaking' },
     { pattern: /run\s*early|let.*run|let.*continue/, fragment: 'run early' },
     { pattern: /hold.*back|hold.*booked/, fragment: 'hold' },
+    { pattern: /take\s*a\s*look|look\s*now|look\s*at\s*it/, fragment: 'ok' },
     { pattern: /\bok\b|thanks|thank\s*you|cheers/, fragment: 'ok' },
   ],
 
@@ -707,6 +852,64 @@ const PhoneCallsUI = {
     const sigRef = sig ? ` signal ${sig}` : '';
     const panelRef = panel ? ` the ${panel} signaller` : ' the signaller';
 
+    // Signaller-to-signaller calls use different phrasing
+    if (this.isSignallerCall) {
+      const sigWait = raw.match(/wait\s+(\d+)\s*min/i);
+      if (sigWait) {
+        return `Understood, they can expect to wait ${sigWait[1]} minutes further. Phone me back if it is longer than that`;
+      }
+      const sigCallBack = raw.match(/call\s*back\s+in\s+(\d+)\s*min/i);
+      if (sigCallBack) {
+        return `Give me ${sigCallBack[1]} minutes. Phone me back after that`;
+      }
+      if (/^\s*ok\s*$/i.test(raw)) {
+        return 'Ok, Thanks. I will take a look now';
+      }
+      const runEarly = raw.match(/let\s+(\w+)\s+run\s+early/i);
+      if (runEarly) {
+        return `Ok, let ${runEarly[1]} come through`;
+      }
+      const holdBack = raw.match(/hold\s+(\w+)\s+back/i);
+      if (holdBack) {
+        return `Can you hold ${holdBack[1]} back until their booked time please`;
+      }
+      // Fall through to standard formatting for other signaller reply types
+    }
+
+    // Third-party calls (token hut, ground frame, etc.) — talk about the driver, not to them
+    if (this.isThirdPartyCall) {
+      if (/ok.*no\s*obstruction/i.test(raw)) {
+        return `Ok, thank you. No obstructions found, they can continue normally`;
+      }
+      if (/pass.*signal.*at\s*stop.*examine|pass.*signal.*danger.*examine|authoris[ez].*pass.*examine|ask.*pass.*examine/i.test(raw)) {
+        return `Ok, the driver of ${hc} is authorised to pass${sigRef} at danger. Tell them to proceed at caution and continue to examine the line. They need to report any obstructions`;
+      }
+      if (/authoris[ez].*pass.*signal|ask.*pass.*signal|pass.*signal.*at\s*stop/i.test(raw)) {
+        return `Ok, the driver of ${hc} is authorised to pass${sigRef} at danger. Tell them to proceed at caution to the next signal and be prepared to stop short of any obstruction`;
+      }
+      if (/continue\s*examin/i.test(raw)) {
+        return `Ok, thank you. No obstructions found. Tell the driver to continue examining the line and report any obstructions`;
+      }
+      if (/ask.*examine|examine\s*the\s*line/i.test(raw)) {
+        return `Ok, I need the driver to examine the line between${sigRef} and the next signal. Tell them to proceed at caution and report any obstructions`;
+      }
+      const tpWait = raw.match(/wait\s+(\d+)\s*min/i);
+      if (tpWait) {
+        return `Ok, tell the driver to remain at${sigRef} and standby for ${tpWait[1]} minutes. Get them to phone back if the signal hasn't cleared`;
+      }
+      if (/continue\s+after\s+speaking/i.test(raw)) {
+        return `Ok, tell the driver they can continue normally`;
+      }
+      const tpCallBack = raw.match(/call\s*back\s+in\s+(\d+)\s*min/i);
+      if (tpCallBack) {
+        return `Ok, get the driver to call back in ${tpCallBack[1]} minutes`;
+      }
+      if (/^\s*ok\s*$/i.test(raw)) {
+        return 'Ok Thanks';
+      }
+      return raw.replace(/\bat stop\b/gi, 'at danger');
+    }
+
     // "Ok, no obstruction found" — acknowledge and continue normally
     if (/ok.*no\s*obstruction/i.test(raw)) {
       return `${hc}, Thank you. No obstructions found. Continue normally`;
@@ -773,6 +976,57 @@ const PhoneCallsUI = {
     const sigRef = sig ? ` signal ${sig}` : '';
     const trainRef = hc ? `, ${hc}` : '';
 
+    // Signaller-to-signaller readbacks are conversational
+    if (this.isSignallerCall) {
+      if (/wait\s+\d+\s*min/i.test(lower)) {
+        return 'Ok, I will let them know. Thanks';
+      }
+      if (/call\s*back\s+in\s+\d+\s*min/i.test(lower)) {
+        return 'Ok, will do. Thanks';
+      }
+      if (/run\s*early|let.*run|let.*continue/i.test(lower)) {
+        return 'Ok, will do. Thanks';
+      }
+      if (/hold.*back/i.test(lower)) {
+        return 'Ok, I will hold them. Thanks';
+      }
+      if (/^\s*ok\s*$/i.test(lower)) {
+        return 'Ok, Thanks. Bye';
+      }
+      return 'Ok, Thanks. Bye';
+    }
+
+    // Third-party readback (token hut, ground frame) — conversational, relaying the message
+    if (this.isThirdPartyCall) {
+      if (/pass.*signal.*at\s*(stop|danger).*examine/i.test(lower) || /pass.*at\s*danger.*continue.*examine/i.test(lower)) {
+        return `Ok, I will let the driver know they are authorised to pass${sigRef} at danger and to continue examining the line`;
+      }
+      if (/pass.*signal.*at\s*(stop|danger)/i.test(lower)) {
+        return `Ok, I will tell the driver they are authorised to pass${sigRef} at danger`;
+      }
+      if (/no\s*obstruction.*continue\s*normally/i.test(lower)) {
+        return 'Ok, I will let them know they can continue normally';
+      }
+      if (/continue.*examine/i.test(lower)) {
+        return 'Ok, I will tell them to continue examining the line';
+      }
+      if (/examine\s*the\s*line/i.test(lower)) {
+        return `Ok, I will get the driver to examine the line from${sigRef} and report back`;
+      }
+      const tpWait = lower.match(/wait\s+(\d+)\s*min/);
+      if (tpWait) {
+        return `Ok, I will tell them to wait ${tpWait[1]} minutes`;
+      }
+      const tpCallBack = lower.match(/call\s*back\s+in\s+(\d+)\s*min/);
+      if (tpCallBack) {
+        return `Ok, I will get them to call back in ${tpCallBack[1]} minutes`;
+      }
+      if (/continue\s+after\s+speaking/i.test(lower)) {
+        return 'Ok, I will let the driver know they can continue';
+      }
+      return 'Ok, I will pass that on to the driver';
+    }
+
     // "No obstructions found, continue normally"
     if (/no\s*obstruction.*continue\s*normally/i.test(lower)) {
       return `Understood, continue normally${trainRef}`;
@@ -830,11 +1084,18 @@ const PhoneCallsUI = {
     return `Understood${trainRef}`;
   },
 
-  // Send a reply by index — shared by speech, click, and fallback button paths
+  // Send a reply by index — shared by speech recognition, click, and fallback button paths.
+  // FLOW:
+  //   1. Build the caller's readback text (buildConfirmation) based on reply type and caller type
+  //      (driver = formal readback, signaller = conversational, third-party = relay phrasing)
+  //   2. Start TTS audio generation in parallel (don't wait for it)
+  //   3. Send reply to SimSig via reply-phone-call.ps1 (handles headcode confirmation dialogs)
+  //   4. Show readback text in chat and play TTS audio
+  //   5. Unlock hang-up button
+  // The currentHeadCode is passed to the PS script for headcode confirmation dialogs.
   async sendReply(replyIndex, replies, caller) {
     const myCallId = this._callSeq;
     this._hangUpLocked = true; // prevent hangup keybind/click during reply flow
-    // Show loading spinner immediately, send reply + fetch TTS in parallel
     this.addMessage({ type: 'loading', text: 'Replying...' });
     const confirmation = this.buildConfirmation(replies[replyIndex]);
 
@@ -846,7 +1107,7 @@ const PhoneCallsUI = {
       audioPromise = this.fetchTTSAudio(this.phoneticize(confirmation), voiceId);
     }
 
-    // Send reply to SimSig while TTS generates
+    // Send reply to SimSig — PS script handles headcode entry dialogs automatically
     await window.simsigAPI.phone.replyCall(replyIndex, this.currentHeadCode);
     if (myCallId !== this._callSeq) return;
     this._replySent = true;
@@ -880,10 +1141,11 @@ const PhoneCallsUI = {
     if (myCallId !== this._callSeq) return;
     this._replySent = true;
     this.messages = this.messages.filter((m) => m.type !== 'loading');
-    this.addMessage({ type: 'signaller', text: 'Ok, Thanks' });
+    const okText = this.isSignallerCall ? 'Ok, Thanks. I will take a look now' : 'Ok, Thanks';
+    this.addMessage({ type: 'signaller', text: okText });
     this.renderChat();
-    // Driver replies "Ok, Bye" then call ends
-    const goodbye = 'Ok, Bye';
+    // Caller replies then call ends
+    const goodbye = this.isSignallerCall ? 'Ok, Thanks. Bye' : 'Ok, Bye';
     this.addMessage({ type: 'driver', caller: this.shortenCaller(caller), text: goodbye });
     await this.speakAsDriver(goodbye, caller);
     if (myCallId !== this._callSeq) return;
@@ -947,6 +1209,7 @@ const PhoneCallsUI = {
     // If only "Ok" is available, show as speak prompt then send reply and hang up (no goodbye)
     const okOnly = replies.length === 1 && /^ok$/i.test(replies[0].trim());
     if (okOnly) replies = ['Ok, Thanks'];
+    this._isOkOnly = okOnly; // stored so remote actions know the reply type
 
     this._replyClicked = false;
     this.addMessage({ type: 'reply-options', replies });
@@ -1002,6 +1265,8 @@ const PhoneCallsUI = {
   // After reply is sent, listen for goodbye on incoming calls
   async showHangUpInChat(callId) {
     this._replyClicked = false;
+    this._hangUpLocked = false; // allow hangup from this point
+
     while (this.inCall && callId === this._callSeq) {
       this.addMessage({ type: 'greeting', text: 'Hold PTT to say goodbye...' });
 
@@ -1012,7 +1277,13 @@ const PhoneCallsUI = {
           // At the goodbye stage, any speech is treated as goodbye
           // (user has already sent their reply — they're just ending the call)
           const voiceKey = this._activeCallVoiceKey || this._activeCallTrain || '';
-          const goodbyes = [
+          const goodbyes = this.isSignallerCall ? [
+            'Ok, Thanks. Bye.',
+            'Right, thanks for letting me know. Bye.',
+            'Ok, cheers. Bye.',
+            'Thanks. Bye.',
+            'Ok, thanks for that. Bye bye.',
+          ] : [
             'Right, cheers mate, bye.',
             'Ta, bye now.',
             'Sound, cheers, bye bye.',
@@ -1130,8 +1401,11 @@ const PhoneCallsUI = {
     }
 
     this.inCall = false;
+    this._isOkOnly = false;
     window.simsigAPI.keys.setInCall(false);
     this.isShunterCall = false;
+    this.isSignallerCall = false;
+    this.isThirdPartyCall = false;
     this._replyClicked = false;
     this._hasReplyOptions = false;
     this._replySent = false;
@@ -1148,6 +1422,7 @@ const PhoneCallsUI = {
     this.renderChat();
     this.renderCalls();
     this.hideNotification();
+    this._syncToRemote();
 
     // Hide any lingering TAnswerCallForm dialog in SimSig
     window.simsigAPI.phone.hideAnswerDialog().catch(() => {});
@@ -1162,6 +1437,7 @@ const PhoneCallsUI = {
   async answerCall(index) {
     if (this.inCall) return; // prevent double-answer race condition
     this.inCall = true;
+    this._hangUpLocked = true; // lock hangup until call flow is ready
     const callId = ++this._callSeq; // unique ID to detect stale async continuations
     window.simsigAPI.keys.setInCall(true);
     this._replyClicked = false;
@@ -1172,6 +1448,10 @@ const PhoneCallsUI = {
     const call = this.calls[index];
     const train = call ? call.train : '';
     this._activeCallTrain = train;
+
+    // Broadcast to all clients so they stop ringing too
+    window.simsigAPI.phone.notifyCallAnswered(train);
+
     this.showInCallNotification(train);
 
     // Remove focus from notification so Space (PTT) doesn't trigger a click on [End Call]
@@ -1229,20 +1509,29 @@ const PhoneCallsUI = {
     const csd = this.parseCsdMessage(driverMsg);
     const readyAt = !csd ? this.parseReadyAtMessage(driverMsg) : null;
     const earlyRun = this.parseEarlyRunningMessage(driverMsg);
+    const sigAdvisory = !csd && !readyAt && !earlyRun ? this.parseSignallerAdvisory(driverMsg) : null;
 
     // Start background noise for the duration of the call
     // Signaller → office ambience, shunter/CSD/yard → yard noise, train → cab noise
     this.bgCallerType = this.getCallerType(caller, driverMsg);
     this.isShunterCall = /shunter/i.test(caller);
+    // Third-party calls: caller is not a Driver, not a Signaller, not a Shunter
+    // (e.g. token hut, ground frame, level crossing) — use third-person phrasing
+    this.isThirdPartyCall = !this.isShunterCall && !this.isSignallerCall
+      && !/^Driver\b/i.test(caller) && !/signaller/i.test(caller)
+      && !/[0-9][A-Z][0-9]{2}/i.test(caller);
     this.startBgNoise();
 
     // Extract signal and headcode EARLY so formatReplyOption can use them
     const sigMatch = driverMsg.match(/signal\s+([A-Z0-9]+)/i);
     const titleMatch = (result.title || '').match(/([0-9][A-Z][0-9]{2})/i);
     const trainMatch = (result.train || train).match(/([0-9][A-Z][0-9]{2})/i);
+    const advisoryHc = sigAdvisory ? sigAdvisory.headcode.toUpperCase() : null;
     this.currentHeadCode = titleMatch ? titleMatch[1].toUpperCase()
       : trainMatch ? trainMatch[1].toUpperCase()
-      : (result.train || train).trim();
+      : advisoryHc
+        ? advisoryHc
+        : (result.train || train).trim();
     // Use signal from message, or fall back to cached signal for this train
     if (sigMatch) {
       this.currentSignalId = sigMatch[1];
@@ -1284,9 +1573,15 @@ const PhoneCallsUI = {
         spokenMsg = `Hello ${panelName} Signaller. This is driver of ${readyAt.headcode}. I am waiting to enter at ${readyAt.location}`;
       }
     } else if (earlyRun) {
+      this.isSignallerCall = true;
       const bookedPart = earlyRun.booked ? ` with booked time of ${earlyRun.booked}` : '';
       displayMsg = `${caller}. ${earlyRun.headcode} is early. Estimate is ${earlyRun.estimate}${bookedPart}. Continue or hold back?`;
       spokenMsg = `Hello ${panelName}, this is ${this.shortenCaller(caller)} Signaller. I have ${earlyRun.headcode} running early via ${earlyRun.via}. It can be in your area at about ${earlyRun.estimate}. Shall I let it continue or hold it back until its booked time of ${earlyRun.booked}?`;
+    } else if (sigAdvisory) {
+      this.isSignallerCall = true;
+      const locPart = sigAdvisory.location ? ` at ${sigAdvisory.location}` : '';
+      spokenMsg = `Hello, ${panelName} Signaller, this is ${this.shortenCaller(caller)}. I currently have ${sigAdvisory.headcode} waiting${locPart}`;
+      displayMsg = spokenMsg;
     } else if (isExamineResult && this.currentHeadCode) {
       // Examine line result — driver reporting back after examining the line
       const sigPart = this.currentSignalId ? ` at ${this.currentSignalId}` : '';
@@ -1311,18 +1606,19 @@ const PhoneCallsUI = {
     // Pre-generate TTS audio IN PARALLEL while user speaks the greeting
     let prefetchedAudio = null;
     let voiceId = null;
+    const greetingText = greeting;
     if (voices && voices.length > 0) {
       voiceId = this.getTTSVoiceId(caller, voices);
       // Start fetching audio immediately — don't wait for user to finish speaking
       const audioPromise = this.fetchTTSAudio(this.phoneticize(spokenMsg), voiceId);
 
       // Show greeting and wait for user speech AT THE SAME TIME as audio generates
-      this.addMessage({ type: 'greeting', text: greeting });
+      this.addMessage({ type: 'greeting', text: greetingText });
       const [audio] = await Promise.all([audioPromise, this.waitForUserSpeech()]);
       if (callId !== this._callSeq) return;
       prefetchedAudio = audio;
     } else {
-      this.addMessage({ type: 'greeting', text: greeting });
+      this.addMessage({ type: 'greeting', text: greetingText });
       await this.waitForUserSpeech();
       if (callId !== this._callSeq) return;
     }
@@ -1354,6 +1650,7 @@ const PhoneCallsUI = {
     const time = this.gameTime || '';
     this.messages.push({ ...msg, time });
     this.renderChat();
+    this._syncToRemote();
   },
 
   renderCalls() {
@@ -1400,7 +1697,11 @@ const PhoneCallsUI = {
       btn.addEventListener('click', (e) => {
         if (this.inCall) return; // already in a call
         const idx = parseInt(e.target.dataset.index, 10);
-        this.answerCall(idx);
+        if (this._isBrowser) {
+          window.simsigAPI.phone.remoteAction({ type: 'answer', index: idx });
+        } else {
+          this.answerCall(idx);
+        }
       });
     });
   },
@@ -1417,6 +1718,10 @@ const PhoneCallsUI = {
     if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[Dialing]';
     const icon = this.notificationEl.querySelector('#notification-icon');
     if (icon) icon.innerHTML = '&#128222;';
+    this._dialingActive = true;
+    this._syncToRemote();
+    // No audio on browser — host plays the ringing-out sound
+    if (this._isBrowser) return;
     // Play ringing-out via Web Audio API with smooth fade-out and 1s gap
     if (!this._ringOutCtx) {
       this._ringOutCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1429,7 +1734,6 @@ const PhoneCallsUI = {
         })
         .catch(() => {});
     }
-    this._dialingActive = true;
     if (this._ringOutBuffer) this._playRingOut();
   },
 
@@ -1494,6 +1798,7 @@ const PhoneCallsUI = {
     if (icon) icon.innerHTML = '&#128222;';
     // Mark the phone book row as in-call
     this._updatePhonebookInCall(contactName, true);
+    this._syncToRemote();
 
     // Start background audio based on contact type
     this.bgCallerType = this.getCallerType(contactName, '');
@@ -1781,10 +2086,33 @@ const PhoneCallsUI = {
     this.bgCallerType = 'train';
     this.messages = [];
     this.renderChat();
-    this.hideNotification();
+    this.hideNotification(); // includes _syncToRemote()
 
     // Resume incoming call notification if calls are waiting
     this._resumeIncoming();
+  },
+
+  // Handle phonebook dial triggered from browser remote action
+  async _handleRemoteDial(index, name) {
+    this.showDialingNotification(name);
+    const res = await window.simsigAPI.phone.dialPhoneBook(index);
+    if (res.error) {
+      this.stopDialing();
+      return;
+    }
+    // Minimum ring time before first check
+    await new Promise((r) => setTimeout(r, 3000));
+    for (let i = 0; i < 30; i++) {
+      if (!this._dialingActive) return;
+      const status = await window.simsigAPI.phone.placeCallStatus();
+      if (status.connected) {
+        this.stopDialing(true);
+        this.showOutgoingCallNotification(name, status.message, status.replies);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    this.stopDialing();
   },
 
   // Re-show incoming call notification and start ringing if calls are waiting
@@ -1838,6 +2166,7 @@ const PhoneCallsUI = {
     const line2 = document.getElementById('display-line-2');
     if (line1) line1.textContent = 'In Call';
     if (line2) line2.textContent = headcode;
+    this._syncToRemote();
   },
 
   showNotification(trainText) {
@@ -1851,6 +2180,7 @@ const PhoneCallsUI = {
     const icon = this.notificationEl.querySelector('#notification-icon');
     if (icon) icon.innerHTML = '&#128643;';
     this.notificationEl.classList.add('flashing');
+    this._syncToRemote();
   },
 
   // Full reset — called on disconnect to dump all state
@@ -1869,6 +2199,7 @@ const PhoneCallsUI = {
     this.calls = [];
     this.messages = [];
     this.inCall = false;
+    this._isOkOnly = false;
     this.initReady = false;
     this._callSeq++;
     this._replyClicked = false;
@@ -1880,6 +2211,8 @@ const PhoneCallsUI = {
     this.currentHeadCode = '';
     this.currentSignalId = null;
     this.isShunterCall = false;
+    this.isSignallerCall = false;
+    this.isThirdPartyCall = false;
     this.bgCallerType = 'train';
     this.gameTime = '';
     this.trainSignalCache = {};
@@ -1927,6 +2260,55 @@ const PhoneCallsUI = {
     const line2 = document.getElementById('display-line-2');
     if (line1) line1.textContent = 'GSM-R';
     if (line2) line2.textContent = 'Ready';
+    this._syncToRemote();
+  },
+
+  // Sync chat/notification state to browser clients (host only)
+  _syncToRemote() {
+    if (this._isBrowser) return;
+    if (!window.simsigAPI.phone.chatSync) return;
+    window.simsigAPI.phone.chatSync({
+      messages: this.messages,
+      inCall: this.inCall,
+      activeCallTrain: this._activeCallTrain || '',
+      outgoingCall: this._outgoingCall || false,
+      currentHeadCode: this.currentHeadCode || '',
+      currentSignalId: this.currentSignalId || '',
+      isShunterCall: this.isShunterCall || false,
+      isSignallerCall: this.isSignallerCall || false,
+      isThirdPartyCall: this.isThirdPartyCall || false,
+      silenceBtnVisible: this.silenceBtn && !this.silenceBtn.classList.contains('hidden'),
+      notification: this._getNotificationState(),
+    });
+  },
+
+  _getNotificationState() {
+    if (!this.notificationEl) return { type: 'hidden' };
+    if (this.notificationEl.classList.contains('hidden')) return { type: 'hidden' };
+    const icon = this.notificationEl.querySelector('#notification-icon');
+    return {
+      type: this.notificationEl.classList.contains('in-call') ? 'in-call'
+        : this.notificationEl.classList.contains('flashing') ? 'flashing' : 'visible',
+      trainText: this.notificationTrainEl ? this.notificationTrainEl.textContent : '',
+      buttonText: this.notificationAnswerBtn ? this.notificationAnswerBtn.textContent : '',
+      iconHtml: icon ? icon.innerHTML : '',
+    };
+  },
+
+  _applyNotification(state) {
+    if (!this.notificationEl) return;
+    if (state.type === 'hidden') {
+      this.notificationEl.classList.add('hidden');
+      this.notificationEl.classList.remove('flashing', 'in-call');
+      return;
+    }
+    this.notificationEl.classList.remove('hidden');
+    this.notificationEl.classList.toggle('in-call', state.type === 'in-call');
+    this.notificationEl.classList.toggle('flashing', state.type === 'flashing');
+    if (this.notificationTrainEl) this.notificationTrainEl.textContent = state.trainText || '';
+    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = state.buttonText || '';
+    const icon = this.notificationEl.querySelector('#notification-icon');
+    if (icon && state.iconHtml) icon.innerHTML = state.iconHtml;
   },
 
   renderChat() {
@@ -1989,15 +2371,27 @@ const PhoneCallsUI = {
           const timeParts = waitMins.map((m) =>
             `<span class="wait-time-choice" data-index="${waitIndices[waitMins.indexOf(m)]}">${m}</span>`
           ).join(' / ');
-          const waitWho = this.isShunterCall ? 'Shunter' : 'Driver';
-          items.push({ html: `${waitWho}, Correct. Remain at${this.escapeHtml(sigRef)} and wait ${timeParts} minutes before phoning back.`, replyIndex: -1 });
+          if (this.isSignallerCall) {
+            items.push({ html: `Understood, they can expect to wait ${timeParts} minutes further. Phone me back if it is longer than that.`, replyIndex: -1 });
+          } else if (this.isThirdPartyCall) {
+            items.push({ html: `Ok, tell the driver to remain at${this.escapeHtml(sigRef)} and wait ${timeParts} minutes. Get them to phone back if the signal hasn't cleared.`, replyIndex: -1 });
+          } else {
+            const waitWho = this.isShunterCall ? 'Shunter' : 'Driver';
+            items.push({ html: `${waitWho}, Correct. Remain at${this.escapeHtml(sigRef)} and wait ${timeParts} minutes before phoning back.`, replyIndex: -1 });
+          }
         }
         if (callBackMins.length > 0) {
           const timeParts = callBackMins.map((m) =>
             `<span class="wait-time-choice" data-index="${callBackIndices[callBackMins.indexOf(m)]}">${m}</span>`
           ).join(' / ');
-          const cbWho = this.isShunterCall ? 'Shunter' : 'Driver';
-          items.push({ html: `${cbWho}, Please call back in ${timeParts} minutes.`, replyIndex: -1 });
+          if (this.isSignallerCall) {
+            items.push({ html: `Give me ${timeParts} minutes. Phone me back after that.`, replyIndex: -1 });
+          } else if (this.isThirdPartyCall) {
+            items.push({ html: `Ok, get the driver to call back in ${timeParts} minutes.`, replyIndex: -1 });
+          } else {
+            const cbWho = this.isShunterCall ? 'Shunter' : 'Driver';
+            items.push({ html: `${cbWho}, Please call back in ${timeParts} minutes.`, replyIndex: -1 });
+          }
         }
         otherReplies.forEach((o) => {
           items.push({ html: this.escapeHtml(this.formatReplyOption(o.raw)), replyIndex: o.index });

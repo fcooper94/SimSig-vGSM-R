@@ -36,7 +36,9 @@
       "Bash(node generate-voice-samples.js)",
       "Bash(git log --all --oneline --grep -i \"elevenlabs\\\\|eleven\")",
       "WebFetch(domain:app.unpkg.com)",
-      "Bash(powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ':*)"
+      "Bash(powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ':*)",
+      "Bash(node -c \"c:/dev/SimSig-Comms/src/renderer/js/ui-phone-calls.js\")",
+      "Bash(gh repo rename SimSig-vGSM-R --yes)"
     ]
   }
 }

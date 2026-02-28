@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; script-src 'self'; style-src 'self'; media-src 'self' blob:">
-  <title>SimSig GSM-R Comms</title>
+  <title>SimSig VGSM-R</title>
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/radio.css">
   <link rel="stylesheet" href="css/settings.css">
@@ -87,7 +87,7 @@
           <span>Emergency</span>
         </div>
         <div id="emrg-panel-body">
-          <button id="emrg-stop-all">Stop All Trains</button>
+          <button id="emrg-stop-all">Send All Stop</button>
           <div id="emrg-feedback"></div>
         </div>
       </section>
@@ -134,8 +134,8 @@
 
   <!-- ── TAB BAR ────────────────────────────────────────────── -->
   <div id="tab-bar">
-    <span class="tab-item">Speed Dial</span>
-    <span class="tab-item">Speed Dial</span>
+    <span class="tab-item disabled">Speed Dial</span>
+    <span class="tab-item disabled">Speed Dial</span>
     <span class="tab-item">&nbsp;&nbsp;&nbsp;</span>
     <span class="tab-item" id="tab-log">Log</span>
     <span class="tab-item" id="tab-trains">Trains Mobiles (0)</span>
@@ -254,6 +254,11 @@
           <div id="tts-credit-status" class="hidden"></div>
         </fieldset>
         <fieldset>
+          <legend>Browser Access</legend>
+          <label><input type="checkbox" id="setting-web-enabled"> Enable browser access (iPad)</label>
+          <label>Port <input type="number" id="setting-web-port" value="3000" min="1024" max="65535"></label>
+        </fieldset>
+        <fieldset>
           <legend>Keybinds</legend>
           <label>Push-To-Talk <input type="text" id="setting-ptt-keybind" readonly></label>
           <button type="button" class="rebind-btn" data-target="setting-ptt-keybind">Press to rebind...</button>
@@ -273,11 +278,23 @@
   <!-- ── EMERGENCY CONFIRM MODAL ────────────────────────────── -->
   <div id="emrg-confirm-modal" class="modal hidden">
     <div class="confirm-content">
-      <h3>Stop All Trains</h3>
+      <h3>Send All Stop</h3>
       <p>This will pull every signal in the simulation.</p>
       <div class="confirm-actions">
         <button id="emrg-confirm-yes">Yes</button>
         <button id="emrg-confirm-no">No</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── GENERIC CONFIRM MODAL ──────────────────────────────── -->
+  <div id="confirm-modal" class="modal hidden">
+    <div class="confirm-content">
+      <h3 id="confirm-title">Are you sure?</h3>
+      <p id="confirm-message"></p>
+      <div class="confirm-actions">
+        <button id="confirm-yes">Yes</button>
+        <button id="confirm-no">No</button>
       </div>
     </div>
   </div>
@@ -292,6 +309,12 @@
     <div id="paused-text">SIM PAUSED</div>
   </div>
 
+  <!-- Browser Access overlay -->
+  <div id="browser-overlay" class="hidden">
+    <div id="browser-overlay-text">Connect to<br><span id="browser-overlay-url"></span></div>
+  </div>
+
+  <script src="js/ws-api-shim.js"></script>
   <script src="../../node_modules/vosk-browser/dist/vosk.js"></script>
   <script src="js/stt-vosk.js"></script>
   <script src="js/time-utils.js"></script>

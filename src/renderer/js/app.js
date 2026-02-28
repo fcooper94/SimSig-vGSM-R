@@ -1,12 +1,15 @@
 document.addEventListener('DOMContentLoaded', async () => {
-  // Initialize all UI modules
+  // Initialize all UI modules synchronously first
   ConnectionUI.init();
   SettingsUI.init();
-  await PTTUI.init();
   AudioPipeline.init();
   PhoneCallsUI.init();
   TrainTracker.init();
   MessageFeed.init();
+
+  // Register ALL event listeners BEFORE any async work.
+  // The WebSocket initial state sync fires as soon as the connection opens,
+  // so listeners must be in place before we yield to the event loop (await).
 
   // Hide init overlay once pause/unpause sync completes
   window.simsigAPI.sim.onReady(() => {
@@ -77,6 +80,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     MessageFeed.handleMessage(msg);
   });
 
+  // Auto-populate panel name and subtitle from SimSig window title
+  window.simsigAPI.sim.onName((name) => {
+    const ascIdx = name.toUpperCase().indexOf('ASC');
+    const trimmed = ascIdx !== -1 ? name.substring(0, ascIdx + 3).trim() : name;
+    document.getElementById('panel-name-tab').textContent = trimmed;
+    // Show full name in subtitle row
+    document.getElementById('panel-subtitle').textContent = name;
+  });
+
+  // Now do async initialization (PTTUI needs settings from main process)
+  await PTTUI.init();
+
   // Tab switching — left panel views (comms chat stays always-visible in right panel)
   const tabs = {
     incoming:  { tab: document.getElementById('tab-incoming'), view: document.getElementById('phone-calls') },
@@ -101,15 +116,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   tabs.incoming.tab.addEventListener('click', () => switchTab('incoming'));
   tabs.trains.tab.addEventListener('click', () => switchTab('trains'));
   tabs.log.tab.addEventListener('click', () => switchTab('log'));
-
-  // Auto-populate panel name and subtitle from SimSig window title
-  window.simsigAPI.sim.onName((name) => {
-    const ascIdx = name.toUpperCase().indexOf('ASC');
-    const trimmed = ascIdx !== -1 ? name.substring(0, ascIdx + 3).trim() : name;
-    document.getElementById('panel-name-tab').textContent = trimmed;
-    // Show full name in subtitle row
-    document.getElementById('panel-subtitle').textContent = name;
-  });
 
   // Setting toolbar button opens settings modal
   const settingsToolbarBtn = document.getElementById('settings-toolbar-btn');
@@ -182,8 +188,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       row.appendChild(dialIcon);
 
       row.addEventListener('click', async () => {
+        if (!ConnectionUI.isConnected) {
+          phonebookStatus.textContent = 'Cannot dial while disconnected';
+          return;
+        }
         if (PhoneCallsUI.inCall || PhoneCallsUI._outgoingCall || PhoneCallsUI._dialingActive) {
           phonebookStatus.textContent = 'Cannot dial while in a call';
+          return;
+        }
+        // Browser: forward dial action to host (host runs the full outgoing call flow)
+        if (window.simsigAPI._isBrowser) {
+          window.simsigAPI.phone.remoteAction({ type: 'dial', index: idx, name });
           return;
         }
         row.classList.add('dialing');
@@ -236,5 +251,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('phonebook-refresh').addEventListener('click', () => {
     loadPhoneBook();
   });
+
+  // Show browser overlay if web server is already running (auto-started)
+  // Done last so a failure here can't block event listener registration
+  try {
+    if (window.simsigAPI.web) {
+      const webSettings = await window.simsigAPI.settings.getAll();
+      if (webSettings.web?.enabled) {
+        const port = webSettings.web.port || 3000;
+        const result = await window.simsigAPI.web.start(port);
+        document.getElementById('browser-overlay-url').textContent = `${result.ip || 'localhost'}:${port}`;
+        document.getElementById('browser-overlay').classList.remove('hidden');
+      }
+    }
+  } catch (err) {
+    console.warn('[App] Failed to show browser overlay:', err);
+  }
 
 });

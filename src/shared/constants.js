@@ -49,5 +49,9 @@ module.exports = {
       provider: 'edge',
       elevenLabsApiKey: '',
     },
+    web: {
+      enabled: false,
+      port: 3000,
+    },
   },
 };

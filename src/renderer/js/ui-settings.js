@@ -45,12 +45,19 @@ const SettingsUI = {
     const settings = await window.simsigAPI.settings.getAll();
     this.populate(settings);
     await this.enumerateAudioDevices();
+    // Hide browser overlay text while settings is open so it's not in the way
+    const browserOverlay = document.getElementById('browser-overlay');
+    if (browserOverlay && !browserOverlay.classList.contains('hidden')) {
+      browserOverlay.classList.add('settings-open');
+    }
     this.modal.classList.remove('hidden');
   },
 
   close() {
     this.modal.classList.add('hidden');
     this.stopKeybindListen();
+    const browserOverlay = document.getElementById('browser-overlay');
+    if (browserOverlay) browserOverlay.classList.remove('settings-open');
   },
 
   populate(settings) {
@@ -73,6 +80,10 @@ const SettingsUI = {
     providerSelect.value = settings.tts?.provider || 'edge';
     document.getElementById('setting-tts-apikey').value = settings.tts?.elevenLabsApiKey || '';
     this.toggleApiKeyRow(providerSelect.value);
+
+    // Browser access
+    document.getElementById('setting-web-enabled').checked = settings.web?.enabled || false;
+    document.getElementById('setting-web-port').value = settings.web?.port || 3000;
   },
 
   async save() {
@@ -130,6 +141,25 @@ const SettingsUI = {
     // Apply ring output device in real-time
     if (typeof PhoneCallsUI !== 'undefined') {
       PhoneCallsUI.setRingDevice(ringSelect.value);
+    }
+
+    // Browser access
+    const webEnabled = document.getElementById('setting-web-enabled').checked;
+    const webPort = parseInt(document.getElementById('setting-web-port').value, 10) || 3000;
+    await window.simsigAPI.settings.set('web.enabled', webEnabled);
+    await window.simsigAPI.settings.set('web.port', webPort);
+
+    if (window.simsigAPI.web) {
+      const overlay = document.getElementById('browser-overlay');
+      if (webEnabled) {
+        const result = await window.simsigAPI.web.start(webPort);
+        const urlSpan = document.getElementById('browser-overlay-url');
+        urlSpan.textContent = `${result.ip || 'localhost'}:${webPort}`;
+        overlay.classList.remove('hidden');
+      } else {
+        await window.simsigAPI.web.stop();
+        overlay.classList.add('hidden');
+      }
     }
 
     this.close();

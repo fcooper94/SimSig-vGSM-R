@@ -38,6 +38,8 @@ module.exports = {
   PHONE_PLACE_CALL_HANGUP: 'phone:place-call-hangup',
   PHONE_HIDE_ANSWER: 'phone:hide-answer',
   PHONE_DRIVER_HUNG_UP: 'phone:driver-hung-up',
+  PHONE_SILENCE_RING: 'phone:silence-ring',
+  PHONE_CALL_ANSWERED: 'phone:call-answered',
 
   // TTS
   TTS_GET_VOICES: 'tts:get-voices',
@@ -55,4 +57,12 @@ module.exports = {
 
   // Window
   WINDOW_TOGGLE_FULLSCREEN: 'window:toggle-fullscreen',
+
+  // Browser mirror (chat state sync + remote interaction)
+  PHONE_CHAT_SYNC: 'phone:chat-sync',
+  PHONE_REMOTE_ACTION: 'phone:remote-action',
+
+  // Web server (browser access)
+  WEB_START: 'web:start',
+  WEB_STOP: 'web:stop',
 };

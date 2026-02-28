@@ -1,7 +1,39 @@
 # reply-phone-call.ps1
-# Selects a reply option in SimSig's Answer Call dialog and clicks Reply
-# using physical mouse/keyboard simulation (same approach as place-call).
+# ──────────────────────────────────────────────────────────────────────
+# Selects a reply option in SimSig's Answer Call dialog and clicks Reply.
+# Called from ipc-handlers.js via execFile when the user picks a reply.
+#
+# CRITICAL: SimSig is a Delphi app — its dialogs use VCL classes:
+#   TAnswerCallForm  — the main "Answer call from ..." dialog
+#   TListBox         — the reply options list
+#   TButton          — Reply, OK, Yes, No, Close buttons
+#   TEdit            — text entry for headcode confirmation
+#   TLabel           — NOT a windowed control (no HWND), cannot be found via EnumChildWindows
+#
+# IMPORTANT — PostMessage vs SendMessage:
+#   Clicking a button that opens a modal dialog MUST use PostMessage (async).
+#   SendMessage(BM_CLICK) blocks until the dialog is dismissed, which hangs
+#   the entire script. This was a hard-won lesson — do not change to SendMessage.
+#
+# HEADCODE CONFIRMATION FLOW:
+#   Some replies (e.g. "Authorise driver to pass signal at stop") trigger a
+#   "Confirmation required" dialog with a TEdit where the headcode must be typed.
+#   The dialog title contains "onfirmation" and has a TEdit child — that's how
+#   FindConfirmationDialog() identifies it vs a plain message/OK dialog.
+#   The TLabel text says "Enter XXXX to confirm" but since TLabel has no HWND,
+#   we enumerate child windows to look for text matching that pattern (it may
+#   appear on TStaticText or similar windowed controls, depending on SimSig version).
+#   If not found, we fall back to the HeadCode parameter passed from the app.
+#
+# DIALOG LOOP:
+#   After clicking Reply, SimSig may show 0-4 sequential dialogs:
+#     1. Headcode confirmation (TEdit + OK) — enter headcode, click OK
+#     2. Message/OK dialog — click OK/Yes to dismiss
+#     3. Further confirmations or messages
+#   The loop polls for up to 1 second per round (40 polls x 25ms) then moves on.
+#
 # Usage: powershell -File reply-phone-call.ps1 -ReplyIndex 0 [-HeadCode 1F32]
+# ──────────────────────────────────────────────────────────────────────
 
 param(
     [int]$ReplyIndex = 0,
@@ -146,7 +178,8 @@ public class Win32Reply {
         return result;
     }
 
-    // Find a visible top-level window titled "Message" or "Confirmation" with an OK button
+    // Find a visible top-level popup dialog with OK/Yes/Close button but NO edit control
+    // (Dialogs with edit controls are headcode entry dialogs, handled separately)
     public static IntPtr FindMessageDialog(string[] buttonTexts) {
         IntPtr result = IntPtr.Zero;
         EnumWindows((hWnd, lParam) => {
@@ -154,7 +187,11 @@ public class Win32Reply {
             var sb = new StringBuilder(256);
             GetWindowText(hWnd, sb, 256);
             string title = sb.ToString();
-            if (title == "Message" || title.Contains("onfirmation")) {
+            if (title == "Message" || title.Contains("onfirmation") || title.Contains("onfirm")
+                || title == "Warning" || title == "Info" || title == "Error") {
+                // Skip if this dialog has a TEdit — that's a headcode entry dialog
+                IntPtr edit = FindEditControl(hWnd);
+                if (edit != IntPtr.Zero) return true;
                 IntPtr btn = FindButtonByText(hWnd, buttonTexts);
                 if (btn != IntPtr.Zero) {
                     result = hWnd;
@@ -325,64 +362,132 @@ try {
     [Win32Reply]::SendMessage($listBoxHwnd, [Win32Reply]::LB_SETCURSEL, [IntPtr]$ReplyIndex, [IntPtr]::Zero) | Out-Null
     Start-Sleep -Milliseconds 100
 
-    # Click the Reply button via message (no keyboard/focus needed)
-    [Win32Reply]::SendMessage($replyBtnHwnd, [Win32Reply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    # Click the Reply button via async PostMessage — Reply may open a modal dialog
+    # that would block a synchronous SendMessage(BM_CLICK) indefinitely
+    [Win32Reply]::PostMessage($replyBtnHwnd, [Win32Reply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
 
-    # Poll for confirmation dialog (headcode entry) and interact via messages
-    $confirmDlg = [IntPtr]::Zero
-    for ($poll = 0; $poll -lt 40; $poll++) {
-        Start-Sleep -Milliseconds 25
-        $confirmDlg = [Win32Reply]::FindConfirmationDialog()
-        if ($confirmDlg -ne [IntPtr]::Zero) {
-            [Win32Reply]::HideOffScreen($confirmDlg)
-            break
-        }
-    }
-
-    if ($confirmDlg -ne [IntPtr]::Zero) {
-        # Set headcode text directly on the TEdit control
-        $editHwnd = [Win32Reply]::FindEditControl($confirmDlg)
-        $hc = if ($HeadCode -ne "") { $HeadCode } else { "0000" }
-        if ($editHwnd -ne [IntPtr]::Zero) {
-            [Win32Reply]::SetText($editHwnd, $hc)
-            Start-Sleep -Milliseconds 100
-        }
-
-        # Click OK/confirm button via message
-        $okBtn = [Win32Reply]::FindButtonByText($confirmDlg, @("OK", "Ok", "&OK"))
-        if ($okBtn -ne [IntPtr]::Zero) {
-            [Win32Reply]::SendMessage($okBtn, [Win32Reply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
-        } else {
-            # Fallback: find any button and click it
-            $anyBtn = [Win32Reply]::FindButtonByLabel($confirmDlg, "Yes")
-            if ($anyBtn -eq [IntPtr]::Zero) { $anyBtn = [Win32Reply]::FindButtonByLabel($confirmDlg, "OK") }
-            if ($anyBtn -ne [IntPtr]::Zero) {
-                [Win32Reply]::SendMessage($anyBtn, [Win32Reply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
-            }
-        }
-        Start-Sleep -Milliseconds 300
-    }
-
-    # Poll for message/OK dialogs and dismiss via BM_CLICK (no keyboard)
-    for ($round = 0; $round -lt 2; $round++) {
-        $msgDlg = [IntPtr]::Zero
+    # ── DIALOG HANDLING LOOP ───────────────────────────────────────────
+    # After clicking Reply, SimSig may pop up sequential modal dialogs.
+    # We handle two types:
+    #   1. HEADCODE CONFIRMATION: has "onfirmation" in title + TEdit child.
+    #      We type the headcode into TEdit and click OK.
+    #   2. MESSAGE DIALOG: "Message"/"Confirmation" with OK/Yes/Close button, no TEdit.
+    #      We just click the button to dismiss it.
+    # Each round polls for up to 1 second. If neither type appears, we're done.
+    # All button clicks use PostMessage (async) — never SendMessage — because
+    # clicking OK/Yes may open ANOTHER modal dialog which would block SendMessage.
+    for ($dialogRound = 0; $dialogRound -lt 4; $dialogRound++) {
+        [Console]::Error.WriteLine("Dialog round $dialogRound - polling...")
+        $confirmDlg = [IntPtr]::Zero
+        $msgDlgFound = [IntPtr]::Zero
         for ($poll = 0; $poll -lt 40; $poll++) {
             Start-Sleep -Milliseconds 25
-            $msgDlg = [Win32Reply]::FindMessageDialog(@("OK", "Ok", "&OK", "Close"))
-            if ($msgDlg -ne [IntPtr]::Zero) {
-                [Win32Reply]::HideOffScreen($msgDlg)
-                Start-Sleep -Milliseconds 50
+            $confirmDlg = [Win32Reply]::FindConfirmationDialog()
+            if ($confirmDlg -ne [IntPtr]::Zero) {
+                [Console]::Error.WriteLine("  Found headcode dialog (hwnd=$confirmDlg)")
+                [Win32Reply]::HideOffScreen($confirmDlg)
+                break
+            }
+            $msgDlgFound = [Win32Reply]::FindMessageDialog(@("OK", "Ok", "&OK", "Close", "Yes", "&Yes"))
+            if ($msgDlgFound -ne [IntPtr]::Zero) {
+                $sb3 = New-Object System.Text.StringBuilder 256
+                [Win32Reply]::GetWindowText($msgDlgFound, $sb3, 256) | Out-Null
+                [Console]::Error.WriteLine("  Found message dialog: '$($sb3.ToString())' (hwnd=$msgDlgFound)")
+                [Win32Reply]::HideOffScreen($msgDlgFound)
                 break
             }
         }
-        if ($msgDlg -ne [IntPtr]::Zero) {
-            $okBtn = [Win32Reply]::FindButtonByText($msgDlg, @("OK", "Ok", "&OK", "Close"))
-            if ($okBtn -ne [IntPtr]::Zero) {
-                [Win32Reply]::SendMessage($okBtn, [Win32Reply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
-            }
-            Start-Sleep -Milliseconds 200
-        } else {
+
+        if ($confirmDlg -eq [IntPtr]::Zero -and $msgDlgFound -eq [IntPtr]::Zero) {
+            [Console]::Error.WriteLine("  No dialog found, done.")
             break
+        }
+
+        if ($confirmDlg -ne [IntPtr]::Zero) {
+            $hc = if ($HeadCode -ne "") { $HeadCode } else { "0000" }
+            [Console]::Error.WriteLine("  Using HeadCode param: '$hc'")
+
+            # Try to read expected headcode from dialog label (TLabel may not be a window)
+            # Collect child info into script-scoped lists (no logging inside delegate — it crashes in native callback)
+            $script:childLog = [System.Collections.ArrayList]::new()
+            $script:labelHc = ""
+            [Win32Reply]::EnumChildWindows($confirmDlg, [Win32Reply+EnumCallback]{
+                param($h, $l)
+                $sb2 = New-Object System.Text.StringBuilder 256
+                [Win32Reply]::GetClassName($h, $sb2, 256) | Out-Null
+                $cls2 = $sb2.ToString()
+                $sb2.Clear()
+                [Win32Reply]::GetWindowText($h, $sb2, 256) | Out-Null
+                $wtxt = $sb2.ToString()
+                $script:childLog.Add("    Child: class=$cls2 hwnd=$h text='$wtxt'") | Out-Null
+                if ($wtxt -match "Enter\s+(\S+)\s+to\s+confirm") {
+                    $script:labelHc = $matches[1]
+                }
+                return $true
+            }, [IntPtr]::Zero) | Out-Null
+            foreach ($line in $script:childLog) { [Console]::Error.WriteLine($line) }
+            $labelHc = $script:labelHc
+            if ($labelHc -ne "") {
+                $hc = $labelHc
+                [Console]::Error.WriteLine("  Extracted headcode from label: '$hc'")
+            } else {
+                [Console]::Error.WriteLine("  No label with headcode found, using: '$hc'")
+            }
+
+            $editHwnd = [Win32Reply]::FindEditControl($confirmDlg)
+            [Console]::Error.WriteLine("  Edit control: $editHwnd")
+            if ($editHwnd -ne [IntPtr]::Zero) {
+                [Win32Reply]::SetText($editHwnd, $hc)
+                Start-Sleep -Milliseconds 100
+                [Win32Reply]::FocusControl($confirmDlg, $editHwnd)
+                Start-Sleep -Milliseconds 50
+                [Console]::Error.WriteLine("  Set text '$hc' and focused edit")
+            }
+
+            $okBtn = [Win32Reply]::FindButtonByText($confirmDlg, @("OK", "Ok", "&OK"))
+            [Console]::Error.WriteLine("  OK button: $okBtn")
+            if ($okBtn -ne [IntPtr]::Zero) {
+                # Async click — OK may open another modal dialog
+                [Win32Reply]::PostMessage($okBtn, [Win32Reply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+                [Console]::Error.WriteLine("  Clicked OK (async)")
+            } else {
+                $anyBtn = [Win32Reply]::FindButtonByLabel($confirmDlg, "Yes")
+                if ($anyBtn -eq [IntPtr]::Zero) { $anyBtn = [Win32Reply]::FindButtonByLabel($confirmDlg, "OK") }
+                if ($anyBtn -ne [IntPtr]::Zero) {
+                    [Win32Reply]::PostMessage($anyBtn, [Win32Reply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+                    [Console]::Error.WriteLine("  Clicked fallback button (async): $anyBtn")
+                } else {
+                    [Console]::Error.WriteLine("  No OK/Yes button found!")
+                }
+            }
+            Start-Sleep -Milliseconds 300
+
+            $stillThere = [Win32Reply]::IsWindow($confirmDlg) -and [Win32Reply]::IsWindowVisible($confirmDlg)
+            [Console]::Error.WriteLine("  Dialog still visible: $stillThere")
+            if ($stillThere) {
+                if ($editHwnd -ne [IntPtr]::Zero) {
+                    [Win32Reply]::SetText($editHwnd, $hc)
+                    Start-Sleep -Milliseconds 50
+                    [Win32Reply]::FocusControl($confirmDlg, $editHwnd)
+                    Start-Sleep -Milliseconds 50
+                }
+                [Win32Reply]::SetForegroundWindow($confirmDlg) | Out-Null
+                Start-Sleep -Milliseconds 50
+                [Win32Reply]::PressKey(0x0D)
+                [Console]::Error.WriteLine("  Retried with keyboard Enter")
+                Start-Sleep -Milliseconds 300
+            }
+        } elseif ($msgDlgFound -ne [IntPtr]::Zero) {
+            $btn = [Win32Reply]::FindButtonByText($msgDlgFound, @("Yes", "&Yes"))
+            if ($btn -eq [IntPtr]::Zero) {
+                $btn = [Win32Reply]::FindButtonByText($msgDlgFound, @("OK", "Ok", "&OK", "Close"))
+            }
+            if ($btn -ne [IntPtr]::Zero) {
+                # Async click — dismissing may open another modal dialog
+                [Win32Reply]::PostMessage($btn, [Win32Reply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+                [Console]::Error.WriteLine("  Dismissed message dialog (async)")
+            }
+            Start-Sleep -Milliseconds 300
         }
     }
 

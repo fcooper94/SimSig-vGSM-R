@@ -26,6 +26,28 @@ let phoneReader = null;
 let ttsVoicesCache = null;
 let elevenLabsVoicesCache = null;
 
+// Tracked state for syncing new WebSocket clients
+let lastConnectionStatus = null;
+let lastPhoneCalls = null;
+let lastSimName = null;
+let lastInitReady = false;
+let lastChatState = null;
+
+// Handler map for WebSocket bridge — stores all invoke handlers
+const handlerMap = {};
+
+function registerHandler(channel, fn) {
+  ipcMain.handle(channel, fn);
+  handlerMap[channel] = fn;
+}
+
+// WebSocket broadcast function — set by web server when active
+let wsBroadcast = null;
+
+function setWsBroadcast(fn) {
+  wsBroadcast = fn;
+}
+
 // Convert Float32 PCM samples to a 16-bit WAV buffer
 function float32ToWav(samples, sampleRate) {
   const numSamples = samples.length;
@@ -63,24 +85,50 @@ function float32ToWav(samples, sampleRate) {
   return buffer;
 }
 
+function trackState(channel, data) {
+  if (channel === channels.CONNECTION_STATUS) lastConnectionStatus = data;
+  else if (channel === channels.PHONE_CALLS_UPDATE) lastPhoneCalls = data;
+  else if (channel === channels.SIM_NAME) lastSimName = data;
+  else if (channel === channels.INIT_READY) lastInitReady = !!data;
+}
+
 function sendToAllWindows(channel, data) {
+  trackState(channel, data);
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(channel, data);
   }
+  if (wsBroadcast) wsBroadcast(channel, data);
 }
 
 function sendToMainWindow(channel, data) {
+  trackState(channel, data);
   const wins = BrowserWindow.getAllWindows();
   if (wins.length > 0) {
     wins[0].webContents.send(channel, data);
   }
+  if (wsBroadcast) wsBroadcast(channel, data);
+}
+
+function getInitialState() {
+  const clockState = getClockState();
+  return {
+    connectionStatus: lastConnectionStatus,
+    phoneCalls: lastPhoneCalls,
+    simName: lastSimName,
+    initReady: lastInitReady,
+    clock: clockState.clockSeconds > 0 ? {
+      ...clockState,
+      formatted: formatTime(clockState.clockSeconds),
+    } : null,
+    chatState: lastChatState,
+  };
 }
 
 
 function registerIpcHandlers() {
   // Settings
-  ipcMain.handle(channels.SETTINGS_GET, (_event, key) => settings.get(key));
-  ipcMain.handle(channels.SETTINGS_SET, (_event, key, value) => {
+  registerHandler(channels.SETTINGS_GET, (_event, key) => settings.get(key));
+  registerHandler(channels.SETTINGS_SET, (_event, key, value) => {
     settings.set(key, value);
     // Invalidate TTS caches when provider or API key changes
     if (key === 'tts.provider') {
@@ -91,7 +139,7 @@ function registerIpcHandlers() {
       elevenLabsVoicesCache = null;
     }
   });
-  ipcMain.handle(channels.SETTINGS_GET_ALL, () => settings.getAll());
+  registerHandler(channels.SETTINGS_GET_ALL, () => settings.getAll());
 
   // Global PTT keyboard hook
   const allSettings = settings.getAll();
@@ -101,21 +149,21 @@ function registerIpcHandlers() {
     hangUp: allSettings.hangUp?.keybind || 'Space',
   });
 
-  ipcMain.handle(channels.PTT_SET_KEYBIND, (_event, code) => {
+  registerHandler(channels.PTT_SET_KEYBIND, (_event, code) => {
     globalPtt.setKeybind(code);
   });
-  ipcMain.handle(channels.ANSWER_CALL_SET_KEYBIND, (_event, code) => {
+  registerHandler(channels.ANSWER_CALL_SET_KEYBIND, (_event, code) => {
     globalPtt.setAnswerCallKeybind(code);
   });
-  ipcMain.handle(channels.HANGUP_SET_KEYBIND, (_event, code) => {
+  registerHandler(channels.HANGUP_SET_KEYBIND, (_event, code) => {
     globalPtt.setHangUpKeybind(code);
   });
-  ipcMain.handle(channels.PHONE_IN_CALL, (_event, state) => {
+  registerHandler(channels.PHONE_IN_CALL, (_event, state) => {
     globalPtt.setInCall(state);
   });
 
   // Connection
-  ipcMain.handle(channels.CONNECTION_CONNECT, async () => {
+  registerHandler(channels.CONNECTION_CONNECT, async () => {
     try {
       if (stompManager) {
         await stompManager.disconnect();
@@ -225,7 +273,7 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle(channels.CONNECTION_DISCONNECT, async () => {
+  registerHandler(channels.CONNECTION_DISCONNECT, async () => {
     if (phoneReader) {
       phoneReader.stopPolling();
       phoneReader = null;
@@ -234,17 +282,19 @@ function registerIpcHandlers() {
       await stompManager.disconnect();
       stompManager = null;
     }
+    // Ensure all clients get disconnected status and clear their calls
+    sendToAllWindows(channels.CONNECTION_STATUS, 'disconnected');
   });
 
   // Commands
-  ipcMain.handle(channels.CMD_ALL_SIGNALS_DANGER, () => {
+  registerHandler(channels.CMD_ALL_SIGNALS_DANGER, () => {
     if (stompManager && stompManager.status === 'connected') {
       return stompManager.allSignalsToDanger();
     }
     return 0;
   });
 
-  ipcMain.handle(channels.PHONE_ANSWER_CALL, (_event, index, train) => {
+  registerHandler(channels.PHONE_ANSWER_CALL, (_event, index, train) => {
     const args = [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', ANSWER_SCRIPT, '-Index', String(index || 0),
@@ -285,7 +335,16 @@ function registerIpcHandlers() {
     });
   });
 
-  ipcMain.handle(channels.PHONE_REPLY_CALL, (_event, replyIndex, headCode) => {
+  // Reply to an incoming call — runs reply-phone-call.ps1 which:
+  //   1. Selects the reply option in SimSig's TAnswerCallForm TListBox
+  //   2. Clicks Reply (PostMessage — async to avoid blocking on modal dialogs)
+  //   3. Handles headcode confirmation dialogs (enters headcode into TEdit, clicks OK)
+  //   4. Dismisses any follow-up message/OK dialogs
+  //   5. Hides SimSig's telephone window off-screen
+  // The headCode param is needed for replies like "pass signal at danger" which
+  // require the user to type the train's headcode to confirm the action.
+  // stderr output contains debug logging from [Console]::Error.WriteLine().
+  registerHandler(channels.PHONE_REPLY_CALL, (_event, replyIndex, headCode) => {
     console.log(`[PhoneReply] replyIndex=${replyIndex}, headCode="${headCode || ''}"`);
     const args = [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
@@ -323,7 +382,7 @@ function registerIpcHandlers() {
   });
 
   // Phone Book — read contacts
-  ipcMain.handle(channels.PHONE_BOOK_READ, () => {
+  registerHandler(channels.PHONE_BOOK_READ, () => {
     if (getClockState().paused) {
       return { error: 'Cannot open phone book while sim is paused', contacts: [] };
     }
@@ -353,7 +412,7 @@ function registerIpcHandlers() {
   });
 
   // Phone Book — dial a contact by index
-  ipcMain.handle(channels.PHONE_BOOK_DIAL, (_event, index) => {
+  registerHandler(channels.PHONE_BOOK_DIAL, (_event, index) => {
     if (getClockState().paused) {
       return { error: 'Cannot dial while sim is paused' };
     }
@@ -383,7 +442,7 @@ function registerIpcHandlers() {
   });
 
   // Place Call — read connection status and replies
-  ipcMain.handle(channels.PHONE_PLACE_CALL_STATUS, () => {
+  registerHandler(channels.PHONE_PLACE_CALL_STATUS, () => {
     const args = [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', READ_PLACE_CALL_SCRIPT,
@@ -411,8 +470,13 @@ function registerIpcHandlers() {
     });
   });
 
-  // Place Call — send a reply
-  ipcMain.handle(channels.PHONE_PLACE_CALL_REPLY, (_event, replyIndex, headCode) => {
+  // Reply to an outgoing Place Call — runs reply-place-call.ps1 which:
+  //   1. Finds the Place Call dialog and its reply control (TListBox or TComboBox)
+  //   2. Selects the reply and clicks "Send request/message" (PostMessage — async)
+  //   3. Handles Yes/No confirmation dialogs and headcode entry dialogs
+  //   4. Reads the TMemo response text (SimSig's answer to our request)
+  //   5. Returns { response: "..." } with the text, or { error: "..." } on failure
+  registerHandler(channels.PHONE_PLACE_CALL_REPLY, (_event, replyIndex, headCode) => {
     const args = [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', REPLY_PLACE_CALL_SCRIPT, '-ReplyIndex', String(replyIndex || 0),
@@ -447,7 +511,7 @@ function registerIpcHandlers() {
   });
 
   // Place Call — hang up and close dialog
-  ipcMain.handle(channels.PHONE_PLACE_CALL_HANGUP, () => {
+  registerHandler(channels.PHONE_PLACE_CALL_HANGUP, () => {
     const args = [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', HANGUP_PLACE_CALL_SCRIPT,
@@ -470,8 +534,33 @@ function registerIpcHandlers() {
     });
   });
 
+  // Silence ring — broadcast to all clients so host + browser stay in sync
+  registerHandler(channels.PHONE_SILENCE_RING, () => {
+    sendToAllWindows(channels.PHONE_SILENCE_RING);
+  });
+
+  // Call answered — broadcast to all clients so they stop ringing
+  registerHandler(channels.PHONE_CALL_ANSWERED, (_event, train) => {
+    sendToAllWindows(channels.PHONE_CALL_ANSWERED, train);
+  });
+
+  // Chat sync — host renderer broadcasts its chat/notification state to browser clients only
+  registerHandler(channels.PHONE_CHAT_SYNC, (_event, state) => {
+    lastChatState = state;
+    if (wsBroadcast) wsBroadcast(channels.PHONE_CHAT_SYNC, state);
+  });
+
+  // Remote action — browser sends an action (answer/reply/hangup) to be performed on the host
+  registerHandler(channels.PHONE_REMOTE_ACTION, (_event, action) => {
+    // Forward to the host's Electron renderer window (not WS clients)
+    const wins = BrowserWindow.getAllWindows();
+    if (wins.length > 0) {
+      wins[0].webContents.send(channels.PHONE_REMOTE_ACTION, action);
+    }
+  });
+
   // Hide any lingering TAnswerCallForm dialog
-  ipcMain.handle(channels.PHONE_HIDE_ANSWER, () => {
+  registerHandler(channels.PHONE_HIDE_ANSWER, () => {
     const args = [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', HIDE_ANSWER_SCRIPT,
@@ -488,12 +577,12 @@ function registerIpcHandlers() {
     });
   });
 
-  ipcMain.handle(channels.CMD_OPEN_MESSAGE_LOG, () => {
+  registerHandler(channels.CMD_OPEN_MESSAGE_LOG, () => {
     const { createMessageLogWindow } = require('./main');
     createMessageLogWindow();
   });
 
-  ipcMain.handle(channels.WINDOW_TOGGLE_FULLSCREEN, () => {
+  registerHandler(channels.WINDOW_TOGGLE_FULLSCREEN, () => {
     const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
     if (win) win.setFullScreen(!win.isFullScreen());
   });
@@ -501,41 +590,74 @@ function registerIpcHandlers() {
   // TTS — ElevenLabs (premium paid voices, requires API key)
   const ELEVENLABS_API_BASE = 'https://api.elevenlabs.io';
 
-  // Reject voices whose name/description sounds posh, formal, or RP
-  const POSH_NAME_WORDS = [
-    'smooth', 'calm', 'velvety', 'velvet', 'elegant', 'refined', 'regal',
+  // Reject voices that clearly don't fit a train driver profile
+  const REJECT_WORDS = [
+    // Posh / RP / formal
+    'velvety', 'velvet', 'elegant', 'refined', 'regal',
     'posh', 'formal', 'sophisticated', 'polished', 'narrator', 'narration',
     'newsreader', 'announcer', 'documentary', 'storyteller', 'captivating',
-    'broadcaster', 'dramatic', 'authoritative', 'educator', 'steady',
-    'engaging', 'inviting', 'surrey', 'suspense', 'clear,',
+    'broadcaster', 'authoritative', 'educator',
+    'meditation', 'asmr', 'soothing',
+    'princess', 'queen', 'king', 'royal', 'butler', 'professor',
+    'received pronunciation', 'upper class',
+    'lecture', 'audiobook',
+    // Wrong character type
+    'sexy', 'seductive', 'romantic', 'flirty', 'sensual',
+    'child', 'kid', 'toddler', 'baby', 'anime', 'cartoon',
+    'robot', 'alien', 'monster', 'villain', 'wizard', 'elf',
+    'customer support', 'customer care', 'corporate',
+    'perky', 'bubbly',
+    'whisper', 'whispery',
+  ];
+
+  // Prefer voices whose accent/description matches working-class regions
+  const WORKING_CLASS_KEYWORDS = [
+    'northern', 'yorkshire', 'manchester', 'lancashire', 'liverpool',
+    'scouse', 'geordie', 'newcastle', 'cockney', 'east london', 'essex',
+    'estuary', 'london', 'midlands', 'birmingham', 'brummie',
+    'working class', 'casual', 'bloke', 'lad', 'geezer', 'mate',
+    'rough', 'gruff', 'gritty', 'rugged', 'deep', 'husky',
+    'south london', 'south east', 'bristol', 'west country',
+    'welsh', 'nottingham', 'sheffield', 'leeds', 'hull', 'derby',
+    'irish', 'scottish', 'glasgow',
   ];
 
   // Search the ElevenLabs shared voice library for working-class voices
   async function searchSharedVoices(apiKey) {
-    // Search for conversational/character voices with various British-adjacent accents
-    const searchAccents = ['british', 'irish', 'scottish'];
-    const searchUseCases = ['conversational', 'characters'];
+    // Use manual URL construction — URLSearchParams causes 400 errors
     const allVoices = [];
     const seenIds = new Set();
 
-    for (const accent of searchAccents) {
-      for (const useCase of searchUseCases) {
-        try {
-          const url = `${ELEVENLABS_API_BASE}/v1/shared-voices?page_size=30&language=en&accent=${accent}&use_cases=${useCase}&sort=usage_character_count_7d&min_notice_period_days=0`;
-          const resp = await fetch(url, { headers: { 'xi-api-key': apiKey } });
-          if (!resp.ok) continue;
-          const data = await resp.json();
-          for (const v of (data.voices || [])) {
-            if (!seenIds.has(v.voice_id)) {
-              seenIds.add(v.voice_id);
-              allVoices.push(v);
-            }
-          }
-        } catch (err) {
-          console.warn(`[TTS] Shared voice search failed for ${accent}/${useCase}:`, err.message);
+    async function doSearch(extraParams, label) {
+      try {
+        const url = `${ELEVENLABS_API_BASE}/v1/shared-voices?page_size=100&language=en${extraParams}&sort=trending&min_notice_period_days=0`;
+        const resp = await fetch(url, { headers: { 'xi-api-key': apiKey } });
+        if (!resp.ok) {
+          const errBody = await resp.text().catch(() => '');
+          console.warn(`[TTS] Shared search ${resp.status} for ${label}: ${errBody}`);
+          return;
         }
+        const data = await resp.json();
+        let added = 0;
+        for (const v of (data.voices || [])) {
+          if (!seenIds.has(v.voice_id)) {
+            seenIds.add(v.voice_id);
+            allVoices.push(v);
+            added++;
+          }
+        }
+        console.log(`[TTS] Search "${label}" → ${(data.voices || []).length} results, ${added} new`);
+      } catch (err) {
+        console.warn(`[TTS] Shared search failed for ${label}:`, err.message);
       }
     }
+
+    // British/Irish/Scottish accents with conversational + character use cases
+    for (const accent of ['british', 'irish', 'scottish']) {
+      await doSearch(`&accent=${accent}&use_cases=conversational`, `${accent}/conversational`);
+      await doSearch(`&accent=${accent}&use_cases=characters`, `${accent}/characters`);
+    }
+
     return allVoices;
   }
 
@@ -599,19 +721,44 @@ function registerIpcHandlers() {
       });
     }
 
-    // 4) Filter: reject posh, keep only relevant accents
-    const voices = merged
+    // Only allow British Isles accents
+    const ALLOWED_ACCENTS = [
+      'british', 'english', 'irish', 'scottish', 'welsh',
+      'cockney', 'northern', 'yorkshire', 'manchester', 'london',
+      'estuary', 'midlands', 'geordie', 'scouse', 'brummie',
+      'essex', 'west country', 'south east',
+    ];
+
+    // 4) Filter: reject posh, reject non-British accents
+    const filtered = merged
       .filter((v) => {
         // Reject posh-sounding voices
-        if (POSH_NAME_WORDS.some((kw) => v.desc.includes(kw))) return false;
+        if (REJECT_WORDS.some((kw) => v.desc.includes(kw))) return false;
+        // Reject non-British accents (american, indian, etc.)
+        if (v.accent && !ALLOWED_ACCENTS.some((a) => v.accent.includes(a))) return false;
         return true;
       })
-      .map((v) => ({
-        id: `el-${v.voiceId}`,
-        name: v.name,
-        accent: v.accent,
-        gender: v.gender || 'male',
-      }));
+      .map((v) => {
+        // Score working-class affinity
+        const wcScore = WORKING_CLASS_KEYWORDS.reduce((s, kw) =>
+          s + (v.desc.includes(kw) || v.accent.includes(kw) ? 1 : 0), 0);
+        return {
+          id: `el-${v.voiceId}`,
+          name: v.name,
+          accent: v.accent,
+          gender: v.gender || 'male',
+          wcScore,
+        };
+      });
+
+    // Sort: working-class voices first, then by name for stability
+    filtered.sort((a, b) => b.wcScore - a.wcScore || a.name.localeCompare(b.name));
+
+    // Ensure ~90% male: keep all males, limit females to ~10% of total
+    const males = filtered.filter((v) => v.gender === 'male');
+    const females = filtered.filter((v) => v.gender !== 'male');
+    const maxFemales = Math.max(1, Math.ceil(males.length * 0.1));
+    const voices = [...males, ...females.slice(0, maxFemales)];
 
     // Log what we got
     const accentCounts = {};
@@ -638,7 +785,7 @@ function registerIpcHandlers() {
         },
         body: JSON.stringify({
           text,
-          model_id: 'eleven_flash_v2_5',
+          model_id: 'eleven_turbo_v2_5',
           voice_settings: {
             stability: 0.35,
             similarity_boost: 0.5,
@@ -659,39 +806,24 @@ function registerIpcHandlers() {
   }
 
   // TTS — Edge TTS (free Microsoft neural voices, no API key needed)
-  // Subtle pitch/rate tweaks per voice to sound like distinct real people
+  // Pitch/rate tweaks create distinct-sounding voices from the limited GB base voices
+  // Mostly British/Irish males to sound like real train drivers (~90% male)
   const EDGE_VOICES = [
-    // British male
-    { id: 'edge-0',  name: 'Ryan',      voice: 'en-GB-RyanNeural',                accent: 'british',      gender: 'male',   pitch: '-18Hz',  rate: 1.29 },
-    { id: 'edge-1',  name: 'Thomas',    voice: 'en-GB-ThomasNeural',              accent: 'british',      gender: 'male',   pitch: '-5Hz',   rate: 1.23 },
-    // British female
-    { id: 'edge-2',  name: 'Sonia',     voice: 'en-GB-SoniaNeural',               accent: 'british',      gender: 'female', pitch: '-15Hz',  rate: 1.27 },
-    { id: 'edge-3',  name: 'Libby',     voice: 'en-GB-LibbyNeural',               accent: 'british',      gender: 'female', pitch: '-7Hz',   rate: 1.21 },
-    { id: 'edge-4',  name: 'Maisie',    voice: 'en-GB-MaisieNeural',              accent: 'british',      gender: 'female', pitch: '-10Hz',  rate: 1.25 },
-    // Irish
-    { id: 'edge-5',  name: 'Connor',    voice: 'en-IE-ConnorNeural',              accent: 'irish',        gender: 'male',   pitch: '-14Hz',  rate: 1.25 },
-    { id: 'edge-6',  name: 'Emily',     voice: 'en-IE-EmilyNeural',               accent: 'irish',        gender: 'female', pitch: '-10Hz',  rate: 1.23 },
-    // Australian
-    { id: 'edge-7',  name: 'William',   voice: 'en-AU-WilliamMultilingualNeural', accent: 'australian',   gender: 'male',   pitch: '-16Hz',  rate: 1.27 },
-    { id: 'edge-8',  name: 'Natasha',   voice: 'en-AU-NatashaNeural',             accent: 'australian',   gender: 'female', pitch: '-10Hz',  rate: 1.21 },
-    // New Zealand
-    { id: 'edge-9',  name: 'Mitchell',  voice: 'en-NZ-MitchellNeural',            accent: 'new zealand',  gender: 'male',   pitch: '-13Hz',  rate: 1.25 },
-    { id: 'edge-10', name: 'Molly',     voice: 'en-NZ-MollyNeural',               accent: 'new zealand',  gender: 'female', pitch: '-6Hz',   rate: 1.23 },
-    // Canadian
-    { id: 'edge-11', name: 'Liam',      voice: 'en-CA-LiamNeural',                accent: 'canadian',     gender: 'male',   pitch: '-15Hz',  rate: 1.27 },
-    { id: 'edge-12', name: 'Clara',     voice: 'en-CA-ClaraNeural',               accent: 'canadian',     gender: 'female', pitch: '-10Hz',  rate: 1.25 },
-    // Hong Kong English
-    { id: 'edge-13', name: 'Sam',       voice: 'en-HK-SamNeural',                 accent: 'hong kong',    gender: 'male',   pitch: '-14Hz',  rate: 1.23 },
-    { id: 'edge-14', name: 'Yan',       voice: 'en-HK-YanNeural',                 accent: 'hong kong',    gender: 'female', pitch: '-10Hz',  rate: 1.21 },
-    // Philippine English
-    { id: 'edge-15', name: 'James',     voice: 'en-PH-JamesNeural',               accent: 'philippine',   gender: 'male',   pitch: '-13Hz',  rate: 1.25 },
-    { id: 'edge-16', name: 'Rosa',      voice: 'en-PH-RosaNeural',                accent: 'philippine',   gender: 'female', pitch: '-10Hz',  rate: 1.23 },
-    // Singaporean English
-    { id: 'edge-17', name: 'Wayne',     voice: 'en-SG-WayneNeural',               accent: 'singaporean',  gender: 'male',   pitch: '-15Hz',  rate: 1.27 },
-    { id: 'edge-18', name: 'Luna',      voice: 'en-SG-LunaNeural',                accent: 'singaporean',  gender: 'female', pitch: '-10Hz',  rate: 1.23 },
-    // Tanzanian English
-    { id: 'edge-19', name: 'Elimu',     voice: 'en-TZ-ElimuNeural',               accent: 'tanzanian',    gender: 'male',   pitch: '-14Hz',  rate: 1.25 },
-    { id: 'edge-20', name: 'Imani',     voice: 'en-TZ-ImaniNeural',               accent: 'tanzanian',    gender: 'female', pitch: '-10Hz',  rate: 1.21 },
+    // British males — varied pitch/rate to create distinct drivers
+    { id: 'edge-0',  name: 'Dave',      voice: 'en-GB-RyanNeural',    accent: 'british', gender: 'male', pitch: '-20Hz', rate: 1.30 },
+    { id: 'edge-1',  name: 'Steve',     voice: 'en-GB-RyanNeural',    accent: 'british', gender: 'male', pitch: '-12Hz', rate: 1.25 },
+    { id: 'edge-2',  name: 'Kev',       voice: 'en-GB-RyanNeural',    accent: 'british', gender: 'male', pitch: '-6Hz',  rate: 1.20 },
+    { id: 'edge-3',  name: 'Gaz',       voice: 'en-GB-ThomasNeural',  accent: 'british', gender: 'male', pitch: '-18Hz', rate: 1.28 },
+    { id: 'edge-4',  name: 'Mark',      voice: 'en-GB-ThomasNeural',  accent: 'british', gender: 'male', pitch: '-8Hz',  rate: 1.22 },
+    { id: 'edge-5',  name: 'Paul',      voice: 'en-GB-ThomasNeural',  accent: 'british', gender: 'male', pitch: '-2Hz',  rate: 1.18 },
+    { id: 'edge-6',  name: 'Mike',      voice: 'en-GB-RyanNeural',    accent: 'british', gender: 'male', pitch: '-15Hz', rate: 1.35 },
+    { id: 'edge-7',  name: 'Chris',     voice: 'en-GB-ThomasNeural',  accent: 'british', gender: 'male', pitch: '-14Hz', rate: 1.32 },
+    { id: 'edge-8',  name: 'Rob',       voice: 'en-GB-RyanNeural',    accent: 'british', gender: 'male', pitch: '-24Hz', rate: 1.22 },
+    // Irish male
+    { id: 'edge-9',  name: 'Paddy',     voice: 'en-IE-ConnorNeural',  accent: 'irish',   gender: 'male', pitch: '-14Hz', rate: 1.25 },
+    { id: 'edge-10', name: 'Sean',      voice: 'en-IE-ConnorNeural',  accent: 'irish',   gender: 'male', pitch: '-8Hz',  rate: 1.20 },
+    // British female (1 out of 12 = ~8%)
+    { id: 'edge-11', name: 'Lisa',      voice: 'en-GB-SoniaNeural',   accent: 'british', gender: 'female', pitch: '-15Hz', rate: 1.27 },
   ];
 
   // Cache MsEdgeTTS instances per base voice for reuse
@@ -715,7 +847,7 @@ function registerIpcHandlers() {
     return ttsVoicesCache;
   }
 
-  ipcMain.handle(channels.TTS_GET_VOICES, async () => {
+  registerHandler(channels.TTS_GET_VOICES, async () => {
     const provider = settings.get('tts.provider') || 'edge';
 
     if (provider === 'windows') {
@@ -795,7 +927,7 @@ function registerIpcHandlers() {
     }
   }
 
-  ipcMain.handle(channels.TTS_SPEAK, async (_event, text, voiceId) => {
+  registerHandler(channels.TTS_SPEAK, async (_event, text, voiceId) => {
     if (!voiceId) return null;
     const provider = settings.get('tts.provider') || 'edge';
 
@@ -819,7 +951,7 @@ function registerIpcHandlers() {
   });
 
   // ElevenLabs credit check — returns { remaining, total } or { error }
-  ipcMain.handle(channels.TTS_CHECK_CREDITS, async (_event, apiKey) => {
+  registerHandler(channels.TTS_CHECK_CREDITS, async (_event, apiKey) => {
     const trimmedKey = (apiKey || '').trim();
     if (!trimmedKey) return { error: 'No API key provided' };
     try {
@@ -852,7 +984,7 @@ function registerIpcHandlers() {
   // STT — ElevenLabs Scribe (cloud, premium) or Vosk (handled in renderer)
   // When ElevenLabs is the TTS provider, audio is sent here for Scribe transcription.
   // When Edge/Windows TTS is selected, Vosk runs entirely in the renderer (no IPC).
-  ipcMain.handle(channels.STT_TRANSCRIBE, async (_event, audioData) => {
+  registerHandler(channels.STT_TRANSCRIBE, async (_event, audioData) => {
     const provider = settings.get('tts.provider') || 'edge';
 
     if (provider === 'elevenlabs' && audioData) {
@@ -961,4 +1093,4 @@ function registerIpcHandlers() {
   });
 }
 
-module.exports = { registerIpcHandlers };
+module.exports = { registerIpcHandlers, handlerMap, setWsBroadcast, getInitialState };

@@ -12,7 +12,9 @@ const ConnectionUI = {
     this.connectBtn.addEventListener('click', () => {
       const currentStatus = this.indicator.className;
       if (this.isConnected || currentStatus === 'no-gateway' || currentStatus === 'reconnecting') {
-        window.simsigAPI.connection.disconnect();
+        this.showConfirm('Disconnect', 'Are you sure you want to disconnect?', () => {
+          window.simsigAPI.connection.disconnect();
+        });
       } else {
         window.simsigAPI.connection.connect();
         this.setStatus('connecting');
@@ -27,6 +29,23 @@ const ConnectionUI = {
         window.simsigAPI.window.toggleFullscreen();
       });
     }
+  },
+
+  showConfirm(title, message, onYes) {
+    const modal = document.getElementById('confirm-modal');
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-message').textContent = message;
+    modal.classList.remove('hidden');
+
+    const yesBtn = document.getElementById('confirm-yes');
+    const noBtn = document.getElementById('confirm-no');
+    const cleanup = () => {
+      modal.classList.add('hidden');
+      yesBtn.replaceWith(yesBtn.cloneNode(true));
+      noBtn.replaceWith(noBtn.cloneNode(true));
+    };
+    yesBtn.addEventListener('click', () => { cleanup(); onYes(); }, { once: true });
+    noBtn.addEventListener('click', () => { cleanup(); }, { once: true });
   },
 
   setStatus(status) {
@@ -58,8 +77,8 @@ const ConnectionUI = {
     // No-gateway keeps Disconnect available (PhoneReader is still running)
     this.connectBtn.textContent = (this.isConnected || statusStr === 'no-gateway') ? 'Disconnect' : 'Connect';
 
-    // Clear init overlay on no-gateway so it doesn't stay stuck
-    if (statusStr === 'no-gateway') {
+    // Clear init overlay once connection resolves (connected or no-gateway)
+    if (statusStr === 'connected' || statusStr === 'no-gateway') {
       const initOverlay = document.getElementById('init-overlay');
       if (initOverlay) initOverlay.classList.add('hidden');
     }

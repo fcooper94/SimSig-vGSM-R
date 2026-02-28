@@ -1,10 +1,35 @@
 # reply-place-call.ps1
-# Finds the reply control in the Place Call dialog (TListBox or TComboBox).
-# Selects the reply by index, clicks "Send request/message" button.
-# If a parameter dialog appears (e.g. "Enter train"), types headcode and presses Enter.
-# After sending, reads the TMemo response text and returns it.
+# ──────────────────────────────────────────────────────────────────────
+# Handles outgoing (Place Call) replies in SimSig's Place Call dialog.
+# Called from ipc-handlers.js via execFile when the user sends a reply
+# during an outgoing call (signaller-to-signaller, token hut, etc.).
+#
+# FLOW:
+#   1. Find the Place Call dialog (top-level window titled "Place Call")
+#   2. Find the reply control — TListBox or TComboBox depending on SimSig version
+#   3. Select the reply by index (LB_SETCURSEL or CB_SETCURSEL)
+#   4. Click the "Send request/message" button via PostMessage (async — see below)
+#   5. Handle any follow-up dialogs:
+#      a. Yes/No confirmation dialog — click Yes
+#      b. Headcode entry dialog ("Confirmation required" with TEdit) — type headcode, click OK
+#      c. Message/OK dialog — click OK to dismiss
+#   6. Read the TMemo response text (SimSig's reply to us) and return it as JSON
+#
+# IMPORTANT — PostMessage vs SendMessage:
+#   The "Send request/message" button click MUST use PostMessage (async).
+#   SendMessage(BM_CLICK) blocks if the button opens a modal dialog (e.g.
+#   headcode confirmation), hanging the script until the 30s timeout kills it.
+#
+# HEADCODE CONFIRMATION:
+#   Some replies (e.g. "permission for train to enter") trigger a confirmation
+#   dialog. The Yes/No type is a simple confirmation with no TEdit — dismiss it.
+#   The headcode entry type has "onfirmation" in the title + a TEdit child
+#   where the headcode must be typed. TLabel text says "Enter XXXX to confirm"
+#   but TLabel is a Delphi TGraphicControl with no HWND — we try to read it
+#   via EnumChildWindows but fall back to the HeadCode parameter if not found.
 #
 # Usage: powershell -File reply-place-call.ps1 -ReplyIndex 0 [-HeadCode 1F32]
+# ──────────────────────────────────────────────────────────────────────
 
 param(
     [int]$ReplyIndex = 0,
@@ -177,6 +202,26 @@ public class PlaceCallReply {
         return result;
     }
 
+    // Find a visible Yes/No confirmation dialog (no edit control required)
+    public static IntPtr FindConfirmationDialog() {
+        IntPtr result = IntPtr.Zero;
+        EnumWindows((hWnd, lParam) => {
+            if (!IsWindowVisible(hWnd)) return true;
+            var sb = new StringBuilder(256);
+            GetWindowText(hWnd, sb, 256);
+            string title = sb.ToString();
+            if (title.Contains("onfirmation") || title.Contains("onfirm")) {
+                IntPtr yesBtn = FindButtonByAnyText(hWnd, new string[] {"Yes", "&Yes"});
+                if (yesBtn != IntPtr.Zero) {
+                    result = hWnd;
+                    return false;
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+        return result;
+    }
+
     // Find a visible message dialog with OK/Close button
     public static IntPtr FindMessageDialog() {
         IntPtr result = IntPtr.Zero;
@@ -334,24 +379,77 @@ try {
         }
     }
 
-    # Poll for parameter dialog (e.g. "Confirmation required" with edit box for headcode)
+    # Poll for either a simple Yes/No confirmation dialog or a parameter dialog with edit box.
+    # SimSig may show a "Confirmation required" Yes/No first, THEN a headcode entry dialog after.
     $paramDlg = [IntPtr]::Zero
+    $confirmDlg = [IntPtr]::Zero
     for ($poll = 0; $poll -lt 40; $poll++) {
         Start-Sleep -Milliseconds 25
+        # Check for parameter dialog (has TEdit for headcode entry)
         $paramDlg = [PlaceCallReply]::FindParameterDialog()
         if ($paramDlg -ne [IntPtr]::Zero) {
             [PlaceCallReply]::HideOffScreen($paramDlg)
             break
         }
+        # Check for simple Yes/No confirmation dialog (no edit box)
+        $confirmDlg = [PlaceCallReply]::FindConfirmationDialog()
+        if ($confirmDlg -ne [IntPtr]::Zero) {
+            [PlaceCallReply]::HideOffScreen($confirmDlg)
+            break
+        }
+    }
+
+    # Handle simple Yes/No confirmation first (e.g. "Confirmation required for this action")
+    if ($confirmDlg -ne [IntPtr]::Zero) {
+        $yesBtn = [PlaceCallReply]::FindButtonByAnyText($confirmDlg, @("Yes", "&Yes"))
+        if ($yesBtn -ne [IntPtr]::Zero) {
+            [PlaceCallReply]::SendMessage($yesBtn, [PlaceCallReply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        }
+        Start-Sleep -Milliseconds 300
+
+        # After dismissing confirmation, poll again for a parameter dialog (headcode entry)
+        $paramDlg = [IntPtr]::Zero
+        for ($poll = 0; $poll -lt 40; $poll++) {
+            Start-Sleep -Milliseconds 25
+            $paramDlg = [PlaceCallReply]::FindParameterDialog()
+            if ($paramDlg -ne [IntPtr]::Zero) {
+                [PlaceCallReply]::HideOffScreen($paramDlg)
+                break
+            }
+        }
     }
 
     if ($paramDlg -ne [IntPtr]::Zero) {
+        # Try to read the expected headcode from the dialog label ("Enter XXXX to confirm")
+        $hc = if ($HeadCode -ne "") { $HeadCode } else { "0000" }
+        $labelHc = ""
+        [PlaceCallReply]::EnumChildWindows($paramDlg, [PlaceCallReply+EnumCallback]{
+            param($h, $l)
+            $sb2 = New-Object System.Text.StringBuilder 256
+            [PlaceCallReply]::GetClassName($h, $sb2, 256) | Out-Null
+            $cls2 = $sb2.ToString()
+            if ($cls2 -eq "TLabel" -or $cls2 -eq "TStaticText" -or $cls2 -eq "Static") {
+                $sb2.Clear()
+                [PlaceCallReply]::GetWindowText($h, $sb2, 256) | Out-Null
+                $ltxt = $sb2.ToString()
+                if ($ltxt -match "Enter\s+(\S+)\s+to\s+confirm") {
+                    $script:labelHc = $matches[1]
+                }
+            }
+            return $true
+        }, [IntPtr]::Zero) | Out-Null
+        if ($labelHc -ne "") {
+            $hc = $labelHc
+            [Console]::Error.WriteLine("Extracted headcode from dialog label: $hc")
+        }
+
         # Set headcode text directly on the TEdit control via WM_SETTEXT
         $editHwnd = [PlaceCallReply]::FindEditControl($paramDlg)
-        $hc = if ($HeadCode -ne "") { $HeadCode } else { "0000" }
         if ($editHwnd -ne [IntPtr]::Zero) {
             [PlaceCallReply]::SetText($editHwnd, $hc)
             Start-Sleep -Milliseconds 100
+            [PlaceCallReply]::FocusControl($paramDlg, $editHwnd)
+            Start-Sleep -Milliseconds 50
         }
         # Click OK button via BM_CLICK
         $okBtn = [PlaceCallReply]::FindButtonByAnyText($paramDlg, @("OK", "Ok", "&OK", "Yes", "&Yes"))
@@ -359,6 +457,20 @@ try {
             [PlaceCallReply]::SendMessage($okBtn, [PlaceCallReply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
         }
         Start-Sleep -Milliseconds 300
+
+        # If dialog is still there, retry with keyboard Enter
+        if ([PlaceCallReply]::IsWindowVisible($paramDlg)) {
+            if ($editHwnd -ne [IntPtr]::Zero) {
+                [PlaceCallReply]::SetText($editHwnd, $hc)
+                Start-Sleep -Milliseconds 50
+                [PlaceCallReply]::FocusControl($paramDlg, $editHwnd)
+                Start-Sleep -Milliseconds 50
+            }
+            [PlaceCallReply]::SetForegroundWindow($paramDlg) | Out-Null
+            Start-Sleep -Milliseconds 50
+            [PlaceCallReply]::PressKey([PlaceCallReply]::VK_RETURN)
+            Start-Sleep -Milliseconds 300
+        }
     }
 
     # Poll for any message/OK dialog and dismiss via BM_CLICK

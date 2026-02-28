@@ -47,16 +47,25 @@ let answerKeyHeld = false; // prevent repeat-firing while key is held
 let hangUpKeyHeld = false;
 let inCall = false; // tracks renderer call state so we only send the relevant event
 
+// WebSocket broadcast function — set by web server when active
+let wsBroadcast = null;
+
+function setWsBroadcast(fn) {
+  wsBroadcast = fn;
+}
+
 function sendPttState(active) {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(channels.PTT_STATE, active);
   }
+  if (wsBroadcast) wsBroadcast(channels.PTT_STATE, active);
 }
 
 function sendToAllWindows(channel) {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(channel);
   }
+  if (wsBroadcast) wsBroadcast(channel);
 }
 
 function onKeyDown(e) {
@@ -151,4 +160,4 @@ function setInCall(state) {
   inCall = state;
 }
 
-module.exports = { start, stop, setKeybind, setAnswerCallKeybind, setHangUpKeybind, setInCall };
+module.exports = { start, stop, setKeybind, setAnswerCallKeybind, setHangUpKeybind, setInCall, setWsBroadcast };

@@ -25,6 +25,21 @@ const PTTUI = {
       if (this.isActive) this.deactivate();
     });
 
+    // Touch hold-to-talk (iPad / touchscreen)
+    this.pttBtn.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      this.activate();
+    });
+
+    this.pttBtn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      this.deactivate();
+    });
+
+    this.pttBtn.addEventListener('touchcancel', () => {
+      if (this.isActive) this.deactivate();
+    });
+
     // Global PTT from main process (works even when app is not focused)
     window.simsigAPI.ptt.onStateChange((active) => {
       // Don't trigger PTT when settings modal is open or keybind listening

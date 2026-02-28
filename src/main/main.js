@@ -1,16 +1,18 @@
-const { app, BrowserWindow, Menu } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron');
 const path = require('path');
+const webServer = require('./web-server');
+const channels = require('../shared/ipc-channels');
 
 let mainWindow = null;
 let msgLogWindow = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 900,
-    height: 600,
+    width: 1194,
+    height: 834,
     minWidth: 700,
     minHeight: 400,
-    title: 'SimSig GSM-R Comms',
+    title: 'SimSig VGSM-R',
     icon: path.join(__dirname, '../../images/icon.png'),
     backgroundColor: '#505050',
     webPreferences: {
@@ -28,6 +30,17 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   }
 
+  mainWindow.on('close', (e) => {
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'question',
+      buttons: ['Yes', 'No'],
+      defaultId: 1,
+      title: 'Confirm',
+      message: 'Are you sure you want to close SimSig VGSM-R?',
+    });
+    if (choice === 1) e.preventDefault();
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -44,7 +57,7 @@ function createMessageLogWindow() {
     height: 500,
     minWidth: 400,
     minHeight: 300,
-    title: 'Message Log - SimSig GSM-R',
+    title: 'Message Log - SimSig VGSM-R',
     backgroundColor: '#505050',
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload-msglog.js'),
@@ -64,13 +77,93 @@ function getMessageLogWindow() {
   return msgLogWindow;
 }
 
+const FIREWALL_RULE_NAME = 'SimSig VGSM-R Browser Access';
+
+function addFirewallRule(port) {
+  const { exec } = require('child_process');
+  // Remove any existing rule first, then add for the correct port
+  const del = `netsh advfirewall firewall delete rule name="${FIREWALL_RULE_NAME}"`;
+  const add = `netsh advfirewall firewall add rule name="${FIREWALL_RULE_NAME}" dir=in action=allow protocol=TCP localport=${port}`;
+  exec(`${del} >nul 2>&1 & ${add}`, { windowsHide: true }, (err) => {
+    if (err) {
+      console.warn('[WebServer] Could not add firewall rule (may need admin):', err.message);
+    } else {
+      console.log(`[WebServer] Firewall rule added for port ${port}`);
+    }
+  });
+}
+
+function removeFirewallRule() {
+  const { exec } = require('child_process');
+  exec(`netsh advfirewall firewall delete rule name="${FIREWALL_RULE_NAME}"`, { windowsHide: true }, () => {});
+}
+
+function startWebServer(port) {
+  const { handlerMap, setWsBroadcast, getInitialState } = require('./ipc-handlers');
+  const globalPtt = require('./global-ptt');
+
+  webServer.start(port, handlerMap, getInitialState);
+  setWsBroadcast(webServer.broadcast);
+  globalPtt.setWsBroadcast(webServer.broadcast);
+  addFirewallRule(port);
+  console.log(`[WebServer] Started on port ${port}`);
+}
+
+function stopWebServer() {
+  const { setWsBroadcast } = require('./ipc-handlers');
+  const globalPtt = require('./global-ptt');
+
+  webServer.stop();
+  setWsBroadcast(null);
+  globalPtt.setWsBroadcast(null);
+  removeFirewallRule();
+}
+
 app.whenReady().then(() => {
   const { initSettings } = require('./settings');
+  const settings = require('./settings');
   const { registerIpcHandlers } = require('./ipc-handlers');
 
   initSettings();
   registerIpcHandlers();
   createWindow();
+
+  // Web server IPC handlers
+  ipcMain.handle(channels.WEB_START, (_event, port) => {
+    if (webServer.isRunning()) stopWebServer();
+    const actualPort = port || 3000;
+    startWebServer(actualPort);
+
+    // Get local network IP for the overlay URL
+    // Prefer 192.168.x.x (LAN) over 10.x.x.x (often VPN/virtual adapters)
+    const os = require('os');
+    const nets = os.networkInterfaces();
+    const allIPs = [];
+    for (const iface of Object.values(nets)) {
+      for (const addr of iface) {
+        if ((addr.family === 'IPv4' || addr.family === 4) && !addr.internal) {
+          allIPs.push(addr.address);
+        }
+      }
+    }
+    const localIP = allIPs.find(ip => ip.startsWith('192.168.'))
+      || allIPs.find(ip => ip.startsWith('172.'))
+      || allIPs[0]
+      || 'localhost';
+
+    return { success: true, port: actualPort, ip: localIP };
+  });
+
+  ipcMain.handle(channels.WEB_STOP, () => {
+    stopWebServer();
+    return { success: true };
+  });
+
+  // Auto-start web server if enabled in settings
+  const webSettings = settings.get('web') || {};
+  if (webSettings.enabled) {
+    startWebServer(webSettings.port || 3000);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -94,6 +187,7 @@ function restoreTelephoneWindow() {
 
 app.on('before-quit', () => {
   restoreTelephoneWindow();
+  try { webServer.stop(); removeFirewallRule(); } catch (_) {}
   try { require('./global-ptt').stop(); } catch (_) {}
 });
 app.on('will-quit', restoreTelephoneWindow);
