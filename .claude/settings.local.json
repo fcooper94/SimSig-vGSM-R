@@ -45,7 +45,9 @@
       "Bash(git -C \"c:\\\\dev\\\\SimSig-vGSM-R\" remote -v)",
       "Bash(gh run list --limit 5)",
       "Bash(cmd.exe /c \"where gh\")",
-      "WebFetch(domain:api.github.com)"
+      "WebFetch(domain:api.github.com)",
+      "Bash(grep -i \"admin\\\\|elevation\\\\|requireadministrator\\\\|requestedasinvoker\" /c/dev/SimSig-vGSM-R/src/main/*.ps1)",
+      "Bash(head -100 /c/dev/SimSig-vGSM-R/.github/workflows/*.yml)"
     ]
   }
 }

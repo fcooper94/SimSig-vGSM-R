@@ -18,7 +18,8 @@
   },
   "win": {
     "target": "nsis",
-    "icon": "images/icon.png"
+    "icon": "images/icon.png",
+    "requestedExecutionLevel": "requireAdministrator"
   },
   "nsis": {
     "oneClick": false,
