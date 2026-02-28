@@ -31,4 +31,5 @@ jobs:
       - name: Build and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EP_DRAFT: false
         run: npx electron-builder --win --config electron-builder.json --publish always

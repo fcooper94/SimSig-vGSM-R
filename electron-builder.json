@@ -14,8 +14,7 @@
   "publish": {
     "provider": "github",
     "owner": "fcooper94",
-    "repo": "SimSig-vGSM-R",
-    "releaseType": "release"
+    "repo": "SimSig-vGSM-R"
   },
   "win": {
     "target": "nsis",
