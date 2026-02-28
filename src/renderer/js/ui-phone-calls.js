@@ -1407,6 +1407,8 @@ const PhoneCallsUI = {
 
   showDialingNotification(contactName) {
     if (!this.notificationEl) return;
+    // Silence incoming ringing while placing an outgoing call
+    this.stopRinging();
     this.notificationEl.classList.remove('hidden');
     this.notificationEl.classList.remove('in-call');
     this.notificationEl.classList.add('flashing');
@@ -1468,8 +1470,12 @@ const PhoneCallsUI = {
     // Only close the Place Call dialog if we're cancelling (not when connected)
     if (!keepDialog) {
       window.simsigAPI.phone.placeCallHangup().catch(() => {});
+      this.hideNotification();
+      // Resume incoming call notification if calls are waiting
+      this._resumeIncoming();
+    } else {
+      this.hideNotification();
     }
-    this.hideNotification();
   },
 
   async showOutgoingCallNotification(contactName, message, replies) {
@@ -1776,6 +1782,18 @@ const PhoneCallsUI = {
     this.messages = [];
     this.renderChat();
     this.hideNotification();
+
+    // Resume incoming call notification if calls are waiting
+    this._resumeIncoming();
+  },
+
+  // Re-show incoming call notification and start ringing if calls are waiting
+  _resumeIncoming() {
+    if (this.calls.length > 0 && !this.inCall) {
+      const nextCall = this.calls[this.calls.length - 1];
+      this.showNotification(nextCall.train || '');
+      this.startRinging();
+    }
   },
 
   _updatePhonebookInCall(contactName, active) {

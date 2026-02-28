@@ -83,7 +83,9 @@ public class Win32Reply {
     public const byte VK_DOWN = 0x28;
     public const byte VK_HOME = 0x24;
     public const int  LB_GETCOUNT = 0x018B;
+    public const int  LB_SETCURSEL = 0x0186;
     public const int  WM_SETTEXT  = 0x000C;
+    public const int  BM_CLICK    = 0x00F5;
     public const int  SW_RESTORE  = 9;
 
     public static void ClickAt(int x, int y) {
@@ -309,87 +311,77 @@ try {
         exit 0
     }
 
-    # Keep dialog off-screen — just restore and foreground for keyboard focus
-    [Win32Reply]::ShowWindow($dialogHwnd, [Win32Reply]::SW_RESTORE) | Out-Null
-    [Win32Reply]::SetForegroundWindow($dialogHwnd) | Out-Null
-    Start-Sleep -Milliseconds 300
+    # Select the reply in the ListBox via message (no keyboard needed)
+    [Win32Reply]::SendMessage($listBoxHwnd, [Win32Reply]::LB_SETCURSEL, [IntPtr]$ReplyIndex, [IntPtr]::Zero) | Out-Null
+    Start-Sleep -Milliseconds 100
 
-    # Focus the ListBox, select reply with Home + Down arrows
-    [Win32Reply]::FocusControl($dialogHwnd, $listBoxHwnd)
-    Start-Sleep -Milliseconds 150
-    [Win32Reply]::PressKey([Win32Reply]::VK_HOME)
-    Start-Sleep -Milliseconds 150
+    # Click the Reply button via message (no keyboard/focus needed)
+    [Win32Reply]::SendMessage($replyBtnHwnd, [Win32Reply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
 
-    for ($i = 0; $i -lt $ReplyIndex; $i++) {
-        [Win32Reply]::PressKey([Win32Reply]::VK_DOWN)
-        Start-Sleep -Milliseconds 100
-    }
-    Start-Sleep -Milliseconds 150
-
-    # Press Enter to click Reply, then poll rapidly to catch confirmation dialog before it renders
-    [Win32Reply]::PressKey(0x0D)  # VK_RETURN
+    # Poll for confirmation dialog (headcode entry) and interact via messages
     $confirmDlg = [IntPtr]::Zero
     for ($poll = 0; $poll -lt 40; $poll++) {
         Start-Sleep -Milliseconds 25
         $confirmDlg = [Win32Reply]::FindConfirmationDialog()
         if ($confirmDlg -ne [IntPtr]::Zero) {
             [Win32Reply]::HideOffScreen($confirmDlg)
-            [Win32Reply]::SetForegroundWindow($confirmDlg) | Out-Null
-            Start-Sleep -Milliseconds 100
             break
         }
     }
 
-    # Type headcode and press Enter
-    Add-Type -AssemblyName System.Windows.Forms
-    $hc = if ($HeadCode -ne "") { $HeadCode } else { "0000" }
-    [System.Windows.Forms.SendKeys]::SendWait($hc)
-    Start-Sleep -Milliseconds 500
-    [Win32Reply]::PressKey(0x0D)  # VK_RETURN
+    if ($confirmDlg -ne [IntPtr]::Zero) {
+        # Set headcode text directly on the TEdit control
+        $editHwnd = [Win32Reply]::FindEditControl($confirmDlg)
+        $hc = if ($HeadCode -ne "") { $HeadCode } else { "0000" }
+        if ($editHwnd -ne [IntPtr]::Zero) {
+            [Win32Reply]::SetText($editHwnd, $hc)
+            Start-Sleep -Milliseconds 100
+        }
 
-    # Poll for message/OK dialog and hide instantly
-    $msgDlg = [IntPtr]::Zero
-    for ($poll = 0; $poll -lt 40; $poll++) {
-        Start-Sleep -Milliseconds 25
-        $msgDlg = [Win32Reply]::FindMessageDialog(@("OK", "Ok", "&OK", "Close"))
+        # Click OK/confirm button via message
+        $okBtn = [Win32Reply]::FindButtonByText($confirmDlg, @("OK", "Ok", "&OK"))
+        if ($okBtn -ne [IntPtr]::Zero) {
+            [Win32Reply]::SendMessage($okBtn, [Win32Reply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        } else {
+            # Fallback: find any button and click it
+            $anyBtn = [Win32Reply]::FindButtonByLabel($confirmDlg, "Yes")
+            if ($anyBtn -eq [IntPtr]::Zero) { $anyBtn = [Win32Reply]::FindButtonByLabel($confirmDlg, "OK") }
+            if ($anyBtn -ne [IntPtr]::Zero) {
+                [Win32Reply]::SendMessage($anyBtn, [Win32Reply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+            }
+        }
+        Start-Sleep -Milliseconds 300
+    }
+
+    # Poll for message/OK dialogs and dismiss via BM_CLICK (no keyboard)
+    for ($round = 0; $round -lt 2; $round++) {
+        $msgDlg = [IntPtr]::Zero
+        for ($poll = 0; $poll -lt 40; $poll++) {
+            Start-Sleep -Milliseconds 25
+            $msgDlg = [Win32Reply]::FindMessageDialog(@("OK", "Ok", "&OK", "Close"))
+            if ($msgDlg -ne [IntPtr]::Zero) {
+                [Win32Reply]::HideOffScreen($msgDlg)
+                Start-Sleep -Milliseconds 50
+                break
+            }
+        }
         if ($msgDlg -ne [IntPtr]::Zero) {
-            [Win32Reply]::HideOffScreen($msgDlg)
-            [Win32Reply]::SetForegroundWindow($msgDlg) | Out-Null
-            Start-Sleep -Milliseconds 100
+            $okBtn = [Win32Reply]::FindButtonByText($msgDlg, @("OK", "Ok", "&OK", "Close"))
+            if ($okBtn -ne [IntPtr]::Zero) {
+                [Win32Reply]::SendMessage($okBtn, [Win32Reply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+            }
+            Start-Sleep -Milliseconds 200
+        } else {
             break
         }
     }
-    [Win32Reply]::PressKey(0x0D)  # VK_RETURN
 
-    # Poll for any second message dialog
-    $msgDlg2 = [IntPtr]::Zero
-    for ($poll = 0; $poll -lt 20; $poll++) {
-        Start-Sleep -Milliseconds 25
-        $msgDlg2 = [Win32Reply]::FindMessageDialog(@("OK", "Ok", "&OK", "Close"))
-        if ($msgDlg2 -ne [IntPtr]::Zero) {
-            [Win32Reply]::HideOffScreen($msgDlg2)
-            [Win32Reply]::SetForegroundWindow($msgDlg2) | Out-Null
-            Start-Sleep -Milliseconds 100
-            break
-        }
-    }
-    [Win32Reply]::PressKey(0x0D)  # VK_RETURN
     Start-Sleep -Milliseconds 300
 
-    # Soft close: if TAnswerCallForm is still open, try Escape then hide off-screen
-    Start-Sleep -Milliseconds 300
+    # If TAnswerCallForm is still open, hide it off-screen
     $aHwnd = [Win32Reply]::FindTopWindowByClass("TAnswerCallForm")
     if ($aHwnd -ne [IntPtr]::Zero) {
-        [Win32Reply]::SetForegroundWindow($aHwnd) | Out-Null
-        Start-Sleep -Milliseconds 100
-        [Win32Reply]::PressKey(0x1B)  # VK_ESCAPE
-        Start-Sleep -Milliseconds 500
-
-        # Check if it closed — if not, hide off-screen
-        $aHwnd2 = [Win32Reply]::FindTopWindowByClass("TAnswerCallForm")
-        if ($aHwnd2 -ne [IntPtr]::Zero) {
-            [Win32Reply]::HideOffScreen($aHwnd2)
-        }
+        [Win32Reply]::HideOffScreen($aHwnd)
     }
 
     # Hide any lingering Place Call dialog

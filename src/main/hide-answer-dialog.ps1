@@ -123,13 +123,11 @@ if ($teleHwnd -ne [IntPtr]::Zero) {
     }
 }
 
-# Step 2: The TAnswerCallForm should now be responsive — press Escape to close it
+# Step 2: The TAnswerCallForm should now be responsive — try to close it
 $answerHwnd2 = [HideAnswer]::FindByClass("TAnswerCallForm")
 if ($answerHwnd2 -ne [IntPtr]::Zero) {
-    [HideAnswer]::ShowWindow($answerHwnd2, [HideAnswer]::SW_RESTORE) | Out-Null
-    [HideAnswer]::SetForegroundWindow($answerHwnd2) | Out-Null
-    Start-Sleep -Milliseconds 200
-    [HideAnswer]::PressKey([HideAnswer]::VK_ESCAPE)
+    # Send WM_CLOSE first; if that doesn't work, hide off-screen
+    [HideAnswer]::PostMessage($answerHwnd2, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
     Start-Sleep -Milliseconds 500
 
     # Fallback: hide off-screen if still there

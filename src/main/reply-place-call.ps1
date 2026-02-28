@@ -26,6 +26,15 @@ public class PlaceCallReply {
     [DllImport("user32.dll", EntryPoint = "SendMessage", CharSet = CharSet.Auto)]
     public static extern IntPtr SendMessageSb(IntPtr hWnd, int msg, IntPtr wParam, StringBuilder lParam);
 
+    [DllImport("user32.dll", EntryPoint = "SendMessage", CharSet = CharSet.Auto)]
+    public static extern IntPtr SendMessageStr(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+
+    public const int WM_SETTEXT = 0x000C;
+
+    public static void SetText(IntPtr hWnd, string text) {
+        SendMessageStr(hWnd, WM_SETTEXT, IntPtr.Zero, text);
+    }
+
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")]
@@ -295,80 +304,67 @@ try {
     )
     $sendBtnHwnd = if ($null -ne $sendBtn) { [IntPtr]$sendBtn.Current.NativeWindowHandle } else { [IntPtr]::Zero }
 
-    # Restore & foreground the dialog for interaction
-    [PlaceCallReply]::ShowWindow($dialogHwnd, 9) | Out-Null
-    [PlaceCallReply]::SetForegroundWindow($dialogHwnd) | Out-Null
-    Start-Sleep -Milliseconds 200
-
     if ($replyControlType -eq "listbox") {
-        # For TListBox: use LB_SETCURSEL to select the item, then click Send button
+        # For TListBox: use LB_SETCURSEL to select the item, then BM_CLICK Send button
         [PlaceCallReply]::SetListBoxSel($replyControlHwnd, $ReplyIndex)
         Start-Sleep -Milliseconds 100
 
-        # Click the "Send request/message" button
         if ($sendBtnHwnd -ne [IntPtr]::Zero) {
             [PlaceCallReply]::SendMessage($sendBtnHwnd, [PlaceCallReply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
-        } else {
-            # Fallback: focus listbox, Tab to button, Enter
-            [PlaceCallReply]::FocusControl($dialogHwnd, $replyControlHwnd)
-            Start-Sleep -Milliseconds 100
-            [PlaceCallReply]::PressKey([PlaceCallReply]::VK_TAB)
-            Start-Sleep -Milliseconds 100
-            [PlaceCallReply]::PressKey([PlaceCallReply]::VK_RETURN)
         }
     } else {
-        # For TComboBox: focus, Home + Down keys to navigate, Tab to button, Enter
-        [PlaceCallReply]::FocusControl($dialogHwnd, $replyControlHwnd)
+        # For TComboBox: use CB_SETCURSEL to select the item, then BM_CLICK Send button
+        [PlaceCallReply]::SendMessage($replyControlHwnd, 0x014E, [IntPtr]$ReplyIndex, [IntPtr]::Zero) | Out-Null  # CB_SETCURSEL
         Start-Sleep -Milliseconds 100
-        [PlaceCallReply]::PressKey([PlaceCallReply]::VK_HOME)
-        Start-Sleep -Milliseconds 50
 
-        for ($i = 0; $i -lt $ReplyIndex; $i++) {
-            [PlaceCallReply]::PressKey([PlaceCallReply]::VK_DOWN)
-            Start-Sleep -Milliseconds 50
+        if ($sendBtnHwnd -ne [IntPtr]::Zero) {
+            [PlaceCallReply]::SendMessage($sendBtnHwnd, [PlaceCallReply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
         }
-
-        # Tab to the "Send request/message" button and press Enter
-        [PlaceCallReply]::PressKey([PlaceCallReply]::VK_TAB)
-        Start-Sleep -Milliseconds 100
-        [PlaceCallReply]::PressKey([PlaceCallReply]::VK_RETURN)
     }
 
     # Poll for parameter dialog (e.g. "Confirmation required" with edit box for headcode)
-    Add-Type -AssemblyName System.Windows.Forms
     $paramDlg = [IntPtr]::Zero
     for ($poll = 0; $poll -lt 40; $poll++) {
         Start-Sleep -Milliseconds 25
         $paramDlg = [PlaceCallReply]::FindParameterDialog()
         if ($paramDlg -ne [IntPtr]::Zero) {
             [PlaceCallReply]::HideOffScreen($paramDlg)
-            [PlaceCallReply]::SetForegroundWindow($paramDlg) | Out-Null
-            Start-Sleep -Milliseconds 100
             break
         }
     }
 
     if ($paramDlg -ne [IntPtr]::Zero) {
+        # Set headcode text directly on the TEdit control via WM_SETTEXT
+        $editHwnd = [PlaceCallReply]::FindEditControl($paramDlg)
         $hc = if ($HeadCode -ne "") { $HeadCode } else { "0000" }
-        [System.Windows.Forms.SendKeys]::SendWait($hc)
+        if ($editHwnd -ne [IntPtr]::Zero) {
+            [PlaceCallReply]::SetText($editHwnd, $hc)
+            Start-Sleep -Milliseconds 100
+        }
+        # Click OK button via BM_CLICK
+        $okBtn = [PlaceCallReply]::FindButtonByAnyText($paramDlg, @("OK", "Ok", "&OK", "Yes", "&Yes"))
+        if ($okBtn -ne [IntPtr]::Zero) {
+            [PlaceCallReply]::SendMessage($okBtn, [PlaceCallReply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        }
         Start-Sleep -Milliseconds 300
-        [PlaceCallReply]::PressKey([PlaceCallReply]::VK_RETURN)
     }
 
-    # Poll for any message/OK dialog and dismiss it
+    # Poll for any message/OK dialog and dismiss via BM_CLICK
     $msgDlg = [IntPtr]::Zero
     for ($poll = 0; $poll -lt 20; $poll++) {
         Start-Sleep -Milliseconds 25
         $msgDlg = [PlaceCallReply]::FindMessageDialog()
         if ($msgDlg -ne [IntPtr]::Zero) {
             [PlaceCallReply]::HideOffScreen($msgDlg)
-            [PlaceCallReply]::SetForegroundWindow($msgDlg) | Out-Null
-            Start-Sleep -Milliseconds 100
+            Start-Sleep -Milliseconds 50
             break
         }
     }
     if ($msgDlg -ne [IntPtr]::Zero) {
-        [PlaceCallReply]::PressKey([PlaceCallReply]::VK_RETURN)
+        $okBtn = [PlaceCallReply]::FindButtonByAnyText($msgDlg, @("OK", "Ok", "&OK", "Close"))
+        if ($okBtn -ne [IntPtr]::Zero) {
+            [PlaceCallReply]::SendMessage($okBtn, [PlaceCallReply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        }
         Start-Sleep -Milliseconds 300
     }
 

@@ -201,7 +201,7 @@ function registerIpcHandlers() {
       );
       phoneReader.startPolling(2000);
 
-      // Briefly pause/unpause SimSig to trigger a clock_msg so the clock starts
+      // Ensure Telephone Calls dialog is open so PhoneReader can poll
       setTimeout(() => {
         execFile('powershell', [
           '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
