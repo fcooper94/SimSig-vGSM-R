@@ -1,2 +1,7 @@
-﻿SimSig main window not found
-TTelephoneForm already on-screen
+﻿SimSig hwnd: 132606  PID: 5668
+Monitor: (0,0)-(1463,866)
+Restore target: (532, 283)
+Found 0 off-screen SimSig window(s)
+Closed Place Call dialog
+TTelephoneForm not found, sending F6
+TTelephoneForm still not found after F6

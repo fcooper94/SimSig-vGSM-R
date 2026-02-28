@@ -21,11 +21,14 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
   }
 
   return new Promise((resolve) => {
+    // Timeout for the initial update check (network request to GitHub).
+    // Once an update is found the timeout is cleared so the download can
+    // take as long as it needs on slow connections.
     const timeout = setTimeout(() => {
       console.log('[Updater] Update check timed out, proceeding');
       cleanup();
       resolve();
-    }, 15000);
+    }, 30000);
 
     function cleanup() {
       clearTimeout(timeout);
@@ -40,6 +43,7 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
     autoUpdater.on('update-available', (info) => {
       console.log(`[Updater] Update available: v${info.version}`);
       if (onStatus) onStatus('Update available', `Downloading v${info.version}...`);
+      clearTimeout(timeout); // let the download run without a timeout
       autoUpdater.downloadUpdate();
     });
 
