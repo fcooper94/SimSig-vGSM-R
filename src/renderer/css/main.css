@@ -21,6 +21,29 @@
   --grid-bg: #ece9d8;
 }
 
+body.dark-mode {
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #1a1a1a;
+  --bg-panel: #2a2a2a;
+  --bg-input: #333333;
+  --accent: #00b4d8;
+  --accent-dim: #0090a8;
+  --text: #e0e0e0;
+  --text-light: #cccccc;
+  --text-dim: #888888;
+  --success: #4ade80;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --border: #555555;
+  --border-light: #444444;
+  --tab-bg: #2a2a2a;
+  --toolbar-bg: #2a2a2a;
+  --bevel-light: #444444;
+  --bevel-dark: #111111;
+  --bevel-mid: #333333;
+  --grid-bg: #222222;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -52,6 +75,45 @@ body {
   border-bottom-color: var(--bevel-dark);
   border-top: 1px solid var(--bevel-light);
   flex-shrink: 0;
+  -webkit-app-region: drag;
+}
+
+#top-bar button, #top-bar .window-controls {
+  -webkit-app-region: no-drag;
+}
+
+.window-controls {
+  display: flex;
+  gap: 2px;
+  margin-left: 8px;
+}
+
+.window-controls button {
+  background: var(--bg-panel);
+  color: var(--text);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  min-height: 32px;
+}
+
+.window-controls button:hover {
+  background: #e0dcd4;
+}
+
+.window-controls button:active {
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+}
+
+#win-close:hover {
+  background: #cc0000;
+  color: #ffffff;
 }
 
 #panel-name-tab {
@@ -117,7 +179,7 @@ body {
 }
 
 
-#connect-btn, #fullscreen-btn, #settings-btn, #msglog-btn {
+#connect-btn, #fullscreen-btn, #compact-toggle-btn, #settings-btn, #msglog-btn {
   background: var(--bg-panel);
   color: var(--text);
   border: 2px solid;
@@ -129,11 +191,11 @@ body {
   min-height: 32px;
 }
 
-#connect-btn:hover, #fullscreen-btn:hover, #settings-btn:hover, #msglog-btn:hover {
+#connect-btn:hover, #fullscreen-btn:hover, #compact-toggle-btn:hover, #settings-btn:hover, #msglog-btn:hover {
   background: #e0dcd4;
 }
 
-#connect-btn:active, #fullscreen-btn:active, #settings-btn:active, #msglog-btn:active {
+#connect-btn:active, #fullscreen-btn:active, #compact-toggle-btn:active, #settings-btn:active, #msglog-btn:active {
   border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
 }
 
@@ -638,3 +700,291 @@ button {
 /* Clickable tabs */
 #tab-trains, #tab-incoming, #tab-log { cursor: pointer; }
 #tab-trains:hover, #tab-incoming:hover, #tab-log:hover { background: #e8e4dc; }
+
+/* ── DARK MODE OVERRIDES ─────────────────────────────────── */
+body.dark-mode #panel-name-tab {
+  background: var(--accent);
+}
+
+body.dark-mode #connect-btn:hover,
+body.dark-mode #fullscreen-btn:hover,
+body.dark-mode #compact-toggle-btn:hover,
+body.dark-mode #settings-btn:hover,
+body.dark-mode #msglog-btn:hover,
+body.dark-mode .window-controls button:hover {
+  background: #3a3a3a;
+}
+
+body.dark-mode #win-close:hover {
+  background: #cc0000;
+  color: #ffffff;
+}
+
+body.dark-mode .toolbar-btn:hover {
+  background: #3a3a3a;
+}
+
+body.dark-mode .tab-item.highlight {
+  color: var(--accent);
+}
+
+body.dark-mode #tab-trains:hover,
+body.dark-mode #tab-incoming:hover,
+body.dark-mode #tab-log:hover {
+  background: #333333;
+}
+
+body.dark-mode .compact-btn:hover,
+body.dark-mode .compact-emrg-cancel:hover,
+body.dark-mode .compact-emrg-confirm-no:hover {
+  background: #3a3a3a;
+}
+
+/* ── COMPACT MODE ────────────────────────────────────────── */
+
+#compact-bar {
+  display: none;
+}
+
+body.compact-mode #top-bar,
+body.compact-mode #panel-subtitle-row,
+body.compact-mode #app-content,
+body.compact-mode #tab-bar,
+body.compact-mode #bottom-bar,
+body.compact-mode .modal:not(#emrg-confirm-modal),
+body.compact-mode #init-overlay,
+body.compact-mode #paused-overlay,
+body.compact-mode #browser-overlay {
+  display: none !important;
+}
+
+body.compact-mode {
+  height: 100vh;
+  overflow: hidden;
+}
+
+body.compact-mode #compact-bar {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  background: var(--toolbar-bg);
+  flex: 1;
+  height: 100vh;
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  -webkit-app-region: drag;
+}
+
+.compact-buttons {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  padding: 4px;
+}
+
+#compact-bar button, #compact-bar .compact-notification {
+  -webkit-app-region: no-drag;
+}
+
+.compact-emrg-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-panel);
+  border-bottom: 2px solid var(--bevel-dark);
+  -webkit-app-region: no-drag;
+  animation: compact-emrg-slide-in 0.15s ease-out;
+}
+
+.compact-emrg-panel.hidden {
+  display: none;
+}
+
+.compact-emrg-panel.closing {
+  animation: compact-emrg-slide-out 0.15s ease-in forwards;
+}
+
+@keyframes compact-emrg-slide-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes compact-emrg-slide-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(8px); }
+}
+
+#compact-emrg-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#compact-emrg-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+#compact-emrg-confirm.hidden {
+  display: none;
+}
+
+.compact-emrg-confirm-text {
+  font-size: 12px;
+  font-weight: bold;
+  color: #cc0000;
+  padding-left: 4px;
+}
+
+.compact-emrg-confirm-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.compact-emrg-confirm-yes {
+  background: #cc0000;
+  color: #ffffff;
+  border: 2px solid;
+  border-color: #ff4444 #880000 #880000 #ff4444;
+  padding: 4px 16px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.compact-emrg-confirm-yes:hover {
+  background: #dd2222;
+}
+
+.compact-emrg-confirm-no {
+  background: var(--bg-panel);
+  color: var(--text);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  padding: 4px 16px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.compact-emrg-confirm-no:hover {
+  background: #e0dcd4;
+}
+
+.compact-emrg-action {
+  background: #cc0000;
+  color: #ffffff;
+  border: 2px solid;
+  border-color: #ff4444 #880000 #880000 #ff4444;
+  padding: 4px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  text-align: left;
+}
+
+.compact-emrg-action:hover {
+  background: #dd2222;
+}
+
+.compact-emrg-action:active {
+  border-color: #880000 #ff4444 #ff4444 #880000;
+  background: #aa0000;
+}
+
+.compact-emrg-cancel {
+  background: var(--bg-panel);
+  color: var(--text);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  padding: 4px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.compact-emrg-cancel:hover {
+  background: #e0dcd4;
+}
+
+.compact-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  background: var(--bg-panel);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.compact-btn:hover {
+  background: #e0dcd4;
+}
+
+.compact-btn:active {
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+}
+
+.compact-emrg {
+  background: #cc0000;
+  color: #ffffff;
+  border-color: #ff4444 #880000 #880000 #ff4444;
+  font-weight: bold;
+}
+
+.compact-emrg:hover {
+  background: #dd2222;
+}
+
+.compact-emrg:active {
+  border-color: #880000 #ff4444 #ff4444 #880000;
+  background: #aa0000;
+}
+
+.compact-notification {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg-panel);
+  border: 2px solid;
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  min-width: 120px;
+  justify-content: center;
+}
+
+.compact-notification.hidden {
+  visibility: hidden;
+}
+
+.compact-notification.flashing {
+  animation: flash-notification 0.8s infinite;
+}
+
+.compact-notification.in-call {
+  background: #ffffc0;
+}
+
+.compact-spacer {
+  flex: 1;
+}
+
+.compact-expand {
+  font-size: 16px;
+  padding: 4px 10px;
+}
+

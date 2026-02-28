@@ -32,6 +32,29 @@ const PhoneCallsUI = {
     this.silenceBtn = document.getElementById('silence-btn');
     this.silenced = false;
 
+    // ── Compact mode notification mirror ─────────────────────────────
+    const compactNotif = document.getElementById('compact-notification');
+    if (compactNotif && this.notificationEl) {
+      const compactTrain = document.getElementById('compact-notif-train');
+      const compactAction = document.getElementById('compact-notif-action');
+      const syncCompact = () => {
+        if (this.notificationEl.classList.contains('hidden')) {
+          compactNotif.classList.add('hidden');
+          compactNotif.classList.remove('flashing', 'in-call');
+        } else {
+          compactNotif.classList.remove('hidden');
+          compactNotif.classList.toggle('flashing', this.notificationEl.classList.contains('flashing'));
+          compactNotif.classList.toggle('in-call', this.notificationEl.classList.contains('in-call'));
+        }
+        if (compactTrain) compactTrain.textContent = this.notificationTrainEl.textContent;
+        if (compactAction && this.notificationAnswerBtn) compactAction.textContent = this.notificationAnswerBtn.textContent;
+      };
+      new MutationObserver(syncCompact).observe(this.notificationEl, {
+        attributes: true, attributeFilter: ['class'],
+        childList: true, subtree: true, characterData: true,
+      });
+    }
+
     // ── Browser mirror mode ──────────────────────────────────────────
     // Browser is display-only: no audio, no local call flow.
     // It receives chat/notification state from the host and forwards clicks.

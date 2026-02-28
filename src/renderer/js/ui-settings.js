@@ -43,7 +43,11 @@ const SettingsUI = {
 
   async open() {
     const settings = await window.simsigAPI.settings.getAll();
+    this._savedTheme = settings.theme || 'light';
     this.populate(settings);
+    window.simsigAPI.app.getVersion().then((v) => {
+      document.getElementById('settings-version').textContent = 'Version - v' + v;
+    });
     await this.enumerateAudioDevices();
     // Hide browser overlay text while settings is open so it's not in the way
     const browserOverlay = document.getElementById('browser-overlay');
@@ -56,6 +60,10 @@ const SettingsUI = {
   close() {
     this.modal.classList.add('hidden');
     this.stopKeybindListen();
+    // Revert dark mode preview if cancelled (not saved)
+    if (this._savedTheme !== undefined) {
+      document.body.classList.toggle('dark-mode', this._savedTheme === 'dark');
+    }
     const browserOverlay = document.getElementById('browser-overlay');
     if (browserOverlay) browserOverlay.classList.remove('settings-open');
   },
@@ -84,6 +92,13 @@ const SettingsUI = {
     // Browser access
     document.getElementById('setting-web-enabled').checked = settings.web?.enabled || false;
     document.getElementById('setting-web-port').value = settings.web?.port || 3000;
+
+    // Appearance
+    const darkCheckbox = document.getElementById('setting-dark-mode');
+    darkCheckbox.checked = settings.theme === 'dark';
+    darkCheckbox.addEventListener('change', () => {
+      document.body.classList.toggle('dark-mode', darkCheckbox.checked);
+    });
   },
 
   async save() {
@@ -161,6 +176,12 @@ const SettingsUI = {
         overlay.classList.add('hidden');
       }
     }
+
+    // Theme
+    const theme = document.getElementById('setting-dark-mode').checked ? 'dark' : 'light';
+    await window.simsigAPI.settings.set('theme', theme);
+    document.body.classList.toggle('dark-mode', theme === 'dark');
+    this._savedTheme = theme; // prevent close() from reverting
 
     this.close();
   },

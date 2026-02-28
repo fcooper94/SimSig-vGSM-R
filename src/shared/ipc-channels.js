@@ -57,6 +57,13 @@ module.exports = {
 
   // Window
   WINDOW_TOGGLE_FULLSCREEN: 'window:toggle-fullscreen',
+  WINDOW_TOGGLE_COMPACT: 'window:toggle-compact',
+  WINDOW_COMPACT_RESIZE: 'window:compact-resize',
+  WINDOW_MINIMIZE: 'window:minimize',
+  WINDOW_MAXIMIZE: 'window:maximize',
+  WINDOW_CLOSE: 'window:close',
+  WINDOW_CONFIRM_CLOSE: 'window:confirm-close',
+  WINDOW_CONFIRM_CLOSE_REPLY: 'window:confirm-close-reply',
 
   // Browser mirror (chat state sync + remote interaction)
   PHONE_CHAT_SYNC: 'phone:chat-sync',

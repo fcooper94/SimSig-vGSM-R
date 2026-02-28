@@ -1,4 +1,8 @@
 document.addEventListener('DOMContentLoaded', async () => {
+  // Apply saved theme immediately to prevent flash of light mode
+  const allSettings = await window.simsigAPI.settings.getAll();
+  if (allSettings.theme === 'dark') document.body.classList.add('dark-mode');
+
   // Initialize all UI modules synchronously first
   ConnectionUI.init();
   SettingsUI.init();
@@ -250,6 +254,142 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('phonebook-refresh').addEventListener('click', () => {
     loadPhoneBook();
+  });
+
+  // ── Compact Mode ──────────────────────────────────────────
+  const compactToggleBtn = document.getElementById('compact-toggle-btn');
+  const compactExpandBtn = document.getElementById('compact-expand-btn');
+  const compactEmrgBtn = document.getElementById('compact-emrg-btn');
+  const compactDialBtn = document.getElementById('compact-dial-btn');
+  const compactNotification = document.getElementById('compact-notification');
+
+  if (compactToggleBtn) {
+    compactToggleBtn.addEventListener('click', () => {
+      window.simsigAPI.window.toggleCompact();
+    });
+  }
+
+  if (compactExpandBtn) {
+    compactExpandBtn.addEventListener('click', () => {
+      window.simsigAPI.window.toggleCompact();
+    });
+  }
+
+  const compactEmrgPanel = document.getElementById('compact-emrg-panel');
+  const compactEmrgActions = document.getElementById('compact-emrg-actions');
+  const compactEmrgConfirm = document.getElementById('compact-emrg-confirm');
+  const compactEmrgStopAll = document.getElementById('compact-emrg-stop-all');
+  const compactEmrgCancel = document.getElementById('compact-emrg-cancel');
+
+  function resetCompactEmrgState() {
+    if (compactEmrgActions) compactEmrgActions.classList.remove('hidden');
+    if (compactEmrgConfirm) compactEmrgConfirm.classList.add('hidden');
+  }
+
+  function showCompactEmrgPanel() {
+    if (!compactEmrgPanel) return;
+    resetCompactEmrgState();
+    compactEmrgPanel.classList.remove('hidden', 'closing');
+    compactEmrgPanel.style.visibility = 'hidden';
+    requestAnimationFrame(async () => {
+      const panelH = compactEmrgPanel.offsetHeight;
+      await window.simsigAPI.window.compactResize(70 + panelH);
+      compactEmrgPanel.style.visibility = '';
+    });
+  }
+
+  function hideCompactEmrgPanel() {
+    if (!compactEmrgPanel) return;
+    compactEmrgPanel.classList.add('closing');
+    compactEmrgPanel.addEventListener('animationend', () => {
+      compactEmrgPanel.classList.add('hidden');
+      compactEmrgPanel.classList.remove('closing');
+      window.simsigAPI.window.compactResize(70);
+    }, { once: true });
+  }
+
+  if (compactEmrgBtn) {
+    compactEmrgBtn.addEventListener('click', () => showCompactEmrgPanel());
+  }
+
+  // "Send All Stop" → show confirmation
+  if (compactEmrgStopAll) {
+    compactEmrgStopAll.addEventListener('click', () => {
+      if (compactEmrgActions) compactEmrgActions.classList.add('hidden');
+      if (compactEmrgConfirm) compactEmrgConfirm.classList.remove('hidden');
+    });
+  }
+
+  // Confirm Yes → send the command and close
+  const compactEmrgConfirmYes = document.getElementById('compact-emrg-confirm-yes');
+  if (compactEmrgConfirmYes) {
+    compactEmrgConfirmYes.addEventListener('click', async () => {
+      hideCompactEmrgPanel();
+      await window.simsigAPI.commands.allSignalsToDanger();
+    });
+  }
+
+  // Confirm No → go back to action list
+  const compactEmrgConfirmNo = document.getElementById('compact-emrg-confirm-no');
+  if (compactEmrgConfirmNo) {
+    compactEmrgConfirmNo.addEventListener('click', () => {
+      resetCompactEmrgState();
+    });
+  }
+
+  if (compactEmrgCancel) {
+    compactEmrgCancel.addEventListener('click', () => hideCompactEmrgPanel());
+  }
+
+  if (compactDialBtn) {
+    compactDialBtn.addEventListener('click', () => {
+      window.simsigAPI.window.toggleCompact();
+      setTimeout(() => {
+        switchTab('phonebook');
+        if (phonebookContacts.length === 0) loadPhoneBook();
+      }, 100);
+    });
+  }
+
+  if (compactNotification) {
+    compactNotification.addEventListener('click', () => {
+      const notifBtn = document.getElementById('notification-answer-btn');
+      if (notifBtn) notifBtn.click();
+    });
+  }
+
+  window.simsigAPI.window.onCompactChanged((isCompact) => {
+    document.body.classList.toggle('compact-mode', isCompact);
+  });
+
+  // ── Close Confirmation (styled modal) ──────────────────────
+  const confirmModal = document.getElementById('confirm-modal');
+  const confirmTitle = document.getElementById('confirm-title');
+  const confirmMessage = document.getElementById('confirm-message');
+  const confirmYes = document.getElementById('confirm-yes');
+  const confirmNo = document.getElementById('confirm-no');
+
+  window.simsigAPI.window.onConfirmClose(() => {
+    confirmTitle.textContent = 'Close Application';
+    confirmMessage.textContent = 'Are you sure you want to close SimSig VGSM-R?';
+    confirmModal.classList.remove('hidden');
+
+    const onYes = () => {
+      confirmModal.classList.add('hidden');
+      cleanup();
+      window.simsigAPI.window.confirmCloseReply(true);
+    };
+    const onNo = () => {
+      confirmModal.classList.add('hidden');
+      cleanup();
+      window.simsigAPI.window.confirmCloseReply(false);
+    };
+    const cleanup = () => {
+      confirmYes.removeEventListener('click', onYes);
+      confirmNo.removeEventListener('click', onNo);
+    };
+    confirmYes.addEventListener('click', onYes);
+    confirmNo.addEventListener('click', onNo);
   });
 
   // Show browser overlay if web server is already running (auto-started)

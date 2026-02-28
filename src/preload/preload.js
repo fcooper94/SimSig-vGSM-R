@@ -39,6 +39,13 @@ const channels = {
   SIM_NAME: 'sim:name',
   INIT_READY: 'init:ready',
   WINDOW_TOGGLE_FULLSCREEN: 'window:toggle-fullscreen',
+  WINDOW_TOGGLE_COMPACT: 'window:toggle-compact',
+  WINDOW_COMPACT_RESIZE: 'window:compact-resize',
+  WINDOW_MINIMIZE: 'window:minimize',
+  WINDOW_MAXIMIZE: 'window:maximize',
+  WINDOW_CLOSE: 'window:close',
+  WINDOW_CONFIRM_CLOSE: 'window:confirm-close',
+  WINDOW_CONFIRM_CLOSE_REPLY: 'window:confirm-close-reply',
   PHONE_CHAT_SYNC: 'phone:chat-sync',
   PHONE_REMOTE_ACTION: 'phone:remote-action',
   WEB_START: 'web:start',
@@ -176,10 +183,30 @@ contextBridge.exposeInMainWorld('simsigAPI', {
 
   window: {
     toggleFullscreen: () => ipcRenderer.invoke(channels.WINDOW_TOGGLE_FULLSCREEN),
+    toggleCompact: () => ipcRenderer.invoke(channels.WINDOW_TOGGLE_COMPACT),
+    compactResize: (height) => ipcRenderer.invoke(channels.WINDOW_COMPACT_RESIZE, height),
+    minimize: () => ipcRenderer.invoke(channels.WINDOW_MINIMIZE),
+    maximize: () => ipcRenderer.invoke(channels.WINDOW_MAXIMIZE),
+    close: () => ipcRenderer.invoke(channels.WINDOW_CLOSE),
+    onCompactChanged: (callback) => {
+      const listener = (_event, isCompact) => callback(isCompact);
+      ipcRenderer.on('window:compact-changed', listener);
+      return () => ipcRenderer.removeListener('window:compact-changed', listener);
+    },
+    onConfirmClose: (callback) => {
+      const listener = () => callback();
+      ipcRenderer.on(channels.WINDOW_CONFIRM_CLOSE, listener);
+      return () => ipcRenderer.removeListener(channels.WINDOW_CONFIRM_CLOSE, listener);
+    },
+    confirmCloseReply: (confirmed) => ipcRenderer.send(channels.WINDOW_CONFIRM_CLOSE_REPLY, confirmed),
   },
 
   web: {
     start: (port) => ipcRenderer.invoke(channels.WEB_START, port),
     stop: () => ipcRenderer.invoke(channels.WEB_STOP),
+  },
+
+  app: {
+    getVersion: () => ipcRenderer.invoke('app:get-version'),
   },
 });

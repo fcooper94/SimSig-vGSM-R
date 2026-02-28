@@ -126,6 +126,9 @@ function getInitialState() {
 
 
 function registerIpcHandlers() {
+  // App info
+  registerHandler('app:get-version', () => app.getVersion());
+
   // Settings
   registerHandler(channels.SETTINGS_GET, (_event, key) => settings.get(key));
   registerHandler(channels.SETTINGS_SET, (_event, key, value) => {
@@ -585,6 +588,77 @@ function registerIpcHandlers() {
   registerHandler(channels.WINDOW_TOGGLE_FULLSCREEN, () => {
     const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
     if (win) win.setFullScreen(!win.isFullScreen());
+  });
+
+  registerHandler(channels.WINDOW_MINIMIZE, () => {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (win) win.minimize();
+  });
+
+  registerHandler(channels.WINDOW_MAXIMIZE, () => {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (win) {
+      if (win.isMaximized()) win.unmaximize();
+      else win.maximize();
+    }
+  });
+
+  registerHandler(channels.WINDOW_CLOSE, () => {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (win) win.close();
+  });
+
+  registerHandler(channels.WINDOW_TOGGLE_COMPACT, () => {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (!win) return;
+
+    const { screen } = require('electron');
+
+    if (!win._isCompact) {
+      // Save current bounds before shrinking
+      win._savedBounds = win.getBounds();
+
+      // Exit fullscreen if active
+      if (win.isFullScreen()) win.setFullScreen(false);
+
+      // Get the display the window is currently on
+      const display = screen.getDisplayMatching(win.getBounds());
+      const workArea = display.workArea;
+
+      const compactWidth = 450;
+      const compactHeight = 70;
+
+      // Allow the window to shrink below normal min size
+      win.setMinimumSize(compactWidth, compactHeight);
+
+      // Position in bottom-right corner of current display
+      const x = workArea.x + workArea.width - compactWidth - 10;
+      const y = workArea.y + workArea.height - compactHeight - 10;
+      win.setBounds({ x, y, width: compactWidth, height: compactHeight });
+
+      win.setResizable(false);
+      win.webContents.send('window:compact-changed', true);
+      win._isCompact = true;
+    } else {
+      // Restore to normal mode
+      win.setResizable(true);
+      win.setMinimumSize(700, 400);
+      if (win._savedBounds) {
+        win.setBounds(win._savedBounds);
+      }
+
+      win.webContents.send('window:compact-changed', false);
+      win._isCompact = false;
+    }
+  });
+
+  registerHandler(channels.WINDOW_COMPACT_RESIZE, (_e, height) => {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (!win || !win._isCompact) return;
+    const bounds = win.getBounds();
+    const dy = height - bounds.height;
+    win.setMinimumSize(bounds.width, height);
+    win.setBounds({ x: bounds.x, y: bounds.y - dy, width: bounds.width, height });
   });
 
   // TTS — ElevenLabs (premium paid voices, requires API key)

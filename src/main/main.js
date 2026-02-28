@@ -14,6 +14,7 @@ function createWindow() {
     height: 834,
     minWidth: 700,
     minHeight: 400,
+    frame: false,
     title: 'SimSig VGSM-R',
     icon: path.join(__dirname, '../../images/icon.png'),
     backgroundColor: '#505050',
@@ -32,15 +33,23 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   }
 
+  let closeConfirmed = false;
   mainWindow.on('close', (e) => {
-    const choice = dialog.showMessageBoxSync(mainWindow, {
-      type: 'question',
-      buttons: ['Yes', 'No'],
-      defaultId: 1,
-      title: 'Confirm',
-      message: 'Are you sure you want to close SimSig VGSM-R?',
-    });
-    if (choice === 1) e.preventDefault();
+    if (closeConfirmed) return; // already confirmed, let it close
+    e.preventDefault();
+    mainWindow.setAlwaysOnTop(false);
+    mainWindow.webContents.send(channels.WINDOW_CONFIRM_CLOSE);
+  });
+
+  ipcMain.on(channels.WINDOW_CONFIRM_CLOSE_REPLY, (_e, confirmed) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (confirmed) {
+      mainWindow.hide();
+      closeConfirmed = true;
+      mainWindow.close();
+    } else {
+      mainWindow.setAlwaysOnTop(true, 'floating');
+    }
   });
 
   mainWindow.on('closed', () => {

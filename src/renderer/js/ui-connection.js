@@ -29,6 +29,14 @@ const ConnectionUI = {
         window.simsigAPI.window.toggleFullscreen();
       });
     }
+
+    // Custom window controls (frameless window)
+    const winMin = document.getElementById('win-minimize');
+    const winMax = document.getElementById('win-maximize');
+    const winClose = document.getElementById('win-close');
+    if (winMin) winMin.addEventListener('click', () => window.simsigAPI.window.minimize());
+    if (winMax) winMax.addEventListener('click', () => window.simsigAPI.window.maximize());
+    if (winClose) winClose.addEventListener('click', () => window.simsigAPI.window.close());
   },
 
   showConfirm(title, message, onYes) {

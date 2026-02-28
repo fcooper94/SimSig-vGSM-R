@@ -18,6 +18,12 @@
       <span id="status-text">Disconnected</span>
       <button id="connect-btn">Connect</button>
       <button id="fullscreen-btn" title="Toggle fullscreen">&#x26F6;</button>
+      <button id="compact-toggle-btn" title="Compact mode">&#x2922;</button>
+      <div class="window-controls">
+        <button id="win-minimize" title="Minimize">&#x2013;</button>
+        <button id="win-maximize" title="Maximize">&#x25A1;</button>
+        <button id="win-close" title="Close">&#x2715;</button>
+      </div>
     </div>
   </header>
   <div id="panel-subtitle-row">
@@ -206,7 +212,12 @@
   <div id="settings-modal" class="modal hidden">
     <div class="modal-content">
       <h2>Settings</h2>
+      <p id="settings-version" style="font-size:0.75em;opacity:0.5"></p>
       <form id="settings-form">
+        <fieldset>
+          <legend>Appearance</legend>
+          <label><input type="checkbox" id="setting-dark-mode"> Dark Mode</label>
+        </fieldset>
         <fieldset>
           <legend>Gateway Connection</legend>
           <label>Host <input type="text" id="setting-host"></label>
@@ -326,5 +337,39 @@
   <script src="js/ui-message-feed.js"></script>
   <script src="js/audio-pipeline.js"></script>
   <script src="js/app.js"></script>
+
+  <!-- ── COMPACT MODE STRIP ────────────────────────────────── -->
+  <div id="compact-bar">
+    <div id="compact-emrg-panel" class="compact-emrg-panel hidden">
+      <div id="compact-emrg-actions">
+        <button class="compact-emrg-action" id="compact-emrg-stop-all">&#9888; Send All Stop</button>
+        <!-- Add more emergency actions here as needed -->
+        <button class="compact-emrg-cancel" id="compact-emrg-cancel">Cancel</button>
+      </div>
+      <div id="compact-emrg-confirm" class="hidden">
+        <span class="compact-emrg-confirm-text">Are you sure?</span>
+        <div class="compact-emrg-confirm-btns">
+          <button class="compact-emrg-confirm-yes" id="compact-emrg-confirm-yes">Yes</button>
+          <button class="compact-emrg-confirm-no" id="compact-emrg-confirm-no">No</button>
+        </div>
+      </div>
+    </div>
+    <div class="compact-buttons">
+      <button class="compact-btn compact-emrg" id="compact-emrg-btn">
+        <span>&#9888;</span> Emerg.
+      </button>
+      <button class="compact-btn" id="compact-dial-btn">
+        <span>&#128222;</span> Dial
+      </button>
+      <div id="compact-notification" class="compact-notification hidden">
+        <span id="compact-notif-train"></span>
+        <span id="compact-notif-action">[Answer]</span>
+      </div>
+      <div class="compact-spacer"></div>
+      <button class="compact-btn compact-expand" id="compact-expand-btn" title="Expand">
+        <span>&#x2922;</span>
+      </button>
+    </div>
+  </div>
 </body>
 </html>

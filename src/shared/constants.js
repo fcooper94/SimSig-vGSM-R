@@ -54,5 +54,6 @@ module.exports = {
       enabled: false,
       port: 3000,
     },
+    theme: 'light',
   },
 };
