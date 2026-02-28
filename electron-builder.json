@@ -1,0 +1,34 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.simsig.vgsmr",
+  "productName": "vGSM-R",
+  "directories": {
+    "output": "dist"
+  },
+  "files": [
+    "src/**/*",
+    "images/**/*",
+    "sounds/**/*",
+    "package.json"
+  ],
+  "publish": {
+    "provider": "github",
+    "owner": "fcooper94",
+    "repo": "SimSig-vGSM-R"
+  },
+  "win": {
+    "target": "nsis",
+    "icon": "images/icon.png"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "vGSM-R",
+    "artifactName": "vGSM-R-Setup-${version}.${ext}",
+    "installerSidebar": "build/installerSidebar.bmp",
+    "uninstallerSidebar": "build/installerSidebar.bmp"
+  }
+}
