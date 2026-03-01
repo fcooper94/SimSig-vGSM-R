@@ -47,13 +47,15 @@ const ConnectionUI = {
 
     const yesBtn = document.getElementById('confirm-yes');
     const noBtn = document.getElementById('confirm-no');
+    const onYesClick = () => { cleanup(); onYes(); };
+    const onNoClick = () => { cleanup(); };
     const cleanup = () => {
       modal.classList.add('hidden');
-      yesBtn.replaceWith(yesBtn.cloneNode(true));
-      noBtn.replaceWith(noBtn.cloneNode(true));
+      yesBtn.removeEventListener('click', onYesClick);
+      noBtn.removeEventListener('click', onNoClick);
     };
-    yesBtn.addEventListener('click', () => { cleanup(); onYes(); }, { once: true });
-    noBtn.addEventListener('click', () => { cleanup(); }, { once: true });
+    yesBtn.addEventListener('click', onYesClick, { once: true });
+    noBtn.addEventListener('click', onNoClick, { once: true });
   },
 
   setStatus(status) {
@@ -61,6 +63,10 @@ const ConnectionUI = {
 
     this.indicator.className = statusStr;
     this.isConnected = statusStr === 'connected';
+
+    // Toggle body-level disconnected state for global UI gating
+    const active = statusStr === 'connected' || statusStr === 'no-gateway';
+    document.body.classList.toggle('disconnected', !active);
 
     const labels = {
       disconnected: 'Disconnected',

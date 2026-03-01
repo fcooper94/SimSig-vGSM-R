@@ -28,7 +28,7 @@
 .modal-content h2 {
   margin-bottom: 2px;
   color: var(--text);
-  font-size: 14px;
+  font-size: 17px;
 }
 
 #settings-version {
@@ -43,7 +43,7 @@ fieldset {
 
 legend {
   color: #000080;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: bold;
   padding: 0 6px;
 }
@@ -53,7 +53,7 @@ label {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 6px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text);
 }
 
@@ -70,7 +70,7 @@ label input, label select {
   border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
   padding: 3px 8px;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 13px;
   width: 260px;
 }
 
@@ -99,7 +99,7 @@ label input[type="range"] + span {
   min-width: 36px;
   text-align: right;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 13px;
   margin-left: 6px;
 }
 
@@ -110,7 +110,7 @@ label input[type="range"] + span {
   border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
   padding: 4px 10px;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 13px;
   width: 100%;
   margin-top: 4px;
   margin-bottom: 6px;
@@ -145,7 +145,7 @@ label input[type="range"] + span {
   border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
   padding: 4px 16px;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .modal-actions button:hover {
@@ -217,7 +217,7 @@ label input[type="range"] + span {
   width: 220px;
   font-style: normal;
   font-weight: normal;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text);
   box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.3);
   z-index: 200;
@@ -254,7 +254,7 @@ label input[type="range"] + span {
 
 /* TTS credit status */
 #tts-credit-status {
-  font-size: 11px;
+  font-size: 13px;
   padding: 4px 8px;
   margin-top: 4px;
 }

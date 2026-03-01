@@ -9,19 +9,26 @@ let setupWindow = null;
 let splashWindow = null;
 
 function createWindow() {
+  // Position main window over splash for seamless transition
+  const splashBounds = splashWindow && !splashWindow.isDestroyed()
+    ? splashWindow.getBounds() : null;
+
   mainWindow = new BrowserWindow({
-    width: 1194,
-    height: 834,
-    minWidth: 700,
-    minHeight: 400,
+    width: 896,
+    height: 626,
+    minWidth: 525,
+    minHeight: 300,
     frame: false,
     title: 'SimSig VGSM-R',
     icon: path.join(__dirname, '../../images/icon.png'),
     backgroundColor: '#505050',
+    show: false,
+    ...(splashBounds ? { x: splashBounds.x, y: splashBounds.y } : {}),
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      zoomFactor: 0.9,
     },
   });
 
@@ -29,19 +36,41 @@ function createWindow() {
   mainWindow.setMenu(null);
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 
+  // Show main window and close splash once content is ready
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+    closeSplash();
+  });
+
   if (process.argv.includes('--dev')) {
     mainWindow.webContents.openDevTools();
   }
 
   let closeConfirmed = false;
+  let closeTimeout = null;
   mainWindow.on('close', (e) => {
     if (closeConfirmed) return; // already confirmed, let it close
     e.preventDefault();
     mainWindow.setAlwaysOnTop(false);
-    mainWindow.webContents.send(channels.WINDOW_CONFIRM_CLOSE);
+    try {
+      mainWindow.webContents.send(channels.WINDOW_CONFIRM_CLOSE);
+    } catch (err) {
+      // Renderer not available — force close
+      closeConfirmed = true;
+      mainWindow.close();
+      return;
+    }
+    // Safety: if renderer doesn't respond within 5s, force close
+    clearTimeout(closeTimeout);
+    closeTimeout = setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      closeConfirmed = true;
+      mainWindow.close();
+    }, 5000);
   });
 
   ipcMain.on(channels.WINDOW_CONFIRM_CLOSE_REPLY, (_e, confirmed) => {
+    clearTimeout(closeTimeout);
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (confirmed) {
       mainWindow.hide();
@@ -86,10 +115,10 @@ function createSetupWindow() {
 
 function createSplashWindow() {
   splashWindow = new BrowserWindow({
-    width: 1194,
-    height: 834,
-    minWidth: 700,
-    minHeight: 400,
+    width: 896,
+    height: 626,
+    minWidth: 525,
+    minHeight: 300,
     resizable: false,
     frame: false,
     center: true,
@@ -104,6 +133,7 @@ function createSplashWindow() {
   });
 
   splashWindow.setMenu(null);
+  splashWindow.setAlwaysOnTop(true, 'floating');
   splashWindow.loadFile(path.join(__dirname, '../renderer/update.html'));
   splashWindow.once('ready-to-show', () => splashWindow.show());
 
@@ -236,13 +266,12 @@ app.whenReady().then(async () => {
   const initElapsed = Date.now() - initStart;
   if (initElapsed < 1500) await delay(1500 - initElapsed);
 
-  // Close splash and open the appropriate window
-  closeSplash();
-
+  // Create app window — splash is closed once main window is ready-to-show
   if (settings.get('setupComplete') === false) {
     createSetupWindow();
+    closeSplash();
   } else {
-    createWindow();
+    createWindow(); // closeSplash() called inside via ready-to-show
   }
 
   // Setup wizard completion handler

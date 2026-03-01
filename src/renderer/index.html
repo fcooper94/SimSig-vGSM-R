@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="css/radio.css">
   <link rel="stylesheet" href="css/settings.css">
 </head>
-<body>
+<body class="disconnected">
   <!-- ── HEADER ─────────────────────────────────────────────── -->
   <header id="top-bar">
     <div id="panel-name-tab">-</div>
@@ -28,6 +28,11 @@
   </header>
   <div id="panel-subtitle-row">
     <span id="panel-subtitle"></span>
+  </div>
+
+  <!-- Disconnected overlay (covers content + tabs, not header or bottom bar) -->
+  <div id="disconnected-overlay">
+    <span>Disconnected</span>
   </div>
 
   <!-- ── MAIN CONTENT ───────────────────────────────────────── -->
@@ -133,6 +138,12 @@
     <div id="right-panel">
       <div id="chat-header">
         <span>Comms</span>
+        <span id="comms-zoom-btn" title="Text size">&#128269;</span>
+        <div id="comms-zoom-popup" class="hidden">
+          <span id="comms-zoom-minus">&#8722;</span>
+          <input type="range" id="comms-zoom-slider" min="8" max="20" value="14" step="1">
+          <span id="comms-zoom-plus">+</span>
+        </div>
       </div>
       <div id="chat-messages"></div>
     </div>
@@ -266,7 +277,7 @@
         </fieldset>
         <fieldset>
           <legend>Browser Access</legend>
-          <label><input type="checkbox" id="setting-web-enabled"> Enable browser access (iPad)</label>
+          <label><input type="checkbox" id="setting-web-enabled"> Enable browser access</label>
           <label>Port <input type="number" id="setting-web-port" value="3000" min="1024" max="65535"></label>
         </fieldset>
         <fieldset>

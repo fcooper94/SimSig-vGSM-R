@@ -174,6 +174,12 @@ const PhoneCallsUI = {
           this.sendOutgoingReply(action.replyIndex, this._outgoingReplies, this._outgoingContactName);
         }
       } else if (action.type === 'hangup') {
+        if (this._dialingActive) {
+          this.stopDialing();
+          this.addMessage({ type: 'system', text: 'Call cancelled' });
+          this._resumeIncoming();
+          return;
+        }
         if (this._outgoingCall) {
           if (this._outgoingReplies && this._outgoingReplies.length > 0 && !this._outgoingReplySent) return;
           this.endOutgoingCall();
@@ -190,6 +196,13 @@ const PhoneCallsUI = {
 
     // Click the notification box to answer the latest call or end the current call
     this.notificationEl.addEventListener('click', () => {
+      if (this._dialingActive) {
+        this.stopDialing();
+        window.simsigAPI.phone.placeCallHangup();
+        this.addMessage({ type: 'system', text: 'Call cancelled' });
+        this._resumeIncoming();
+        return;
+      }
       if (this._outgoingCall) {
         if (this._outgoingReplies && this._outgoingReplies.length > 0 && !this._outgoingReplySent) return;
         this.endOutgoingCall();
@@ -197,7 +210,7 @@ const PhoneCallsUI = {
         if (this._hasReplyOptions && !this._replySent) return; // must reply first
         if (this._hangUpLocked) return; // reply/goodbye still in progress
         this.hangUp();
-      } else if (this.calls.length > 0 && !this._dialingActive) {
+      } else if (this.calls.length > 0) {
         this.answerCall(this.calls.length - 1);
       }
     });
@@ -222,6 +235,13 @@ const PhoneCallsUI = {
     window.simsigAPI.keys.onHangUp(() => {
       if (typeof SettingsUI !== 'undefined' && SettingsUI.isListeningForKeybind) return;
       if (typeof SettingsUI !== 'undefined' && !SettingsUI.modal.classList.contains('hidden')) return;
+      if (this._dialingActive) {
+        this.stopDialing();
+        window.simsigAPI.phone.placeCallHangup();
+        this.addMessage({ type: 'system', text: 'Call cancelled' });
+        this._resumeIncoming();
+        return;
+      }
       if (this._outgoingCall) {
         if (this._outgoingReplies && this._outgoingReplies.length > 0 && !this._outgoingReplySent) return;
         this.endOutgoingCall();
@@ -1738,7 +1758,7 @@ const PhoneCallsUI = {
     this.notificationEl.classList.add('flashing');
     this.notificationTrainEl.textContent = contactName;
     if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
-    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[Dialing]';
+    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[Cancel]';
     const icon = this.notificationEl.querySelector('#notification-icon');
     if (icon) icon.innerHTML = '&#128222;';
     this._dialingActive = true;
@@ -2138,13 +2158,23 @@ const PhoneCallsUI = {
     this.stopDialing();
   },
 
-  // Re-show incoming call notification and start ringing if calls are waiting
+  // Re-show incoming call notification after 1s, start ringing after 2s
   _resumeIncoming() {
-    if (this.calls.length > 0 && !this.inCall) {
-      const nextCall = this.calls[this.calls.length - 1];
-      this.showNotification(nextCall.train || '');
-      this.startRinging();
-    }
+    if (this._resumeTimer) clearTimeout(this._resumeTimer);
+    if (this._resumeRingTimer) clearTimeout(this._resumeRingTimer);
+    this._resumeTimer = setTimeout(() => {
+      this._resumeTimer = null;
+      if (this.calls.length > 0 && !this.inCall && !this._outgoingCall && !this._dialingActive) {
+        const nextCall = this.calls[this.calls.length - 1];
+        this.showNotification(nextCall.train || '');
+        this._resumeRingTimer = setTimeout(() => {
+          this._resumeRingTimer = null;
+          if (this.calls.length > 0 && !this.inCall && !this._outgoingCall && !this._dialingActive) {
+            this.startRinging();
+          }
+        }, 1000);
+      }
+    }, 1000);
   },
 
   _updatePhonebookInCall(contactName, active) {

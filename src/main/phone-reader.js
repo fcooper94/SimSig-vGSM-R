@@ -32,10 +32,13 @@ class PhoneReader {
   // Open the telephone window via a separate script, retrying until SimSig is found
   _ensureTelephoneWindow() {
     if (this.telephoneOpened) return;
+    if (this._telephoneOpening) return; // prevent concurrent attempts
+    this._telephoneOpening = true;
     execFile('powershell', [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', OPEN_TELEPHONE_SCRIPT,
     ], { timeout: 5000 }, (err, stdout) => {
+      this._telephoneOpening = false;
       const output = (stdout || '').trim();
       console.log('[PhoneReader] Telephone window:', output);
       if (err) {
@@ -64,7 +67,6 @@ class PhoneReader {
 
   poll() {
     if (this.polling) return; // skip if previous poll still running
-    this._ensureTelephoneWindow(); // retry if not yet opened
     this.polling = true;
 
     execFile('powershell', [

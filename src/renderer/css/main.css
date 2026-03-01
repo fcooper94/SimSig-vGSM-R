@@ -59,6 +59,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
   user-select: none;
   touch-action: manipulation; /* Fix tap delay on iPad/mobile */
   -webkit-tap-highlight-color: transparent;
@@ -384,6 +385,7 @@ body {
 .toolbar-btn:disabled {
   opacity: 0.5;
   cursor: default;
+  pointer-events: none;
 }
 
 .toolbar-icon {
@@ -451,6 +453,7 @@ body {
 
 /* ── CHAT HEADER ───────────────────────────────────────────── */
 #chat-header {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -463,14 +466,75 @@ body {
   color: var(--text);
 }
 
+#comms-zoom-btn {
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0.5;
+  user-select: none;
+  margin-left: auto;
+}
+
+#comms-zoom-btn:hover {
+  opacity: 1;
+}
+
+#comms-zoom-popup {
+  position: absolute;
+  top: 100%;
+  right: 8px;
+  background: var(--bg-panel);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 100;
+  box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+#comms-zoom-popup.hidden {
+  display: none;
+}
+
+#comms-zoom-minus, #comms-zoom-plus {
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text);
+  width: 18px;
+  text-align: center;
+}
+
+#comms-zoom-minus:hover, #comms-zoom-plus:hover {
+  color: #000080;
+}
+
+#comms-zoom-slider {
+  width: 80px;
+  cursor: pointer;
+  accent-color: #000080;
+}
+
+body.dark-mode #comms-zoom-minus:hover,
+body.dark-mode #comms-zoom-plus:hover {
+  color: var(--accent);
+}
+
+body.dark-mode #comms-zoom-slider {
+  accent-color: var(--accent);
+}
+
 #chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 9px;
+  padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   background: var(--grid-bg);
+  font-size: 14px;
 }
 
 /* ── PLACEHOLDER GRIDS ─────────────────────────────────────── */
@@ -720,7 +784,11 @@ body.dark-mode #win-close:hover {
   color: #ffffff;
 }
 
-body.dark-mode .toolbar-btn:hover {
+body.dark-mode .toolbar-btn:disabled {
+  opacity: 0.25;
+}
+
+body.dark-mode .toolbar-btn:hover:not(:disabled) {
   background: #3a3a3a;
 }
 
@@ -738,6 +806,61 @@ body.dark-mode .compact-btn:hover,
 body.dark-mode .compact-emrg-cancel:hover,
 body.dark-mode .compact-emrg-confirm-no:hover {
   background: #3a3a3a;
+}
+
+/* ── DISCONNECTED STATE ──────────────────────────────────── */
+#disconnected-overlay {
+  display: none;
+}
+
+body.disconnected #disconnected-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  pointer-events: none;
+}
+
+body.disconnected #disconnected-overlay span {
+  font-size: 28px;
+  font-weight: bold;
+  color: var(--text);
+  opacity: 0.18;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+/* Dim and disable main content, tabs, and toolbar when not connected */
+body.disconnected #app-content,
+body.disconnected #tab-bar,
+body.disconnected #panel-subtitle-row {
+  opacity: 0.15;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Keep these toolbar buttons active when disconnected */
+body.disconnected #bottom-bar {
+  pointer-events: none;
+  opacity: 0.35;
+}
+
+body.disconnected #bottom-bar #settings-toolbar-btn {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+/* Compact mode: disable functional buttons when disconnected */
+body.disconnected #compact-emrg-btn,
+body.disconnected #compact-dial-btn {
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 /* ── COMPACT MODE ────────────────────────────────────────── */

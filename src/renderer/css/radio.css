@@ -168,7 +168,7 @@
 /* No calls message */
 #no-calls-message {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 16px;
   font-style: italic;
   padding: 8px;
   text-align: center;
@@ -288,9 +288,9 @@
 .chat-message {
   background: #ffffff;
   border-left: 4px solid var(--success);
-  padding: 10px 16px;
+  padding: 5px 10px;
   max-width: 90%;
-  font-size: 16px;
+  font-size: inherit;
   color: var(--text);
 }
 
@@ -301,12 +301,12 @@
 }
 
 .chat-greeting .chat-message-label {
-  font-size: 14px;
+  font-size: 0.85em;
   font-weight: bold;
   color: #cc6600;
   text-transform: uppercase;
   letter-spacing: 1px;
-  margin-bottom: 5px;
+  margin-bottom: 2px;
 }
 
 .chat-greeting .chat-message-text {
@@ -328,22 +328,20 @@
 }
 
 .chat-message-caller {
-  font-size: 16px;
+  font-size: 0.93em;
   font-weight: bold;
   color: #006600;
-  margin-bottom: 5px;
+  margin-bottom: 2px;
 }
 
 .chat-message-text {
-  font-size: 16px;
+  font-size: 1em;
   color: var(--text);
-  line-height: 1.5;
+  line-height: 1.3;
 }
 
 .chat-message-time {
-  font-size: 13px;
-  color: var(--text-dim);
-  margin-top: 5px;
+  display: none;
 }
 
 .chat-system {
@@ -357,7 +355,7 @@
 
 .chat-system .chat-message-text {
   color: var(--text-dim);
-  font-size: 14px;
+  font-size: 1em;
   font-style: italic;
 }
 
@@ -369,24 +367,24 @@
 }
 
 .chat-reply-options .chat-message-label {
-  font-size: 14px;
+  font-size: 0.78em;
   font-weight: bold;
   color: #0066cc;
   text-transform: uppercase;
   letter-spacing: 1px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .reply-options-list {
   margin: 0;
-  padding-left: 24px;
-  font-size: 16px;
+  padding-left: 18px;
+  font-size: 0.85em;
   color: var(--text);
-  line-height: 1.6;
+  line-height: 1.4;
 }
 
 .reply-options-list li {
-  padding: 8px 0;
+  padding: 4px 0;
   border-bottom: 1px solid #e0e4ea;
   cursor: pointer;
 }
@@ -441,8 +439,8 @@
   background: #d0d8f0;
   color: #0044aa;
   font-weight: bold;
-  padding: 4px 10px;
-  font-size: 18px;
+  padding: 2px 7px;
+  font-size: 0.85em;
   cursor: pointer;
 }
 
@@ -489,13 +487,13 @@
 
 .chat-loading .chat-message-text {
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: 0.71em;
   font-style: italic;
 }
 
 .chat-empty {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 16px;
   font-style: italic;
   text-align: center;
   padding-top: 30px;
@@ -804,6 +802,14 @@
   min-height: 28px;
 }
 
+.phonebook-loading {
+  color: var(--text-dim);
+  font-size: 16px;
+  font-style: italic;
+  text-align: center;
+  padding: 40px 12px;
+}
+
 /* ── EMERGENCY PANEL ───────────────────────────────────────── */
 #emrg-panel-header {
   display: flex;
@@ -862,8 +868,24 @@
 }
 
 /* ── DARK MODE OVERRIDES ─────────────────────────────────── */
-body.dark-mode #calls-table tbody tr:hover {
+body.dark-mode #calls-table,
+body.dark-mode #trains-table {
+  color: var(--text);
+}
+
+body.dark-mode #calls-table td,
+body.dark-mode #trains-table td {
+  border-bottom-color: #3a3a3a;
+  border-right-color: #333333;
+}
+
+body.dark-mode #calls-table tbody tr:hover,
+body.dark-mode #trains-table tbody tr:hover {
   background: #1a3a4d;
+}
+
+body.dark-mode #trains-table .at-signal {
+  color: #ef4444;
 }
 
 body.dark-mode #calls-table tbody tr.active {
@@ -912,15 +934,55 @@ body.dark-mode .chat-bubble .chat-signal-id {
   color: var(--accent);
 }
 
-body.dark-mode .reply-options-list li:hover {
-  background: #3a3a3a;
+body.dark-mode .chat-message {
+  background: #2a2a2a;
 }
 
-body.dark-mode .reply-options-list li {
+body.dark-mode .chat-greeting {
+  background: #3a2d1a;
+  border-left-color: #cc8800;
+}
+
+body.dark-mode .chat-greeting .chat-message-label {
+  color: #ddaa44;
+}
+
+body.dark-mode .chat-greeting .chat-message-text {
+  color: #ddbb66;
+}
+
+body.dark-mode .chat-error {
+  background: #3a1a1a;
+}
+
+body.dark-mode .chat-error .chat-message-text {
+  color: #ef4444;
+}
+
+body.dark-mode .chat-message-caller {
+  color: #6ecb6e;
+}
+
+body.dark-mode .chat-reply-options {
+  background: #1a2a3a;
+  border-left-color: var(--accent);
+}
+
+body.dark-mode .chat-reply-options .chat-message-label {
   color: var(--accent);
 }
 
+body.dark-mode .reply-options-list li {
+  color: var(--text);
+  border-bottom-color: #3a3a3a;
+}
+
+body.dark-mode .reply-options-list li:hover {
+  background: #2a3a4a;
+}
+
 body.dark-mode .wait-time-choice {
+  background: #2a3a4d;
   color: var(--accent);
 }
 
@@ -929,12 +991,39 @@ body.dark-mode .wait-time-choice:hover {
   color: #1a1a1a;
 }
 
+body.dark-mode .phonebook-item {
+  background: #2a2a2a;
+  border-color: #444444;
+}
+
 body.dark-mode .phonebook-avatar {
   background: var(--accent);
 }
 
 body.dark-mode .phonebook-item:hover {
   background: #3a3a3a;
+  border-color: var(--accent);
+}
+
+body.dark-mode .phonebook-item:active {
+  background: #1a3a4d;
+}
+
+body.dark-mode .phonebook-item.dialing {
+  border-color: var(--accent);
+  background: #1a3a4d;
+}
+
+body.dark-mode .phonebook-item.dialing .phonebook-name {
+  color: var(--accent);
+}
+
+body.dark-mode .phonebook-item.dialing .phonebook-dial-icon {
+  color: var(--accent);
+}
+
+body.dark-mode .phonebook-item:hover .phonebook-dial-icon {
+  color: var(--accent);
 }
 
 body.dark-mode .phonebook-dial-icon {

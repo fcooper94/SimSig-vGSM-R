@@ -159,19 +159,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   let phonebookContacts = [];
 
   async function loadPhoneBook() {
-    phonebookStatus.textContent = 'Loading...';
-    phonebookList.innerHTML = '';
+    phonebookStatus.textContent = '';
+    phonebookList.innerHTML = '<div class="phonebook-loading">Loading contacts...</div>';
     const result = await window.simsigAPI.phone.readPhoneBook();
     if (result.error) {
+      phonebookList.innerHTML = '<div class="phonebook-loading">Could not load contacts</div>';
       phonebookStatus.textContent = result.error;
       return;
     }
     phonebookContacts = result.contacts || [];
     if (phonebookContacts.length === 0) {
-      phonebookStatus.textContent = 'No contacts found';
+      phonebookList.innerHTML = '<div class="phonebook-loading">No contacts available. Open a sim in SimSig first.</div>';
       return;
     }
     phonebookStatus.textContent = '';
+    phonebookList.innerHTML = '';
     phonebookContacts.forEach((name, idx) => {
       const row = document.createElement('div');
       row.className = 'phonebook-item';
@@ -360,6 +362,45 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.simsigAPI.window.onCompactChanged((isCompact) => {
     document.body.classList.toggle('compact-mode', isCompact);
+  });
+
+  // ── Comms Zoom ───────────────────────────────────────────────
+  const commsZoomBtn = document.getElementById('comms-zoom-btn');
+  const commsZoomPopup = document.getElementById('comms-zoom-popup');
+  const commsZoomSlider = document.getElementById('comms-zoom-slider');
+  const commsZoomMinus = document.getElementById('comms-zoom-minus');
+  const commsZoomPlus = document.getElementById('comms-zoom-plus');
+  const chatMessages = document.getElementById('chat-messages');
+
+  function applyCommsZoom(size) {
+    chatMessages.style.fontSize = size + 'px';
+    commsZoomSlider.value = size;
+  }
+
+  commsZoomBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    commsZoomPopup.classList.toggle('hidden');
+  });
+
+  commsZoomSlider.addEventListener('input', () => {
+    applyCommsZoom(parseInt(commsZoomSlider.value));
+  });
+
+  commsZoomMinus.addEventListener('click', () => {
+    const val = Math.max(8, parseInt(commsZoomSlider.value) - 1);
+    applyCommsZoom(val);
+  });
+
+  commsZoomPlus.addEventListener('click', () => {
+    const val = Math.min(20, parseInt(commsZoomSlider.value) + 1);
+    applyCommsZoom(val);
+  });
+
+  // Close popup when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!commsZoomPopup.contains(e.target) && e.target !== commsZoomBtn) {
+      commsZoomPopup.classList.add('hidden');
+    }
   });
 
   // ── Close Confirmation (styled modal) ──────────────────────
