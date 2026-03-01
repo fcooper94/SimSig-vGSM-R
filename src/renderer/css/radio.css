@@ -499,6 +499,65 @@
   padding-top: 30px;
 }
 
+/* ── "USE TEXT" LINK in PTT prompts ─────────────────────────── */
+.use-text-link {
+  font-size: 0.85em;
+  font-weight: normal;
+  color: #0066cc;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: 8px;
+}
+.use-text-link:hover {
+  text-decoration: underline;
+}
+
+/* ── CHAT TEXT INPUT (free-text prompts) ────────────────────── */
+.chat-text-input {
+  border-left-color: #228822;
+  background: #f0fff0;
+  align-self: stretch;
+  max-width: 100%;
+}
+.chat-text-input .chat-message-label {
+  font-size: 0.78em;
+  font-weight: bold;
+  color: #228822;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+.chat-input-row {
+  display: flex;
+  gap: 6px;
+}
+.chat-text-field {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 0.9em;
+  font-family: inherit;
+  outline: none;
+}
+.chat-text-field:focus {
+  border-color: #228822;
+}
+.chat-text-submit {
+  padding: 4px 12px;
+  background: #228822;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.85em;
+  font-family: inherit;
+}
+.chat-text-submit:hover {
+  background: #1a6e1a;
+}
+
 /* ── MESSAGE LOG / FEED ────────────────────────────────────── */
 #message-feed {
   flex: 1;
@@ -989,6 +1048,32 @@ body.dark-mode .wait-time-choice {
 body.dark-mode .wait-time-choice:hover {
   background: var(--accent);
   color: #1a1a1a;
+}
+
+body.dark-mode .chat-text-input {
+  background: #1a2a1a;
+  border-left-color: #44aa44;
+}
+body.dark-mode .chat-text-input .chat-message-label {
+  color: #44aa44;
+}
+body.dark-mode .chat-text-field {
+  background: #333;
+  border-color: #555;
+  color: #e0e0e0;
+}
+body.dark-mode .chat-text-field:focus {
+  border-color: #44aa44;
+}
+body.dark-mode .chat-text-submit {
+  background: #44aa44;
+}
+body.dark-mode .chat-text-submit:hover {
+  background: #339933;
+}
+
+body.dark-mode .use-text-link {
+  color: var(--accent);
 }
 
 body.dark-mode .phonebook-item {

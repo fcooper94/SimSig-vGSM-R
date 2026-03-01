@@ -445,11 +445,12 @@ function registerIpcHandlers() {
   });
 
   // Place Call — read connection status and replies
-  registerHandler(channels.PHONE_PLACE_CALL_STATUS, () => {
+  registerHandler(channels.PHONE_PLACE_CALL_STATUS, (_event, contactName) => {
     const args = [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', READ_PLACE_CALL_SCRIPT,
     ];
+    if (contactName) args.push('-ContactName', String(contactName));
     return new Promise((resolve) => {
       execFile('powershell', args, { timeout: 5000 }, (err, stdout, stderr) => {
         if (stderr) console.error('[PlaceCallStatus] stderr:', stderr.trim());
@@ -479,12 +480,14 @@ function registerIpcHandlers() {
   //   3. Handles Yes/No confirmation dialogs and headcode entry dialogs
   //   4. Reads the TMemo response text (SimSig's answer to our request)
   //   5. Returns { response: "..." } with the text, or { error: "..." } on failure
-  registerHandler(channels.PHONE_PLACE_CALL_REPLY, (_event, replyIndex, headCode) => {
+  registerHandler(channels.PHONE_PLACE_CALL_REPLY, (_event, replyIndex, headCode, param2, contactName) => {
     const args = [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', REPLY_PLACE_CALL_SCRIPT, '-ReplyIndex', String(replyIndex || 0),
     ];
     if (headCode) args.push('-HeadCode', String(headCode));
+    if (param2) args.push('-Param2', String(param2));
+    if (contactName) args.push('-ContactName', String(contactName));
     return new Promise((resolve) => {
       execFile('powershell', args, { timeout: 30000 }, (err, stdout, stderr) => {
         const win = BrowserWindow.getAllWindows()[0];

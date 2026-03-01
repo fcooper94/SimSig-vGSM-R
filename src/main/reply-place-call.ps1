@@ -33,7 +33,9 @@
 
 param(
     [int]$ReplyIndex = 0,
-    [string]$HeadCode = ""
+    [string]$HeadCode = "",
+    [string]$Param2 = "",
+    [string]$ContactName = ""
 )
 
 Add-Type -AssemblyName UIAutomationClient | Out-Null
@@ -292,11 +294,10 @@ try {
         [PlaceCallReply]::HideOffScreen($dialogHwnd)
     }
 
-    $replyKeywords = "^(Request|Message|Send|Cancel|Pass|Hold|Block|Continue|Ask|Authoris|Please)"
     $replyControlHwnd = [IntPtr]::Zero
     $replyControlType = ""  # "listbox" or "combo"
 
-    # 1) Check TListBox controls first
+    # 1) Check TListBox controls first — any listbox with items is a reply control
     $listCond = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::ClassNameProperty,
         "TListBox"
@@ -310,16 +311,14 @@ try {
         if ($hw -eq [IntPtr]::Zero) { continue }
         $cnt = [PlaceCallReply]::GetListBoxCount($hw)
         if ($cnt -gt 0) {
-            $firstItem = [PlaceCallReply]::GetListBoxText($hw, 0)
-            if ($firstItem -match $replyKeywords) {
-                $replyControlHwnd = $hw
-                $replyControlType = "listbox"
-                break
-            }
+            $replyControlHwnd = $hw
+            $replyControlType = "listbox"
+            break
         }
     }
 
     # 2) If no listbox, check TComboBox controls
+    #    Skip the contacts combo by checking if it contains the contact we dialed.
     if ($replyControlHwnd -eq [IntPtr]::Zero) {
         $comboCond = New-Object System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::ClassNameProperty,
@@ -333,14 +332,24 @@ try {
             $hw = [IntPtr]$combo.Current.NativeWindowHandle
             if ($hw -eq [IntPtr]::Zero) { continue }
             $cnt = [PlaceCallReply]::GetComboCount($hw)
-            if ($cnt -gt 0) {
-                $firstItem = [PlaceCallReply]::GetComboText($hw, 0)
-                if ($firstItem -match $replyKeywords) {
-                    $replyControlHwnd = $hw
-                    $replyControlType = "combo"
-                    break
+            if ($cnt -le 0) { continue }
+
+            # If we know who we called, skip the combo that contains that name
+            $isContactsCombo = $false
+            if ($ContactName) {
+                for ($i = 0; $i -lt $cnt; $i++) {
+                    $text = [PlaceCallReply]::GetComboText($hw, $i)
+                    if ($text -eq $ContactName) {
+                        $isContactsCombo = $true
+                        break
+                    }
                 }
             }
+            if ($isContactsCombo) { continue }
+
+            $replyControlHwnd = $hw
+            $replyControlType = "combo"
+            break
         }
     }
 
@@ -467,6 +476,48 @@ try {
                 Start-Sleep -Milliseconds 50
             }
             [PlaceCallReply]::SetForegroundWindow($paramDlg) | Out-Null
+            Start-Sleep -Milliseconds 50
+            [PlaceCallReply]::PressKey([PlaceCallReply]::VK_RETURN)
+            Start-Sleep -Milliseconds 300
+        }
+    }
+
+    # Poll for a second parameter dialog (e.g. platform number for Platform Alteration)
+    $paramDlg2 = [IntPtr]::Zero
+    for ($poll = 0; $poll -lt 40; $poll++) {
+        Start-Sleep -Milliseconds 25
+        $paramDlg2 = [PlaceCallReply]::FindParameterDialog()
+        if ($paramDlg2 -ne [IntPtr]::Zero) {
+            [PlaceCallReply]::HideOffScreen($paramDlg2)
+            break
+        }
+    }
+
+    if ($paramDlg2 -ne [IntPtr]::Zero) {
+        $p2 = if ($Param2 -ne "") { $Param2 } else { "" }
+
+        $editHwnd2 = [PlaceCallReply]::FindEditControl($paramDlg2)
+        if ($editHwnd2 -ne [IntPtr]::Zero) {
+            [PlaceCallReply]::SetText($editHwnd2, $p2)
+            Start-Sleep -Milliseconds 100
+            [PlaceCallReply]::FocusControl($paramDlg2, $editHwnd2)
+            Start-Sleep -Milliseconds 50
+        }
+        $okBtn2 = [PlaceCallReply]::FindButtonByAnyText($paramDlg2, @("OK", "Ok", "&OK", "Yes", "&Yes"))
+        if ($okBtn2 -ne [IntPtr]::Zero) {
+            [PlaceCallReply]::SendMessage($okBtn2, [PlaceCallReply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        }
+        Start-Sleep -Milliseconds 300
+
+        # If dialog is still there, retry with keyboard Enter
+        if ([PlaceCallReply]::IsWindowVisible($paramDlg2)) {
+            if ($editHwnd2 -ne [IntPtr]::Zero) {
+                [PlaceCallReply]::SetText($editHwnd2, $p2)
+                Start-Sleep -Milliseconds 50
+                [PlaceCallReply]::FocusControl($paramDlg2, $editHwnd2)
+                Start-Sleep -Milliseconds 50
+            }
+            [PlaceCallReply]::SetForegroundWindow($paramDlg2) | Out-Null
             Start-Sleep -Milliseconds 50
             [PlaceCallReply]::PressKey([PlaceCallReply]::VK_RETURN)
             Start-Sleep -Milliseconds 300

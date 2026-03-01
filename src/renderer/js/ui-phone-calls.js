@@ -123,6 +123,38 @@ const PhoneCallsUI = {
 
     // ── Host mode (Electron) ─────────────────────────────────────────
 
+    // Text input event delegation (for free-text prompts like platform number)
+    this.chatEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.classList.contains('chat-text-field') && this._textInputResolve) {
+        e.preventDefault();
+        const value = e.target.value.trim();
+        if (!value) return;
+        const resolve = this._textInputResolve;
+        this._textInputResolve = null;
+        this.messages = this.messages.filter((m) => m.type !== 'text-input');
+        this.renderChat();
+        resolve(value);
+      }
+    });
+    this.chatEl.addEventListener('click', (e) => {
+      // "use text" link — cancel PTT and switch to text input
+      if (e.target.closest('.use-text-link')) {
+        this._useTextInput = true;
+        return;
+      }
+      const submitBtn = e.target.closest('.chat-text-submit');
+      if (submitBtn && this._textInputResolve) {
+        const input = this.chatEl.querySelector('.chat-text-field');
+        const value = input ? input.value.trim() : '';
+        if (!value) return;
+        const resolve = this._textInputResolve;
+        this._textInputResolve = null;
+        this.messages = this.messages.filter((m) => m.type !== 'text-input');
+        this.renderChat();
+        resolve(value);
+      }
+    });
+
     this.ringingAudio = new Audio('../../sounds/ringing.wav');
     this.ringingAudio.loop = true;
 
@@ -858,9 +890,11 @@ const PhoneCallsUI = {
   waitForPTTPress() {
     return new Promise((resolve, reject) => {
       if (this._replyClicked) { reject(new Error('reply_clicked')); return; }
+      if (this._useTextInput) { reject(new Error('use_text')); return; }
       if (typeof PTTUI !== 'undefined' && PTTUI.isActive) { resolve(); return; }
       const check = () => {
         if (this._replyClicked) { reject(new Error('reply_clicked')); return; }
+        if (this._useTextInput) { reject(new Error('use_text')); return; }
         if (typeof PTTUI !== 'undefined' && PTTUI.isActive) {
           resolve();
         } else {
@@ -1949,10 +1983,22 @@ const PhoneCallsUI = {
     return 'Ok, lovely, thanks';
   },
 
-  // Check if a reply option needs a headcode parameter (e.g. "permission for train")
+  // Check if a reply option needs a headcode parameter (e.g. "permission for train", "platform alteration")
   replyNeedsHeadcode(replyText) {
-    const lower = replyText.toLowerCase();
-    return /train|permission|pass.*signal|hold.*back/i.test(lower);
+    return /train|permission|pass.*signal|hold.*back|platform|alternat/i.test(replyText);
+  },
+
+  // Check if a reply option needs a second parameter (platform number)
+  replyNeedsPlatform(replyText) {
+    return /platform|alternat/i.test(replyText);
+  },
+
+  // Show a free-text input in the chat and return a Promise that resolves with the typed value
+  promptForText(label, placeholder) {
+    return new Promise((resolve) => {
+      this._textInputResolve = resolve;
+      this.addMessage({ type: 'text-input', label, placeholder });
+    });
   },
 
   // Reverse NATO map: spoken word → single character
@@ -2013,12 +2059,23 @@ const PhoneCallsUI = {
       this.addMessage({ type: 'driver', caller: shortName, text: askMsg });
       await this.speakAsDriver(askMsg, contactName);
 
-      // Wait for user to speak the headcode
+      // Wait for user to speak the headcode (or type it)
       let gotHeadcode = false;
+      this._useTextInput = false;
       for (let attempt = 0; attempt < 3; attempt++) {
-        this.addMessage({ type: 'greeting', text: 'Hold PTT and say the headcode...' });
+        this.addMessage({ type: 'greeting', text: 'Hold PTT and say the headcode...', hasTextOption: true });
         try {
           const transcript = await this.recordAndTranscribe();
+          // Check if user clicked "use text" during PTT wait
+          if (this._useTextInput) {
+            this._useTextInput = false;
+            headCode = await this.promptForText('ENTER HEADCODE', 'e.g. 3E90');
+            if (headCode) {
+              headCode = headCode.toUpperCase();
+              gotHeadcode = /^[0-9][A-Z][0-9]{2}$/.test(headCode);
+            }
+            break;
+          }
           if (transcript) {
             headCode = this.extractHeadcode(transcript);
             this.addMessage({ type: 'signaller', text: transcript });
@@ -2040,11 +2097,21 @@ const PhoneCallsUI = {
       if (!gotHeadcode) headCode = '0000';
     }
 
+    // If reply needs a platform parameter (e.g. Platform Alteration), prompt for it
+    let param2 = '';
+    if (this.replyNeedsPlatform(replyText)) {
+      const askPlatform = 'And what is the new platform?';
+      this.addMessage({ type: 'driver', caller: shortName, text: askPlatform });
+      await this.speakAsDriver(askPlatform, contactName);
+      param2 = await this.promptForText('ENTER PLATFORM', 'e.g. 2, 3A');
+      if (!this._outgoingCall) return;
+    }
+
     // Show what we're sending
     this.addMessage({ type: 'loading', text: 'Sending...' });
 
     // Send reply to SimSig via Place Call dialog (keyboard input)
-    const result = await window.simsigAPI.phone.placeCallReply(replyIndex, headCode);
+    const result = await window.simsigAPI.phone.placeCallReply(replyIndex, headCode, param2, contactName);
     console.log('[OutgoingReply] result:', JSON.stringify(result));
 
     // Remove loading spinner
@@ -2147,8 +2214,8 @@ const PhoneCallsUI = {
     await new Promise((r) => setTimeout(r, 3000));
     for (let i = 0; i < 30; i++) {
       if (!this._dialingActive) return;
-      const status = await window.simsigAPI.phone.placeCallStatus();
-      if (status.connected) {
+      const status = await window.simsigAPI.phone.placeCallStatus(name);
+      if (status.connected && status.replies && status.replies.length > 0) {
         this.stopDialing(true);
         this.showOutgoingCallNotification(name, status.message, status.replies);
         return;
@@ -2371,11 +2438,12 @@ const PhoneCallsUI = {
     }
 
     this.chatEl.innerHTML = this.messages.filter((m) =>
-      m.type === 'driver' || m.type === 'reply-options' || m.type === 'loading' || m.type === 'greeting'
+      m.type === 'driver' || m.type === 'reply-options' || m.type === 'loading' || m.type === 'greeting' || m.type === 'text-input'
     ).map((msg) => {
       if (msg.type === 'greeting') {
+        const textLink = msg.hasTextOption ? ' <span class="use-text-link">use text</span>' : '';
         return `<div class="chat-message chat-greeting">
-          <div class="chat-message-label">SPEAK NOW</div>
+          <div class="chat-message-label">SPEAK NOW${textLink}</div>
           <div class="chat-message-text">${this.escapeHtml(msg.text)}</div>
           ${msg.time ? `<div class="chat-message-time">${this.escapeHtml(msg.time)}</div>` : ''}
         </div>`;
@@ -2457,10 +2525,23 @@ const PhoneCallsUI = {
           ${msg.time ? `<div class="chat-message-time">${this.escapeHtml(msg.time)}</div>` : ''}
         </div>`;
       }
+      if (msg.type === 'text-input') {
+        return `<div class="chat-message chat-text-input">
+          <div class="chat-message-label">${this.escapeHtml(msg.label || 'ENTER VALUE')}</div>
+          <div class="chat-input-row">
+            <input type="text" class="chat-text-field" placeholder="${this.escapeHtml(msg.placeholder || '')}" />
+            <button class="chat-text-submit">Send</button>
+          </div>
+        </div>`;
+      }
       return '';
     }).join('');
 
     this.chatEl.scrollTop = this.chatEl.scrollHeight;
+
+    // Auto-focus text input if present
+    const textField = this.chatEl.querySelector('.chat-text-field');
+    if (textField) textField.focus();
   },
 
   escapeHtml(text) {

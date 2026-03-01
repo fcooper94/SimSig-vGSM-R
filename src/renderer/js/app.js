@@ -221,8 +221,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             await new Promise((r) => setTimeout(r, 3000));
             for (let i = 0; i < 30; i++) {
               if (!PhoneCallsUI._dialingActive) return; // user cancelled
-              const status = await window.simsigAPI.phone.placeCallStatus();
-              if (status.connected) {
+              const status = await window.simsigAPI.phone.placeCallStatus(name);
+              if (status.connected && status.replies && status.replies.length > 0) {
                 row.classList.remove('dialing');
                 PhoneCallsUI.stopDialing(true);  // keep Place Call dialog open for replies
                 PhoneCallsUI.showOutgoingCallNotification(name, status.message, status.replies);

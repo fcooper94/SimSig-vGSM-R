@@ -3,6 +3,10 @@
 # Reply options may be in a TListBox (multi-option) or TComboBox (single request).
 # Outputs JSON: { "connected": true/false, "message": "...", "replies": [...] }
 
+param(
+    [string]$ContactName = ""
+)
+
 Add-Type -AssemblyName UIAutomationClient | Out-Null
 Add-Type -AssemblyName UIAutomationTypes | Out-Null
 
@@ -86,26 +90,35 @@ try {
         [PlaceCallReader]::HideOffScreen($dialogHwnd)
     }
 
-    $replyKeywords = "^(Request|Message|Send|Cancel|Pass|Hold|Block|Continue|Ask|Authoris|Please)"
     $replyItems = @()
     $replyControlType = ""  # "listbox" or "combo"
 
-    # 1) Check TListBox controls first — reply options are typically in a listbox
-    $listCond = New-Object System.Windows.Automation.PropertyCondition(
+    # Check if connected by looking for TMemo (the message area that appears once the call connects)
+    $memoCond = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-        "TListBox"
+        "TMemo"
     )
-    $allLists = $dialog.FindAll(
+    $memoCheck = $dialog.FindFirst(
         [System.Windows.Automation.TreeScope]::Descendants,
-        $listCond
+        $memoCond
     )
-    foreach ($lb in $allLists) {
-        $hw = [IntPtr]$lb.Current.NativeWindowHandle
-        if ($hw -eq [IntPtr]::Zero) { continue }
-        $cnt = [PlaceCallReader]::GetListBoxCount($hw)
-        if ($cnt -gt 0) {
-            $firstItem = [PlaceCallReader]::GetListBoxText($hw, 0)
-            if ($firstItem -match $replyKeywords) {
+    $isConnected = ($null -ne $memoCheck)
+
+    if ($isConnected) {
+        # Look for reply options in TListBox first
+        $listCond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+            "TListBox"
+        )
+        $allLists = $dialog.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $listCond
+        )
+        foreach ($lb in $allLists) {
+            $hw = [IntPtr]$lb.Current.NativeWindowHandle
+            if ($hw -eq [IntPtr]::Zero) { continue }
+            $cnt = [PlaceCallReader]::GetListBoxCount($hw)
+            if ($cnt -gt 0) {
                 $replyControlType = "listbox"
                 for ($i = 0; $i -lt $cnt; $i++) {
                     $text = [PlaceCallReader]::GetListBoxText($hw, $i)
@@ -114,107 +127,56 @@ try {
                 break
             }
         }
-    }
 
-    # 2) If no listbox match, check TComboBox controls (single-request style like "Please block...")
-    if ($replyItems.Count -eq 0) {
-        $comboCond = New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-            "TComboBox"
-        )
-        $allCombos = $dialog.FindAll(
-            [System.Windows.Automation.TreeScope]::Descendants,
-            $comboCond
-        )
-        foreach ($combo in $allCombos) {
-            $hw = [IntPtr]$combo.Current.NativeWindowHandle
-            if ($hw -eq [IntPtr]::Zero) { continue }
-            $cnt = [PlaceCallReader]::GetComboCount($hw)
-            if ($cnt -gt 0) {
-                $firstItem = [PlaceCallReader]::GetComboText($hw, 0)
-                if ($firstItem -match $replyKeywords) {
-                    $replyControlType = "combo"
+        # If no listbox replies, check TComboBox controls
+        # Skip the contacts combo by checking if it contains the contact we dialed.
+        if ($replyItems.Count -eq 0) {
+            $comboCond = New-Object System.Windows.Automation.PropertyCondition(
+                [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+                "TComboBox"
+            )
+            $allCombos = $dialog.FindAll(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                $comboCond
+            )
+            foreach ($combo in $allCombos) {
+                $hw = [IntPtr]$combo.Current.NativeWindowHandle
+                if ($hw -eq [IntPtr]::Zero) { continue }
+                $cnt = [PlaceCallReader]::GetComboCount($hw)
+                if ($cnt -le 0) { continue }
+
+                # If we know who we called, skip the combo that contains that name
+                $isContactsCombo = $false
+                if ($ContactName) {
                     for ($i = 0; $i -lt $cnt; $i++) {
                         $text = [PlaceCallReader]::GetComboText($hw, $i)
-                        if ($text) { $replyItems += $text }
+                        if ($text -eq $ContactName) {
+                            $isContactsCombo = $true
+                            break
+                        }
                     }
-                    break
                 }
+                if ($isContactsCombo) { continue }
+
+                $replyControlType = "combo"
+                for ($i = 0; $i -lt $cnt; $i++) {
+                    $text = [PlaceCallReader]::GetComboText($hw, $i)
+                    if ($text) { $replyItems += $text }
+                }
+                break
             }
         }
     }
 
-    # Connected = reply items found (in either listbox or combo)
-    if ($replyItems.Count -eq 0) {
-        # Not connected yet — dump debug info about all controls
-        $debugParts = @()
-
-        # Combos
-        $comboCond2 = New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-            "TComboBox"
-        )
-        $allCombos2 = $dialog.FindAll(
-            [System.Windows.Automation.TreeScope]::Descendants,
-            $comboCond2
-        )
-        $debugParts += "combos=$($allCombos2.Count)"
-        $ci = 0
-        foreach ($combo in $allCombos2) {
-            $hw = [IntPtr]$combo.Current.NativeWindowHandle
-            if ($hw -eq [IntPtr]::Zero) { $ci++; continue }
-            $cnt = [PlaceCallReader]::GetComboCount($hw)
-            $first = ""
-            if ($cnt -gt 0) { $first = [PlaceCallReader]::GetComboText($hw, 0) }
-            $debugParts += "c${ci}=${cnt}items"
-            if ($first) { $debugParts += "c${ci}first=$first" }
-            $ci++
-        }
-
-        # Listboxes
-        $debugParts += "listboxes=$($allLists.Count)"
-        $li = 0
-        foreach ($lb in $allLists) {
-            $hw = [IntPtr]$lb.Current.NativeWindowHandle
-            if ($hw -eq [IntPtr]::Zero) { $li++; continue }
-            $cnt = [PlaceCallReader]::GetListBoxCount($hw)
-            $first = ""
-            if ($cnt -gt 0) { $first = [PlaceCallReader]::GetListBoxText($hw, 0) }
-            $debugParts += "lb${li}=${cnt}items"
-            if ($first) { $debugParts += "lb${li}first=$first" }
-            $li++
-        }
-
-        # Buttons
-        $btnCond = New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-            "TButton"
-        )
-        $allBtns = $dialog.FindAll(
-            [System.Windows.Automation.TreeScope]::Descendants,
-            $btnCond
-        )
-        $btnNames = @()
-        foreach ($btn in $allBtns) { $btnNames += $btn.Current.Name }
-        $debugParts += "btns=$($btnNames -join '|')"
-
-        $debugStr = ($debugParts -join "; ") -replace '"', "'" -replace "`n", " " -replace "`r", ""
-        Write-Output "{`"connected`":false,`"debug`":`"$debugStr`"}"
+    if (-not $isConnected) {
+        Write-Output '{"connected":false,"debug":"no TMemo — still ringing"}'
         exit 0
     }
 
     # Connected — read TMemo message text
     $messageText = ""
-    $memoCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-        "TMemo"
-    )
-    $memo = $dialog.FindFirst(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $memoCond
-    )
-    if ($null -ne $memo) {
-        $messageText = ($memo.Current.Name).Trim()
+    if ($null -ne $memoCheck) {
+        $messageText = ($memoCheck.Current.Name).Trim()
     }
 
     # Build JSON manually to guarantee replies is always a JSON array
