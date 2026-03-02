@@ -1,8 +1,9 @@
 const { execFile } = require('child_process');
 const path = require('path');
 
-const SCRIPT_PATH = path.join(__dirname, 'read-phone-calls.ps1');
-const OPEN_TELEPHONE_SCRIPT = path.join(__dirname, 'open-telephone-window.ps1');
+const SCRIPTS_DIR = __dirname.replace('app.asar', 'app.asar.unpacked');
+const SCRIPT_PATH = path.join(SCRIPTS_DIR, 'read-phone-calls.ps1');
+const OPEN_TELEPHONE_SCRIPT = path.join(SCRIPTS_DIR, 'open-telephone-window.ps1');
 
 class PhoneReader {
   constructor(onChange, onSimName, onSimSigClosed, onPauseChange, onAnswerDialogClosed) {

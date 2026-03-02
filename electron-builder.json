@@ -11,6 +11,9 @@
     "sounds/**/*",
     "package.json"
   ],
+  "asarUnpack": [
+    "src/main/*.ps1"
+  ],
   "publish": {
     "provider": "github",
     "owner": "fcooper94",

@@ -7,16 +7,17 @@ const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 const StompConnectionManager = require('./stomp-client');
 const PhoneReader = require('./phone-reader');
 
-const ANSWER_SCRIPT = require('path').join(__dirname, 'answer-phone-call.ps1');
-const REPLY_SCRIPT = require('path').join(__dirname, 'reply-phone-call.ps1');
-const RECOGNIZE_SCRIPT = require('path').join(__dirname, 'speech-recognize.ps1');
-const TOGGLE_PAUSE_SCRIPT = require('path').join(__dirname, 'toggle-pause.ps1');
-const READ_PHONE_BOOK_SCRIPT = require('path').join(__dirname, 'read-phone-book.ps1');
-const DIAL_PHONE_BOOK_SCRIPT = require('path').join(__dirname, 'dial-phone-book.ps1');
-const READ_PLACE_CALL_SCRIPT = require('path').join(__dirname, 'read-place-call.ps1');
-const REPLY_PLACE_CALL_SCRIPT = require('path').join(__dirname, 'reply-place-call.ps1');
-const HANGUP_PLACE_CALL_SCRIPT = require('path').join(__dirname, 'hangup-place-call.ps1');
-const HIDE_ANSWER_SCRIPT = require('path').join(__dirname, 'hide-answer-dialog.ps1');
+const SCRIPTS_DIR = __dirname.replace('app.asar', 'app.asar.unpacked');
+const ANSWER_SCRIPT = require('path').join(SCRIPTS_DIR, 'answer-phone-call.ps1');
+const REPLY_SCRIPT = require('path').join(SCRIPTS_DIR, 'reply-phone-call.ps1');
+const RECOGNIZE_SCRIPT = require('path').join(SCRIPTS_DIR, 'speech-recognize.ps1');
+const TOGGLE_PAUSE_SCRIPT = require('path').join(SCRIPTS_DIR, 'toggle-pause.ps1');
+const READ_PHONE_BOOK_SCRIPT = require('path').join(SCRIPTS_DIR, 'read-phone-book.ps1');
+const DIAL_PHONE_BOOK_SCRIPT = require('path').join(SCRIPTS_DIR, 'dial-phone-book.ps1');
+const READ_PLACE_CALL_SCRIPT = require('path').join(SCRIPTS_DIR, 'read-place-call.ps1');
+const REPLY_PLACE_CALL_SCRIPT = require('path').join(SCRIPTS_DIR, 'reply-place-call.ps1');
+const HANGUP_PLACE_CALL_SCRIPT = require('path').join(SCRIPTS_DIR, 'hangup-place-call.ps1');
+const HIDE_ANSWER_SCRIPT = require('path').join(SCRIPTS_DIR, 'hide-answer-dialog.ps1');
 
 const globalPtt = require('./global-ptt');
 

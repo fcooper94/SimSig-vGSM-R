@@ -347,7 +347,7 @@ function restoreTelephoneWindow() {
   if (restoreDone) return;
   restoreDone = true;
   const { exec } = require('child_process');
-  const restoreScript = path.join(__dirname, 'restore-telephone.ps1');
+  const restoreScript = path.join(__dirname.replace('app.asar', 'app.asar.unpacked'), 'restore-telephone.ps1');
   const cmd = `start "" /B powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${restoreScript}"`;
   exec(cmd, { windowsHide: true });
   console.log('[Quit] Launched restore script');
