@@ -854,6 +854,26 @@ body.disconnected #bottom-bar {
 body.disconnected #bottom-bar #settings-toolbar-btn {
   pointer-events: auto;
   opacity: 1;
+  background: #1a6fb5;
+  color: #ffffff;
+  border-color: #2a8fd8 #0d4a7a #0d4a7a #2a8fd8;
+}
+
+body.disconnected #bottom-bar #settings-toolbar-btn .toolbar-icon {
+  color: #ffffff;
+}
+
+body.disconnected #bottom-bar #settings-toolbar-btn:hover {
+  background: #2080c8;
+}
+
+body.disconnected.dark-mode #bottom-bar #settings-toolbar-btn {
+  background: #1a6fb5;
+  color: #ffffff;
+}
+
+body.disconnected.dark-mode #bottom-bar #settings-toolbar-btn:hover {
+  background: #2080c8;
 }
 
 /* Compact mode: disable functional buttons when disconnected */

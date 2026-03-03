@@ -21,10 +21,7 @@
     "repo": "SimSig-vGSM-R"
   },
   "win": {
-    "target": [
-      "nsis",
-      "zip"
-    ],
+    "target": "nsis",
     "icon": "images/icon.png",
     "requestedExecutionLevel": "asInvoker"
   },

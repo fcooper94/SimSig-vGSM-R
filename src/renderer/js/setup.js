@@ -149,6 +149,15 @@ const SetupWizard = {
   validateCurrentStep() {
     const stepId = this.steps[this.currentStep].id;
 
+    if (stepId === 'tts') {
+      const selected = this.container.querySelector('.provider-option.selected');
+      const provider = selected ? selected.dataset.provider : 'edge';
+      if (provider === 'elevenlabs' && !this.val('setup-api-key')) {
+        this.showApiKeyWarning();
+        return false;
+      }
+    }
+
     if (stepId === 'browser') {
       const checkbox = document.getElementById('setup-web-enabled');
       if (checkbox && checkbox.checked) {
@@ -298,6 +307,50 @@ const SetupWizard = {
     link.addEventListener('click', (e) => {
       e.stopPropagation(); // Don't trigger provider selection
       this.showElevenLabsModal();
+    });
+  },
+
+  showApiKeyWarning() {
+    const overlay = document.createElement('div');
+    overlay.className = 'setup-modal-overlay';
+    overlay.innerHTML = `
+      <div class="setup-modal" style="text-align:center">
+        <div class="modal-title">API Key Required</div>
+        <div class="modal-subtitle">
+          ElevenLabs requires an API key to work.<br>
+          Enter one now, or add it later.
+        </div>
+        <div class="btn-row center" style="gap:10px;margin-top:20px">
+          <button class="btn-primary" id="apikey-warn-enter">Enter Now</button>
+          <button class="btn-secondary" id="apikey-warn-later">Add Later</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => overlay.classList.add('visible'));
+    });
+
+    const close = () => {
+      overlay.classList.remove('visible');
+      setTimeout(() => overlay.remove(), 200);
+    };
+
+    overlay.querySelector('#apikey-warn-enter').addEventListener('click', () => {
+      close();
+      const input = document.getElementById('setup-api-key');
+      if (input) input.focus();
+    });
+
+    overlay.querySelector('#apikey-warn-later').addEventListener('click', () => {
+      close();
+      // Fall back to Edge TTS and proceed
+      const edgeOption = this.container.querySelector('.provider-option[data-provider="edge"]');
+      if (edgeOption) edgeOption.click();
+      this.collectedSettings.ttsProvider = 'edge';
+      this.collectedSettings.elevenLabsApiKey = '';
+      this.nextStep();
     });
   },
 
