@@ -420,7 +420,7 @@ const SetupWizard = {
           New settings may have been added. Would you like to review your settings,
           or keep your current configuration?
         </p>
-        <div class="btn-row center" style="flex-direction:column;gap:10px">
+        <div class="btn-row center stacked">
           <button class="btn-primary large" data-action="keep">Keep Settings</button>
           <button class="btn-ghost" data-action="review">Review Settings</button>
         </div>
@@ -618,7 +618,7 @@ const SetupWizard = {
             <span class="summary-value">${s.webEnabled ? 'Port ' + (s.webPort || '3000') : 'Disabled'}</span>
           </li>
         </ul>
-        <div class="btn-row center" style="flex-direction:column;gap:8px">
+        <div class="btn-row center stacked">
           <button class="btn-primary large" data-action="finish">Launch vGSM-R</button>
           <button class="btn-ghost" data-action="edit" data-step="2">Go back and edit</button>
         </div>

@@ -573,6 +573,12 @@ input, select, button, label, a {
   justify-content: center;
 }
 
+.btn-row.stacked {
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
 .btn-primary {
   padding: 10px 28px;
   background: var(--setup-accent);
