@@ -3,6 +3,9 @@ const path = require('path');
 const webServer = require('./web-server');
 const channels = require('../shared/ipc-channels');
 
+// Disable GPU hardware acceleration to prevent crashes on some systems
+app.disableHardwareAcceleration();
+
 let mainWindow = null;
 let msgLogWindow = null;
 let setupWindow = null;
