@@ -12,7 +12,8 @@
     "package.json"
   ],
   "asarUnpack": [
-    "src/main/*.ps1"
+    "src/main/*.ps1",
+    "node_modules/uiohook-napi/**/*"
   ],
   "publish": {
     "provider": "github",
@@ -20,13 +21,16 @@
     "repo": "SimSig-vGSM-R"
   },
   "win": {
-    "target": "nsis",
+    "target": [
+      "nsis",
+      "zip"
+    ],
     "icon": "images/icon.png",
-    "requestedExecutionLevel": "requireAdministrator"
+    "requestedExecutionLevel": "asInvoker"
   },
   "nsis": {
     "oneClick": false,
-    "perMachine": true,
+    "perMachine": false,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
     "shortcutName": "vGSM-R",
