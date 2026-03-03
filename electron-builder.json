@@ -25,14 +25,11 @@
     "requestedExecutionLevel": "asInvoker"
   },
   "nsis": {
-    "oneClick": false,
+    "oneClick": true,
     "perMachine": false,
-    "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
     "shortcutName": "vGSM-R",
-    "artifactName": "vGSM-R-Setup-${version}.${ext}",
-    "installerSidebar": "build/installerSidebar.bmp",
-    "uninstallerSidebar": "build/installerSidebar.bmp"
+    "artifactName": "vGSM-R-Setup-${version}.${ext}"
   }
 }
