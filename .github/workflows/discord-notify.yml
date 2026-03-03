@@ -1,0 +1,57 @@
+name: Discord - Push Notifications
+
+on:
+  push:
+    branches:
+      - "**"          # all branches
+    # If you want to ignore some branches, uncomment and edit:
+    # branches-ignore:
+    #   - "dependabot/**"
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post push to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMIT_URL: ${{ github.event.head_commit.url }}
+          SHA: ${{ github.sha }}
+          SERVER_URL: ${{ github.server_url }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "Missing DISCORD_WEBHOOK_URL secret"
+            exit 1
+          fi
+
+          SHORT_SHA="$(echo "$SHA" | cut -c1-7)"
+          REPO_URL="$SERVER_URL/$REPO"
+          BRANCH_URL="$REPO_URL/tree/$REF"
+
+          # Escape quotes/newlines for JSON
+          ESC_COMMIT_MSG="$(printf "%s" "$COMMIT_MSG" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read())[1:-1])')"
+
+          cat > payload.json <<EOF
+          {
+            "username": "vEFPS Source Control",
+            "embeds": [
+              {
+                "title": "Push to ${REPO}:${REF}",
+                "url": "${BRANCH_URL}",
+                "description": "• ${ESC_COMMIT_MSG}",
+                "fields": [
+                  { "name": "Author", "value": "${ACTOR}", "inline": true },
+                  { "name": "Commit", "value": "[${SHORT_SHA}](${COMMIT_URL})", "inline": true }
+                ]
+              }
+            ]
+          }
+          EOF
+
+          curl -sS -H "Content-Type: application/json" \
+            -d @payload.json \
+            "$DISCORD_WEBHOOK_URL"
