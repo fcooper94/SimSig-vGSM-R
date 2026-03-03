@@ -22,11 +22,11 @@
   "win": {
     "target": "nsis",
     "icon": "images/icon.png",
-    "requestedExecutionLevel": "asInvoker"
+    "requestedExecutionLevel": "requireAdministrator"
   },
   "nsis": {
     "oneClick": false,
-    "perMachine": false,
+    "perMachine": true,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
     "shortcutName": "vGSM-R",
