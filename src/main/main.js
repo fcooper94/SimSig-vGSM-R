@@ -102,8 +102,8 @@ function createSetupWindow(updateMode = false) {
   });
 
   setupWindow.setMenu(null);
-  const setupFile = path.join(__dirname, '../renderer/setup.html').replace(/\\/g, '/');
-  setupWindow.loadURL(`file:///${setupFile}${updateMode ? '?mode=update' : ''}`);
+  const setupPath = path.join(__dirname, '../renderer/setup.html');
+  setupWindow.loadFile(setupPath, updateMode ? { query: { mode: 'update' } } : {});
 
   if (process.argv.includes('--dev')) {
     setupWindow.webContents.openDevTools();
