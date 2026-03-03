@@ -9,10 +9,6 @@ let setupWindow = null;
 let splashWindow = null;
 
 function createWindow() {
-  // Position main window over splash for seamless transition
-  const splashBounds = splashWindow && !splashWindow.isDestroyed()
-    ? splashWindow.getBounds() : null;
-
   mainWindow = new BrowserWindow({
     width: 896,
     height: 626,
@@ -22,8 +18,6 @@ function createWindow() {
     title: 'SimSig VGSM-R',
     icon: path.join(__dirname, '../../images/icon.png'),
     backgroundColor: '#505050',
-    show: false,
-    ...(splashBounds ? { x: splashBounds.x, y: splashBounds.y } : {}),
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
@@ -35,12 +29,6 @@ function createWindow() {
   mainWindow.setAlwaysOnTop(true, 'floating');
   mainWindow.setMenu(null);
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
-
-  // Show main window and close splash once content is ready
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
-    closeSplash();
-  });
 
   if (process.argv.includes('--dev')) {
     mainWindow.webContents.openDevTools();
@@ -267,21 +255,14 @@ app.whenReady().then(async () => {
   const initElapsed = Date.now() - initStart;
   if (initElapsed < 1500) await delay(1500 - initElapsed);
 
-  // Create app window — splash is closed once main window is ready-to-show
-  const currentVersion = app.getVersion();
-  const lastVersion = settings.get('lastVersion');
-  const isUpgrade = settings.get('setupComplete') === true
-    && lastVersion !== null && lastVersion !== currentVersion;
+  // Close splash and open the appropriate window
+  closeSplash();
 
   if (settings.get('setupComplete') === false) {
     createSetupWindow();
-    closeSplash();
-  } else if (isUpgrade) {
-    createSetupWindow(true);
-    closeSplash();
   } else {
-    settings.set('lastVersion', currentVersion);
-    createWindow(); // closeSplash() called inside via ready-to-show
+    settings.set('lastVersion', app.getVersion());
+    createWindow();
   }
 
   // Setup wizard completion handler
@@ -290,7 +271,6 @@ app.whenReady().then(async () => {
       settings.set(key, value);
     }
     settings.set('setupComplete', true);
-    settings.set('lastVersion', app.getVersion());
 
     // Close setup window and open main window
     createWindow();
@@ -302,15 +282,6 @@ app.whenReady().then(async () => {
     const webCfg = settings.get('web') || {};
     if (webCfg.enabled) {
       startWebServer(webCfg.port || 3000);
-    }
-  });
-
-  // Keep existing settings on upgrade — just stamp version and launch
-  ipcMain.handle('setup:keep-settings', async () => {
-    settings.set('lastVersion', app.getVersion());
-    createWindow();
-    if (setupWindow) {
-      setupWindow.close();
     }
   });
 
