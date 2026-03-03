@@ -277,22 +277,8 @@ app.whenReady().then(async () => {
     createSetupWindow();
     closeSplash();
   } else if (isUpgrade) {
-    const { response } = await dialog.showMessageBox(splashWindow, {
-      type: 'question',
-      title: 'vGSM-R Updated',
-      message: `vGSM-R has been updated to v${currentVersion}`,
-      detail: 'Would you like to review your settings, or keep your current settings?',
-      buttons: ['Keep Settings', 'Review Settings'],
-      defaultId: 0,
-      cancelId: 0,
-    });
+    createSetupWindow(true);
     closeSplash();
-    if (response === 1) {
-      createSetupWindow(true);
-    } else {
-      settings.set('lastVersion', currentVersion);
-      createWindow();
-    }
   } else {
     settings.set('lastVersion', currentVersion);
     createWindow(); // closeSplash() called inside via ready-to-show
@@ -316,6 +302,15 @@ app.whenReady().then(async () => {
     const webCfg = settings.get('web') || {};
     if (webCfg.enabled) {
       startWebServer(webCfg.port || 3000);
+    }
+  });
+
+  // Keep existing settings on upgrade — just stamp version and launch
+  ipcMain.handle('setup:keep-settings', async () => {
+    settings.set('lastVersion', app.getVersion());
+    createWindow();
+    if (setupWindow) {
+      setupWindow.close();
     }
   });
 

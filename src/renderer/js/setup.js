@@ -41,9 +41,7 @@ const SetupWizard = {
       this.dotsEl.appendChild(dot);
     });
 
-    const startStep = this.updateMode ? 2 : 0;
-    this.currentStep = startStep;
-    this.renderStep(startStep);
+    this.renderStep(0);
     this.updateProgress();
   },
 
@@ -107,6 +105,7 @@ const SetupWizard = {
 
   prevStep() {
     const minStep = this.updateMode ? 2 : 0;
+    if (this.currentStep <= minStep) return;
     if (this.currentStep > minStep) {
       this.direction = 'backward';
       this.currentStep--;
@@ -201,6 +200,12 @@ const SetupWizard = {
     });
     this.container.querySelectorAll('[data-action="edit"]').forEach((btn) => {
       btn.addEventListener('click', () => this.goToStep(parseInt(btn.dataset.step, 10)));
+    });
+    this.container.querySelectorAll('[data-action="keep"]').forEach((btn) => {
+      btn.addEventListener('click', () => window.setupAPI.keepSettings());
+    });
+    this.container.querySelectorAll('[data-action="review"]').forEach((btn) => {
+      btn.addEventListener('click', () => this.goToStep(2));
     });
 
     // Step-specific bindings
@@ -354,6 +359,20 @@ const SetupWizard = {
   // === Step Renderers ===
 
   render_welcome() {
+    if (this.updateMode) {
+      return `
+        <img src="../../images/branding.png" class="setup-banner" alt="vGSM-R">
+        <p class="welcome-tagline">vGSM-R has been updated</p>
+        <p class="welcome-description">
+          New settings may have been added. Would you like to review your settings,
+          or keep your current configuration?
+        </p>
+        <div class="btn-row center" style="flex-direction:column;gap:10px">
+          <button class="btn-primary large" data-action="keep">Keep Settings</button>
+          <button class="btn-ghost" data-action="review">Review Settings</button>
+        </div>
+      `;
+    }
     return `
       <img src="../../images/branding.png" class="setup-banner" alt="vGSM-R">
       <p class="welcome-tagline">Virtual Railway Communication for SimSig</p>
