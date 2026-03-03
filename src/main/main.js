@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow } = require('electron');
 const path = require('path');
 
 let mainWindow = null;
@@ -31,12 +31,11 @@ function createWindow() {
   });
 }
 
-function createSplashWindow() {
+app.whenReady().then(async () => {
+  // Show a splash-style window, wait 3 seconds, close it, open main window
   splashWindow = new BrowserWindow({
     width: 896,
     height: 626,
-    minWidth: 525,
-    minHeight: 300,
     resizable: false,
     frame: false,
     center: true,
@@ -55,55 +54,16 @@ function createSplashWindow() {
   splashWindow.loadFile(path.join(__dirname, '../renderer/update.html'));
   splashWindow.once('ready-to-show', () => splashWindow.show());
 
-  splashWindow.on('closed', () => {
-    splashWindow = null;
-  });
-}
+  // Wait 3 seconds then switch to main window
+  await new Promise((r) => setTimeout(r, 3000));
 
-function sendSplashStatus(message, detail) {
-  if (splashWindow && !splashWindow.isDestroyed()) {
-    splashWindow.webContents.send('update:status', { message, detail });
-  }
-}
+  splashWindow.close();
+  splashWindow = null;
 
-function closeSplash() {
-  if (splashWindow && !splashWindow.isDestroyed()) {
-    splashWindow.close();
-  }
-}
-
-app.whenReady().then(async () => {
-  createSplashWindow();
-
-  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-
-  // Phase 1: Checking for updates
-  sendSplashStatus('checking');
-  const updateStart = Date.now();
-  const { checkForUpdates } = require('./updater');
-  await checkForUpdates({
-    onStatus: (message, detail) => sendSplashStatus('checking', detail),
-    onProgress: () => {},
-  });
-  const elapsed = Date.now() - updateStart;
-  if (elapsed < 1500) await delay(1500 - elapsed);
-
-  // Phase 2: Initialising (settings only, NO IPC handlers / native modules)
-  sendSplashStatus('initialising');
-  const initStart = Date.now();
-
-  const { initSettings } = require('./settings');
-  const settings = require('./settings');
-  initSettings();
-
-  const initElapsed = Date.now() - initStart;
-  if (initElapsed < 1500) await delay(1500 - initElapsed);
-
-  // Close splash and open main window
-  closeSplash();
   createWindow();
 });
 
 app.on('window-all-closed', () => {
+  if (splashWindow) return;
   app.quit();
 });
