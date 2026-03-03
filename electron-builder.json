@@ -22,7 +22,7 @@
   "win": {
     "target": "nsis",
     "icon": "images/icon.png",
-    "requestedExecutionLevel": "requireAdministrator"
+    "requestedExecutionLevel": "asInvoker"
   },
   "nsis": {
     "oneClick": false,

@@ -20,6 +20,7 @@ module.exports = {
 
   DEFAULT_SETTINGS: {
     setupComplete: false,
+    lastVersion: null,
     gateway: {
       host: 'localhost',
       port: 51515,

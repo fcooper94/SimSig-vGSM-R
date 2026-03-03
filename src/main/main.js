@@ -86,7 +86,7 @@ function createWindow() {
   });
 }
 
-function createSetupWindow() {
+function createSetupWindow(updateMode = false) {
   setupWindow = new BrowserWindow({
     width: 750,
     height: 600,
@@ -102,7 +102,8 @@ function createSetupWindow() {
   });
 
   setupWindow.setMenu(null);
-  setupWindow.loadFile(path.join(__dirname, '../renderer/setup.html'));
+  const setupFile = path.join(__dirname, '../renderer/setup.html').replace(/\\/g, '/');
+  setupWindow.loadURL(`file:///${setupFile}${updateMode ? '?mode=update' : ''}`);
 
   if (process.argv.includes('--dev')) {
     setupWindow.webContents.openDevTools();
@@ -267,10 +268,33 @@ app.whenReady().then(async () => {
   if (initElapsed < 1500) await delay(1500 - initElapsed);
 
   // Create app window — splash is closed once main window is ready-to-show
+  const currentVersion = app.getVersion();
+  const lastVersion = settings.get('lastVersion');
+  const isUpgrade = settings.get('setupComplete') === true
+    && lastVersion !== null && lastVersion !== currentVersion;
+
   if (settings.get('setupComplete') === false) {
     createSetupWindow();
     closeSplash();
+  } else if (isUpgrade) {
+    const { response } = await dialog.showMessageBox(splashWindow, {
+      type: 'question',
+      title: 'vGSM-R Updated',
+      message: `vGSM-R has been updated to v${currentVersion}`,
+      detail: 'Would you like to review your settings, or keep your current settings?',
+      buttons: ['Keep Settings', 'Review Settings'],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    closeSplash();
+    if (response === 1) {
+      createSetupWindow(true);
+    } else {
+      settings.set('lastVersion', currentVersion);
+      createWindow();
+    }
   } else {
+    settings.set('lastVersion', currentVersion);
     createWindow(); // closeSplash() called inside via ready-to-show
   }
 
@@ -280,6 +304,7 @@ app.whenReady().then(async () => {
       settings.set(key, value);
     }
     settings.set('setupComplete', true);
+    settings.set('lastVersion', app.getVersion());
 
     // Close setup window and open main window
     createWindow();

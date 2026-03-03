@@ -12,10 +12,26 @@ const SetupWizard = {
     { id: 'complete', title: 'Complete' },
   ],
 
-  init() {
+  async init() {
     this.container = document.getElementById('step-container');
     this.dotsEl = document.getElementById('step-dots');
     this.progressFill = document.getElementById('progress-fill');
+
+    // Detect update mode from query string
+    const params = new URLSearchParams(window.location.search);
+    this.updateMode = params.get('mode') === 'update';
+
+    if (this.updateMode) {
+      const all = await window.setupAPI.settings.getAll();
+      this.collectedSettings = {
+        username: all.credentials?.username || '',
+        password: all.credentials?.password || '',
+        ttsProvider: all.tts?.provider || 'edge',
+        elevenLabsApiKey: all.tts?.elevenLabsApiKey || '',
+        webEnabled: all.web?.enabled || false,
+        webPort: String(all.web?.port || '3000'),
+      };
+    }
 
     // Build step dots
     this.steps.forEach((_, i) => {
@@ -25,7 +41,9 @@ const SetupWizard = {
       this.dotsEl.appendChild(dot);
     });
 
-    this.renderStep(0);
+    const startStep = this.updateMode ? 2 : 0;
+    this.currentStep = startStep;
+    this.renderStep(startStep);
     this.updateProgress();
   },
 
@@ -88,7 +106,8 @@ const SetupWizard = {
   },
 
   prevStep() {
-    if (this.currentStep > 0) {
+    const minStep = this.updateMode ? 2 : 0;
+    if (this.currentStep > minStep) {
       this.direction = 'backward';
       this.currentStep--;
       this.renderStep(this.currentStep);
@@ -505,10 +524,14 @@ const SetupWizard = {
   render_complete() {
     const s = this.collectedSettings;
     const providerNames = { edge: 'Edge TTS', elevenlabs: 'ElevenLabs', windows: 'Windows TTS' };
+    const title = this.updateMode ? 'Settings Reviewed' : 'Setup Complete';
+    const subtitle = this.updateMode
+      ? 'Here\'s a summary of your updated configuration.'
+      : 'Here\'s a summary of your configuration.';
     return `
         <img src="../../images/branding.png" class="setup-banner" style="max-width:200px" alt="vGSM-R">
-        <div class="step-title" style="text-align:center">Setup Complete</div>
-        <div class="step-subtitle" style="text-align:center">Here's a summary of your configuration.</div>
+        <div class="step-title" style="text-align:center">${title}</div>
+        <div class="step-subtitle" style="text-align:center">${subtitle}</div>
         <ul class="summary-list">
           <li>
             <span class="summary-label">SimSig Account</span>

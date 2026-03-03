@@ -28,7 +28,7 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
       console.log('[Updater] Update check timed out, proceeding');
       cleanup();
       resolve();
-    }, 30000);
+    }, 10000);
 
     function cleanup() {
       clearTimeout(timeout);
