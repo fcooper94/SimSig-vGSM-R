@@ -1,7 +1,8 @@
-﻿SimSig hwnd: 1115576  PID: 32792
+﻿SimSig hwnd: 722756  PID: 62692
 Monitor: (0,0)-(1463,866)
 Restore target: (532, 283)
-Found 3 off-screen SimSig window(s)
+Found 4 off-screen SimSig window(s)
 Restored [TAnswerCallForm] on-screen at (532, 283)
 Restored [TDialForm] 'Place Call' at (562, 313)
-Restored [TTelephoneForm] 'Telephone Calls' at (592, 343)
+Restored [TApplication] 'Three Bridges ASC SimSig' at (592, 343)
+Restored [TTelephoneForm] 'Telephone Calls' at (622, 373)

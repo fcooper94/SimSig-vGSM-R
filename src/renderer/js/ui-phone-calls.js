@@ -303,8 +303,9 @@ const PhoneCallsUI = {
     this.bgYardBuffer = null;
     this.bgStationBuffer = null;
     this.bgTrainRunningBuffer = null;
+    this.bgTracksideBuffer = null;
     this.bgSource = null;
-    this.bgCallerType = 'train'; // 'train' | 'signaller' | 'yard' | 'station' | 'trainrunning'
+    this.bgCallerType = 'train'; // 'train' | 'signaller' | 'yard' | 'station' | 'trainrunning' | 'trackside'
     this.bgGain = this.bgCtx.createGain();
     this.bgGain.connect(this.bgCtx.destination);
     this.bgGain.gain.value = 0.5;
@@ -331,6 +332,11 @@ const PhoneCallsUI = {
       .then((r) => r.arrayBuffer())
       .then((buf) => this.bgCtx.decodeAudioData(buf))
       .then((buffer) => { this._crossfadeBuffer(buffer); this.bgTrainRunningBuffer = buffer; })
+      .catch(() => {});
+    fetch('../../sounds/trackside-background.wav')
+      .then((r) => r.arrayBuffer())
+      .then((buf) => this.bgCtx.decodeAudioData(buf))
+      .then((buffer) => { this._crossfadeBuffer(buffer); this.bgTracksideBuffer = buffer; })
       .catch(() => {});
 
     // Pre-warm local voices as fallback
@@ -498,9 +504,14 @@ const PhoneCallsUI = {
     });
   },
 
+  // Words that should be spoken as words, not spelled out as acronyms
+  TTS_WORDS: { 'MOM': 'Mom' },
+
   phoneticize(text) {
     text = this.naturalizeTimes(text);
     return text.replace(/\b[A-Z0-9]{2,}\b/gi, (match) => {
+      // Check exception list — words that TTS should say as words
+      if (this.TTS_WORDS[match.toUpperCase()]) return this.TTS_WORDS[match.toUpperCase()];
       const hasLetter = /[A-Za-z]/.test(match);
       const hasDigit = /\d/.test(match);
       // Mixed alphanumeric — always phoneticize (headcodes, signal IDs)
@@ -566,6 +577,8 @@ const PhoneCallsUI = {
       buffer = this.bgStationBuffer;
     } else if (this.bgCallerType === 'trainrunning' && this.bgTrainRunningBuffer) {
       buffer = this.bgTrainRunningBuffer;
+    } else if (this.bgCallerType === 'trackside' && this.bgTracksideBuffer) {
+      buffer = this.bgTracksideBuffer;
     } else if (this.bgCallerType === 'signaller' && this.bgSignallerBuffer) {
       buffer = this.bgSignallerBuffer;
     } else if (this.bgBuffers.length) {
@@ -576,7 +589,7 @@ const PhoneCallsUI = {
     }
     if (this.bgSource) { try { this.bgSource.stop(); } catch {} }
     this.bgGain.gain.cancelScheduledValues(this.bgCtx.currentTime);
-    this.bgGain.gain.value = 0.5;
+    this.bgGain.gain.value = this.bgCallerType === 'trackside' ? 0.25 : 0.5;
     const source = this.bgCtx.createBufferSource();
     source.buffer = buffer;
     source.loop = true;
@@ -801,6 +814,16 @@ const PhoneCallsUI = {
     return { headcode: match[1], location: match[2].trim(), reason: match[3].trim(), departTime: match[4] || null };
   },
 
+  // Parse technician "fixed" reports — signal/points/track section failure fixed
+  // "Signal failure in the Interlocking ST (Selhurst) area fixed."
+  // "Points failure at East Croydon fixed."
+  // "Track section failure in the Selhurst area fixed."
+  parseFixedReport(msg) {
+    const match = msg.match(/(Signal failure|Points failure|Track section failure)\s+(?:in\s+(?:the\s+)?|at\s+)(.+?)\s*(?:area\s+)?fixed/i);
+    if (!match) return null;
+    return { type: match[1], location: match[2].replace(/\s*\([^)]*\)\s*$/, '').trim() };
+  },
+
   // Keyword patterns for matching user speech to SimSig reply options
   // Order matters — more specific patterns first
   REPLY_MATCHERS: [
@@ -886,6 +909,11 @@ const PhoneCallsUI = {
       train: '3A90', title: 'Answer call from Driver (3A90)',
       message: 'After examining the line, no obstruction was found',
       replies: ['Ok, no obstruction found, continue normally', 'Continue examining the line'],
+    },
+    fixed_report: {
+      train: 'Technician', title: 'Answer call from Technician (Panel 1C (Selhurst))',
+      message: 'Signal failure in the Interlocking ST (Selhurst) area fixed.',
+      replies: ['Ok, signal failure in the Interlocking ST (Selhurst) area fixed.'],
     },
   },
 
@@ -1115,6 +1143,11 @@ const PhoneCallsUI = {
         return `Can you hold ${holdBack[1]} back until their booked time please`;
       }
       // Fall through to standard formatting for other signaller reply types
+    }
+
+    // Technician fixed report — failure resolved
+    if (/(?:signal|points|track\s*section)\s*failure.*fixed/i.test(raw)) {
+      return 'Good news. Thanks for your help. I shall commence normal running';
     }
 
     // Third-party calls (token hut, ground frame, etc.) — talk about the driver, not to them
@@ -1387,7 +1420,8 @@ const PhoneCallsUI = {
       || /ok.*crew for.*ready and waiting/i.test(lower)
       || /yes.*signal\s+will\s+be\s+replaced/i.test(lower)
       || /no.*signal\s+will\s+not\s+be\s+replaced/i.test(lower)
-      || /no\s*obstruction.*found/i.test(lower);
+      || /no\s*obstruction.*found/i.test(lower)
+      || /(?:signal|points|track\s*section)\s*failure.*fixed/i.test(lower);
   },
 
   async sendReply(replyIndex, replies, caller) {
@@ -1828,6 +1862,7 @@ const PhoneCallsUI = {
     const sigAdvisory = !csd && !readyAt && !earlyRun ? this.parseSignallerAdvisory(driverMsg) : null;
     const delay = !csd && !readyAt && !earlyRun && !sigAdvisory ? this.parseDelayMessage(driverMsg) : null;
     const crewWaiting = !csd && !readyAt && !earlyRun && !sigAdvisory && !delay ? this.parseCrewWaitingMessage(driverMsg) : null;
+    const fixedReport = this.parseFixedReport(driverMsg);
 
     // Start background noise for the duration of the call
     // Signaller → office ambience, shunter/CSD/yard → yard noise, train → cab noise
@@ -1910,6 +1945,14 @@ const PhoneCallsUI = {
       this.stopBgNoise();
       this.startBgNoise();
       spokenMsg = `Hello Signaller, this is the driver of ${crewWaiting.headcode}. I am waiting at ${crewWaiting.location} station for the train to arrive. As soon as the train is here, my crew and I will complete all our required activities and be ready to depart as soon as possible`;
+      displayMsg = spokenMsg;
+    } else if (fixedReport) {
+      // Technician reporting a failure fixed — use trackside background
+      this.bgCallerType = 'trackside';
+      this.stopBgNoise();
+      this.startBgNoise();
+      const failLower = fixedReport.type.toLowerCase();
+      spokenMsg = `Hello Signaller, this is the MOM down at the ${failLower} in the ${fixedReport.location} area. Good news, the team have been able to fix the issue and you may resume normal running`;
       displayMsg = spokenMsg;
     } else if (isExamineResult && this.currentHeadCode) {
       // Examine line result — driver is moving, use train running background
