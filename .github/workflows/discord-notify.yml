@@ -28,6 +28,12 @@ jobs:
             exit 1
           fi
 
+          # Map GitHub usernames to display names
+          case "$ACTOR" in
+            fcooper94) AUTHOR="Fraser Cooper" ;;
+            *) AUTHOR="$ACTOR" ;;
+          esac
+
           SHORT_SHA="$(echo "$SHA" | cut -c1-7)"
           REPO_URL="$SERVER_URL/$REPO"
           BRANCH_URL="$REPO_URL/tree/$REF"
@@ -37,14 +43,14 @@ jobs:
 
           cat > payload.json <<EOF
           {
-            "username": "vEFPS Source Control",
+            "username": "vGSM-R Control",
             "embeds": [
               {
                 "title": "Push to ${REPO}:${REF}",
                 "url": "${BRANCH_URL}",
                 "description": "• ${ESC_COMMIT_MSG}",
                 "fields": [
-                  { "name": "Author", "value": "${ACTOR}", "inline": true },
+                  { "name": "Author", "value": "${AUTHOR}", "inline": true },
                   { "name": "Commit", "value": "[${SHORT_SHA}](${COMMIT_URL})", "inline": true }
                 ]
               }

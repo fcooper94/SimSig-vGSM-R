@@ -22,6 +22,12 @@ jobs:
             exit 1
           fi
 
+          # Map GitHub usernames to display names
+          case "$ACTOR" in
+            fcooper94) AUTHOR="Fraser Cooper" ;;
+            *) AUTHOR="$ACTOR" ;;
+          esac
+
           TITLE="${RELEASE_NAME:-${TAG}}"
 
           # Escape quotes/newlines for JSON
@@ -29,14 +35,14 @@ jobs:
 
           cat > payload.json <<EOF
           {
-            "username": "vEFPS Source Control",
+            "username": "vGSM-R Control",
             "embeds": [
               {
                 "title": "New Release: ${ESC_TITLE}",
                 "url": "${RELEASE_URL}",
                 "fields": [
                   { "name": "Version", "value": "${TAG}", "inline": true },
-                  { "name": "Published by", "value": "${ACTOR}", "inline": true }
+                  { "name": "Published by", "value": "${AUTHOR}", "inline": true }
                 ]
               }
             ]
