@@ -48,7 +48,7 @@ jobs:
               {
                 "title": "New Commit",
                 "url": "${BRANCH_URL}",
-                "description": "• ${ESC_COMMIT_MSG}",
+                "description": "${ESC_COMMIT_MSG}",
                 "fields": [
                   { "name": "Author", "value": "${AUTHOR}", "inline": true },
                   { "name": "Commit", "value": "[${SHORT_SHA}](${COMMIT_URL})", "inline": true }

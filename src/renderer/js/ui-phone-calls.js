@@ -4,7 +4,10 @@ const PhoneCallsUI = {
   chatEl: null,
   calls: [],
   messages: [],
-  ringingAudio: null,
+  ringCtx: null,
+  ringBuffer: null,
+  ringSource: null,
+  ringGain: null,
   wasRinging: false,
   inCall: false,
   gameTime: '',         // formatted game time from gateway (empty = no connection)
@@ -155,8 +158,17 @@ const PhoneCallsUI = {
       }
     });
 
-    this.ringingAudio = new Audio('../../sounds/ringing.wav');
-    this.ringingAudio.loop = true;
+    // Gapless ringing via Web Audio API (HTML5 Audio.loop has a seek gap)
+    this.ringCtx = new AudioContext();
+    this.ringBuffer = null;
+    this.ringSource = null;
+    this.ringGain = this.ringCtx.createGain();
+    this.ringGain.connect(this.ringCtx.destination);
+    fetch('../../sounds/ringing.wav')
+      .then((r) => r.arrayBuffer())
+      .then((buf) => this.ringCtx.decodeAudioData(buf))
+      .then((buffer) => { this._crossfadeBuffer(buffer); this.ringBuffer = buffer; })
+      .catch(() => {});
 
     // Apply saved ring output device
     window.simsigAPI.settings.getAll().then((s) => {
@@ -174,8 +186,7 @@ const PhoneCallsUI = {
     // Listen for silence events (from this client or remote clients)
     window.simsigAPI.phone.onSilenceRing(() => {
       this.silenced = true;
-      this.ringingAudio.pause();
-      this.ringingAudio.currentTime = 0;
+      this._stopRingSource();
       this.silenceBtn.classList.add('hidden');
       this._syncToRemote();
     });
@@ -290,24 +301,36 @@ const PhoneCallsUI = {
     this.bgBufferIndex = 0;
     this.bgSignallerBuffer = null;
     this.bgYardBuffer = null;
+    this.bgStationBuffer = null;
+    this.bgTrainRunningBuffer = null;
     this.bgSource = null;
-    this.bgCallerType = 'train'; // 'train' | 'signaller' | 'yard'
+    this.bgCallerType = 'train'; // 'train' | 'signaller' | 'yard' | 'station' | 'trainrunning'
     this.bgGain = this.bgCtx.createGain();
     this.bgGain.connect(this.bgCtx.destination);
     this.bgGain.gain.value = 0.5;
     const bgFiles = ['../../sounds/background.wav', '../../sounds/background2.wav'];
     Promise.all(bgFiles.map((f) =>
       fetch(f).then((r) => r.arrayBuffer()).then((buf) => this.bgCtx.decodeAudioData(buf))
-    )).then((buffers) => { this.bgBuffers = buffers; }).catch(() => {});
+    )).then((buffers) => { buffers.forEach((b) => this._crossfadeBuffer(b)); this.bgBuffers = buffers; }).catch(() => {});
     fetch('../../sounds/signaller-background.wav')
       .then((r) => r.arrayBuffer())
       .then((buf) => this.bgCtx.decodeAudioData(buf))
-      .then((buffer) => { this.bgSignallerBuffer = buffer; })
+      .then((buffer) => { this._crossfadeBuffer(buffer); this.bgSignallerBuffer = buffer; })
       .catch(() => {});
     fetch('../../sounds/yard-background.wav')
       .then((r) => r.arrayBuffer())
       .then((buf) => this.bgCtx.decodeAudioData(buf))
-      .then((buffer) => { this.bgYardBuffer = buffer; })
+      .then((buffer) => { this._crossfadeBuffer(buffer); this.bgYardBuffer = buffer; })
+      .catch(() => {});
+    fetch('../../sounds/station-background.wav')
+      .then((r) => r.arrayBuffer())
+      .then((buf) => this.bgCtx.decodeAudioData(buf))
+      .then((buffer) => { this._crossfadeBuffer(buffer); this.bgStationBuffer = buffer; })
+      .catch(() => {});
+    fetch('../../sounds/trainrunning-background.wav')
+      .then((r) => r.arrayBuffer())
+      .then((buf) => this.bgCtx.decodeAudioData(buf))
+      .then((buffer) => { this._crossfadeBuffer(buffer); this.bgTrainRunningBuffer = buffer; })
       .catch(() => {});
 
     // Pre-warm local voices as fallback
@@ -359,8 +382,7 @@ const PhoneCallsUI = {
     this.silenceBtn.classList.remove('hidden');
     this._syncToRemote();
     if (this.isPaused() || !this.initReady) return;
-    this.ringingAudio.currentTime = 0;
-    this.ringingAudio.play().catch(() => {});
+    this._startRingSource();
   },
 
   stopRinging() {
@@ -369,31 +391,63 @@ const PhoneCallsUI = {
     this.silenced = false;
     this.silenceBtn.classList.add('hidden');
     this._syncToRemote();
-    this.ringingAudio.pause();
-    this.ringingAudio.currentTime = 0;
+    this._stopRingSource();
+  },
+
+  _startRingSource() {
+    this._stopRingSource();
+    if (!this.ringBuffer || !this.ringCtx) return;
+    if (this.ringCtx.state === 'suspended') this.ringCtx.resume();
+    const source = this.ringCtx.createBufferSource();
+    source.buffer = this.ringBuffer;
+    source.loop = true;
+    source.connect(this.ringGain);
+    this.ringGain.gain.value = 1;
+    source.start();
+    this.ringSource = source;
+  },
+
+  _stopRingSource() {
+    if (this.ringSource) {
+      try { this.ringSource.stop(); } catch {}
+      this.ringSource = null;
+    }
   },
 
   setRingDevice(deviceId) {
-    if (this.ringingAudio && this.ringingAudio.setSinkId) {
-      this.ringingAudio.setSinkId(deviceId || 'default').catch((e) => {
+    if (this.ringCtx && this.ringCtx.setSinkId) {
+      this.ringCtx.setSinkId(deviceId || 'default').catch((e) => {
         console.warn('[Phone] Could not set ring output device:', e.message);
       });
+    }
+  },
+
+  // Crossfade the tail into the head of an AudioBuffer for seamless looping
+  _crossfadeBuffer(buffer, fadeSec = 0.05) {
+    const samples = Math.min(Math.floor(fadeSec * buffer.sampleRate), buffer.length >> 2);
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+      const d = buffer.getChannelData(ch);
+      const len = d.length;
+      for (let i = 0; i < samples; i++) {
+        const t = i / samples;
+        // Blend tail into head so the loop boundary is seamless
+        d[i] = d[i] * t + d[len - samples + i] * (1 - t);
+        d[len - samples + i] *= t;
+      }
     }
   },
 
   // Silence all audio immediately (called when sim pauses)
   muteAll() {
     if (this._isBrowser) return; // no audio on browser
-    this.ringingAudio.pause();
-    this.ringingAudio.currentTime = 0;
+    this._stopRingSource();
   },
 
-  // Resume ringing if calls are waiting (called when sim unpauses)
+  // Resume ringing if calls are waiting (called when sim unpaused)
   resumeRinging() {
     if (this._isBrowser) return; // no audio on browser
     if (this.calls.length > 0 && this.wasRinging && !this.inCall && !this._outgoingCall && !this._dialingActive && !this.silenced) {
-      this.ringingAudio.currentTime = 0;
-      this.ringingAudio.play().catch(() => {});
+      this._startRingSource();
     }
   },
 
@@ -425,7 +479,27 @@ const PhoneCallsUI = {
 
   // Convert headcodes (1A40), signal IDs (UM24, S14), and standalone
   // digit groups into phonetic speech
+  // Convert HH:MM times to natural spoken English (12h) before phoneticize mangles them
+  naturalizeTimes(text) {
+    const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+      'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+    const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty'];
+    const toWords = (n) => {
+      if (n < 20) return ones[n];
+      return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+    };
+    return text.replace(/\b(\d{1,2}):(\d{2})\b/g, (_, hStr, mStr) => {
+      const h24 = parseInt(hStr, 10);
+      const m = parseInt(mStr, 10);
+      const h12 = h24 === 0 ? 12 : h24 > 12 ? h24 - 12 : h24;
+      if (m === 0) return `${toWords(h12)} o'clock`;
+      if (m < 10) return `${toWords(h12)} oh ${toWords(m)}`;
+      return `${toWords(h12)} ${toWords(m)}`;
+    });
+  },
+
   phoneticize(text) {
+    text = this.naturalizeTimes(text);
     return text.replace(/\b[A-Z0-9]{2,}\b/gi, (match) => {
       const hasLetter = /[A-Za-z]/.test(match);
       const hasDigit = /\d/.test(match);
@@ -456,8 +530,10 @@ const PhoneCallsUI = {
   },
 
   // Pick a consistent TTS voice for a caller (90% male, 10% female)
+  // Cached by headcode so the same train always gets the same voice within a session
   getTTSVoiceId(caller, voices) {
-    if (this.voiceCache[caller]) return this.voiceCache[caller];
+    const cacheKey = this.currentHeadCode || caller;
+    if (this.voiceCache[cacheKey]) return this.voiceCache[cacheKey];
     const hash = this.hashString(caller);
     const males = voices.filter((v) => v.gender === 'male');
     const females = voices.filter((v) => v.gender !== 'male');
@@ -470,7 +546,7 @@ const PhoneCallsUI = {
     } else {
       voice = voices[hash % voices.length];
     }
-    this.voiceCache[caller] = voice.id;
+    this.voiceCache[cacheKey] = voice.id;
     return voice.id;
   },
 
@@ -486,6 +562,10 @@ const PhoneCallsUI = {
     let buffer;
     if (this.bgCallerType === 'yard' && this.bgYardBuffer) {
       buffer = this.bgYardBuffer;
+    } else if (this.bgCallerType === 'station' && this.bgStationBuffer) {
+      buffer = this.bgStationBuffer;
+    } else if (this.bgCallerType === 'trainrunning' && this.bgTrainRunningBuffer) {
+      buffer = this.bgTrainRunningBuffer;
     } else if (this.bgCallerType === 'signaller' && this.bgSignallerBuffer) {
       buffer = this.bgSignallerBuffer;
     } else if (this.bgBuffers.length) {
@@ -705,6 +785,14 @@ const PhoneCallsUI = {
     return { headcode, via, estimate, booked };
   },
 
+  // Parse crew waiting messages — crew ready at station waiting for train to arrive
+  // "Crew for 7V81 is ready and waiting for the train to arrive at East Croydon.."
+  parseCrewWaitingMessage(msg) {
+    const match = msg.match(/Crew for (\w+) is ready and waiting for the train to arrive at (.+?)\.{1,2}/i);
+    if (!match) return null;
+    return { headcode: match[1], location: match[2].trim() };
+  },
+
   // Parse delay messages — driver reporting delayed at a location with a reason
   // "1C51 delayed at Three Bridges due to a technical fault, expected to depart at about 14:15"
   parseDelayMessage(msg) {
@@ -716,17 +804,22 @@ const PhoneCallsUI = {
   // Keyword patterns for matching user speech to SimSig reply options
   // Order matters — more specific patterns first
   REPLY_MATCHERS: [
+    // Crew waiting reply
+    { pattern: /thank.*update|update.*driver/, fragment: 'crew for' },
     // Delay call replies
     { pattern: /understood.*delayed|delayed.*understood/, fragment: 'delayed' },
     { pattern: /yes.*(?:change|aspect|replaced)/, fragment: 'yes' },
     { pattern: /no.*(?:change|aspect|replaced)/, fragment: 'no' },
     { pattern: /no\s*obstruction|continue\s*normally/, fragment: 'no obstruction' },
+    // Unlit signal — pass + examine (must be before generic pass+examine)
+    { pattern: /pass.*unlit.*examine|unlit.*examine/, fragment: 'pass unlit signal and examine' },
     { pattern: /pass.*examine|authoris[ez].*pass.*examine|authoris[ez].*examine/, fragment: 'pass signal' },
     { pattern: /continue\s*examin/, fragment: 'continue examining' },
     { pattern: /(?:15|fifteen|one[\s-]*five|1[\s-]*5)\s*min/, fragment: '15 minute' },
     { pattern: /(?<!\d)(?:0?2|two|to)\s*min/, fragment: '2 minute' },
     { pattern: /(?<!\d)(?:0?5|five)\s*min/, fragment: '5 minute' },
     { pattern: /wait/, fragment: '2 minute' },  // bare "wait" defaults to 2 min
+    { pattern: /pass.*unlit|unlit.*pass/, fragment: 'pass unlit signal' },
     { pattern: /authoris[ez].*pass|pass.*signal|pass\s*at\s*(?:stop|danger)|let\s*him\s*pass|pass\s*it/, fragment: 'authorise driver to pass' },
     { pattern: /examine.*line|examine\s*the/, fragment: 'examine the line' },
     // Place call specific matchers
@@ -778,6 +871,16 @@ const PhoneCallsUI = {
       train: '4022', title: 'Answer call from Aynho Signaller',
       message: 'I have 4022 running early via Aynho Junction.\nIt can be in your area at about 05:00 if I let it continue.\nDo you want me to hold it until its booked time of 05:22?',
       replies: ['No, let 4022 run early', 'Please hold 4022 back'],
+    },
+    crew_waiting: {
+      train: '7V81', title: 'Answer call from Crew for 7V81',
+      message: 'Crew for 7V81 is ready and waiting for the train to arrive at East Croydon.. The crews will change over, any activities at that location will be performed including minimum dwell times, and then the train will be ready to depart.',
+      replies: ['Ok, crew for 7V81 is ready and waiting for the train to arrive at East Croydon.'],
+    },
+    unlit_signal: {
+      train: '2W89', title: 'Answer call from Train 2W89 (Panel 2 (Purley))',
+      message: 'Driver of 2W89 waiting at unlit signal T151',
+      replies: ['Wait 2 minutes before phoning back', 'Wait 5 minutes before phoning back', 'Wait 15 minutes before phoning back', 'Authorise driver to pass unlit signal', 'Ask driver to pass unlit signal and examine the line'],
     },
     examine: {
       train: '3A90', title: 'Answer call from Driver (3A90)',
@@ -1017,7 +1120,13 @@ const PhoneCallsUI = {
     // Third-party calls (token hut, ground frame, etc.) — talk about the driver, not to them
     if (this.isThirdPartyCall) {
       if (/ok.*no\s*obstruction/i.test(raw)) {
-        return `Ok, thank you. No obstructions found, they can continue normally`;
+        return `Ok, thank you. No obstructions found`;
+      }
+      if (/pass.*unlit.*signal.*examine|ask.*pass.*unlit.*examine/i.test(raw)) {
+        return `Ok, the driver of ${hc} is authorised to pass${sigRef} in its unlit state. Tell them to proceed at caution and examine the line. They need to report any obstructions`;
+      }
+      if (/authoris[ez].*pass.*unlit|pass.*unlit.*signal/i.test(raw)) {
+        return `Ok, the driver of ${hc} is authorised to pass${sigRef} in its unlit state. Tell them to proceed at caution to the next signal`;
       }
       if (/pass.*signal.*at\s*stop.*examine|pass.*signal.*danger.*examine|authoris[ez].*pass.*examine|ask.*pass.*examine/i.test(raw)) {
         return `Ok, the driver of ${hc} is authorised to pass${sigRef} at danger. Tell them to proceed at caution and continue to examine the line. They need to report any obstructions`;
@@ -1026,7 +1135,7 @@ const PhoneCallsUI = {
         return `Ok, the driver of ${hc} is authorised to pass${sigRef} at danger. Tell them to proceed at caution to the next signal and be prepared to stop short of any obstruction`;
       }
       if (/continue\s*examin/i.test(raw)) {
-        return `Ok, thank you. No obstructions found. Tell the driver to continue examining the line and report any obstructions`;
+        return `Ok, tell the driver to continue examining the line and report further`;
       }
       if (/ask.*examine|examine\s*the\s*line/i.test(raw)) {
         return `Ok, I need the driver to examine the line between${sigRef} and the next signal. Tell them to proceed at caution and report any obstructions`;
@@ -1048,6 +1157,11 @@ const PhoneCallsUI = {
       return raw.replace(/\bat stop\b/gi, 'at danger');
     }
 
+    // Crew waiting reply
+    if (/ok.*crew for.*ready and waiting/i.test(raw)) {
+      return 'Thank you for the update driver';
+    }
+
     // Delay call replies
     if (/ok.*\w+\s+delayed/i.test(raw)) {
       const reason = this._delayReason || 'a delay';
@@ -1059,9 +1173,17 @@ const PhoneCallsUI = {
     if (/no.*signal\s+will\s+not\s+be\s+replaced/i.test(raw)) {
       return 'Thank you driver.';
     }
-    // "Ok, no obstruction found" — acknowledge and continue normally
+    // "Ok, no obstruction found" — acknowledge examine line result
     if (/ok.*no\s*obstruction/i.test(raw)) {
-      return `${hc}, Thank you. No obstructions found. Continue normally`;
+      return `Thanks Driver, I copy that no obstructions were found`;
+    }
+    // Unlit signal — pass in unlit state + examine line
+    if (/pass.*unlit.*signal.*examine|ask.*pass.*unlit.*examine/i.test(raw)) {
+      return `Driver of ${hc}, this is${panelRef}. We have a signal lamp failure here at${sigRef}. I am authorising you to pass${sigRef} in its unlit state. Proceed at caution to the next signal and examine the line. Report any obstructions.`;
+    }
+    // Unlit signal — pass in unlit state only
+    if (/authoris[ez].*pass.*unlit|pass.*unlit.*signal/i.test(raw)) {
+      return `Driver of ${hc}, this is${panelRef}. We have a signal lamp failure here at${sigRef}. I am authorising you to pass${sigRef} in its unlit state. Proceed at caution to the next signal.`;
     }
     // Pass signal at danger AND continue examining the line
     if (/pass.*signal.*at\s*stop.*examine|pass.*signal.*danger.*examine|authoris[ez].*pass.*examine|ask.*pass.*examine/i.test(raw)) {
@@ -1073,7 +1195,7 @@ const PhoneCallsUI = {
     }
     // Continue examining the line (no pass at danger)
     if (/continue\s*examin/i.test(raw)) {
-      return `${hc}, Thank you. No obstructions found. Driver, please continue to examine the line and report any obstructions`;
+      return `Thanks Driver, can you continue to examine the line and report further`;
     }
     // Examine the line only (initial request)
     if (/ask.*examine|examine\s*the\s*line/i.test(raw)) {
@@ -1147,14 +1269,20 @@ const PhoneCallsUI = {
 
     // Third-party readback (token hut, ground frame) — conversational, relaying the message
     if (this.isThirdPartyCall) {
+      if (/pass.*unlit.*examine|lamp failure.*examine/i.test(lower)) {
+        return `Ok, I will let the driver know they are authorised to pass${sigRef} in its unlit state and to examine the line`;
+      }
+      if (/pass.*unlit|lamp failure/i.test(lower)) {
+        return `Ok, I will tell the driver they are authorised to pass${sigRef} in its unlit state`;
+      }
       if (/pass.*signal.*at\s*(stop|danger).*examine/i.test(lower) || /pass.*at\s*danger.*continue.*examine/i.test(lower)) {
         return `Ok, I will let the driver know they are authorised to pass${sigRef} at danger and to continue examining the line`;
       }
       if (/pass.*signal.*at\s*(stop|danger)/i.test(lower)) {
         return `Ok, I will tell the driver they are authorised to pass${sigRef} at danger`;
       }
-      if (/no\s*obstruction.*continue\s*normally/i.test(lower)) {
-        return 'Ok, I will let them know they can continue normally';
+      if (/no\s*obstruction/i.test(lower)) {
+        return 'Ok, I will let them know. No obstructions found';
       }
       if (/continue.*examine/i.test(lower)) {
         return 'Ok, I will tell them to continue examining the line';
@@ -1176,9 +1304,17 @@ const PhoneCallsUI = {
       return 'Ok, I will pass that on to the driver';
     }
 
-    // "No obstructions found, continue normally"
-    if (/no\s*obstruction.*continue\s*normally/i.test(lower)) {
-      return `Understood, continue normally${trainRef}`;
+    // "No obstructions found" — examine result acknowledgement
+    if (/no\s*obstruction/i.test(lower)) {
+      return `Understood, no obstructions${trainRef}`;
+    }
+    // Unlit signal — pass + examine
+    if (/pass.*unlit.*examine|lamp failure.*examine/i.test(lower)) {
+      return `Authorised to pass${sigRef} in its unlit state, proceed at caution and examine the line${trainRef}`;
+    }
+    // Unlit signal — pass only
+    if (/pass.*unlit|lamp failure/i.test(lower)) {
+      return `Authorised to pass${sigRef} in its unlit state, proceed at caution to the next signal${trainRef}`;
     }
     // Pass signal at danger + continue examining the line
     if (/pass.*signal.*at\s*(stop|danger).*examine/i.test(lower) || /pass.*at\s*danger.*continue.*examine/i.test(lower)) {
@@ -1190,7 +1326,7 @@ const PhoneCallsUI = {
     }
     // Continue examining the line
     if (/continue.*examine/i.test(lower)) {
-      return `Understood, continue to examine the line and report${trainRef}`;
+      return `Ok, I will continue to examine the line and will report further${trainRef}`;
     }
     // Examine the line only (initial request)
     if (/examine\s*the\s*line/i.test(lower)) {
@@ -1242,11 +1378,44 @@ const PhoneCallsUI = {
   //   4. Show readback text in chat and play TTS audio
   //   5. Unlock hang-up button
   // The currentHeadCode is passed to the PS script for headcode confirmation dialogs.
+  // Returns true if this reply type needs no driver readback (just a goodbye)
+  _isNoReadbackReply(replyText) {
+    const lower = replyText.toLowerCase();
+    // Delay acknowledgments, crew waiting, signal replacement yes/no, no obstructions
+    return /ok.*\w+\s+delayed/i.test(lower)
+      || /ok.*crew for.*ready and waiting/i.test(lower)
+      || /yes.*signal\s+will\s+be\s+replaced/i.test(lower)
+      || /no.*signal\s+will\s+not\s+be\s+replaced/i.test(lower)
+      || /no\s*obstruction.*found/i.test(lower);
+  },
+
   async sendReply(replyIndex, replies, caller) {
     const myCallId = this._callSeq;
     this._hangUpLocked = true; // prevent hangup keybind/click during reply flow
     this.addMessage({ type: 'loading', text: 'Replying...' });
-    const confirmation = this.buildConfirmation(replies[replyIndex]);
+
+    const rawReply = replies[replyIndex];
+    const skipReadback = this._isNoReadbackReply(rawReply);
+
+    // Send reply to SimSig — PS script handles headcode entry dialogs automatically
+    await window.simsigAPI.phone.replyCall(replyIndex, this.currentHeadCode);
+    if (myCallId !== this._callSeq) return;
+    this._replySent = true;
+    this.messages = this.messages.filter((m) => m.type !== 'loading');
+
+    if (skipReadback) {
+      // No readback needed — driver just says goodbye and hangs up
+      const goodbye = 'Ok, thanks. Bye.';
+      this.addMessage({ type: 'driver', caller: this.shortenCaller(caller), text: goodbye });
+      await this.speakAsDriver(goodbye, caller);
+      if (myCallId !== this._callSeq) return;
+      this._hangUpLocked = false;
+      this.hangUp();
+      return;
+    }
+
+    // Standard flow: driver readback → wait for goodbye
+    const confirmation = this.buildConfirmation(rawReply);
 
     const voices = await this.getTTSVoices();
     if (myCallId !== this._callSeq) return;
@@ -1256,13 +1425,6 @@ const PhoneCallsUI = {
       audioPromise = this.fetchTTSAudio(this.phoneticize(confirmation), voiceId);
     }
 
-    // Send reply to SimSig — PS script handles headcode entry dialogs automatically
-    await window.simsigAPI.phone.replyCall(replyIndex, this.currentHeadCode);
-    if (myCallId !== this._callSeq) return;
-    this._replySent = true;
-
-    // Remove loading spinner, show confirmation text
-    this.messages = this.messages.filter((m) => m.type !== 'loading');
     this.addMessage({ type: 'driver', caller, text: confirmation });
 
     // Play audio (already fetched or nearly done)
@@ -1555,6 +1717,7 @@ const PhoneCallsUI = {
     this.isShunterCall = false;
     this.isSignallerCall = false;
     this.isThirdPartyCall = false;
+    this.isUnlitSignal = false;
     this._replyClicked = false;
     this._hasReplyOptions = false;
     this._replySent = false;
@@ -1663,6 +1826,7 @@ const PhoneCallsUI = {
     const earlyRun = this.parseEarlyRunningMessage(driverMsg);
     const sigAdvisory = !csd && !readyAt && !earlyRun ? this.parseSignallerAdvisory(driverMsg) : null;
     const delay = !csd && !readyAt && !earlyRun && !sigAdvisory ? this.parseDelayMessage(driverMsg) : null;
+    const crewWaiting = !csd && !readyAt && !earlyRun && !sigAdvisory && !delay ? this.parseCrewWaitingMessage(driverMsg) : null;
 
     // Start background noise for the duration of the call
     // Signaller → office ambience, shunter/CSD/yard → yard noise, train → cab noise
@@ -1740,11 +1904,24 @@ const PhoneCallsUI = {
       const timePart = delay.departTime ? `, expected to depart about ${delay.departTime}` : '';
       spokenMsg = `Hello Signaller, this is ${delay.headcode} at ${delay.location}. We are delayed due to ${delay.reason}${timePart}`;
       displayMsg = spokenMsg;
+    } else if (crewWaiting) {
+      this.bgCallerType = 'station';
+      this.stopBgNoise();
+      this.startBgNoise();
+      spokenMsg = `Hello Signaller, this is the driver of ${crewWaiting.headcode}. I am waiting at ${crewWaiting.location} station for the train to arrive. As soon as the train is here, my crew and I will complete all our required activities and be ready to depart as soon as possible`;
+      displayMsg = spokenMsg;
     } else if (isExamineResult && this.currentHeadCode) {
-      // Examine line result — driver reporting back after examining the line
-      const sigPart = this.currentSignalId ? ` at ${this.currentSignalId}` : '';
-      displayMsg = `${this.currentHeadCode} is stopped${sigPart} after examining the line. No obstructions found.`;
-      spokenMsg = `Hello Signaller. This is driver of ${this.currentHeadCode} standing at${this.currentSignalId ? ` ${this.currentSignalId} signal indicating danger` : ' signal indicating danger'}. After examining the line, no obstruction was found.`;
+      // Examine line result — driver is moving, use train running background
+      this.bgCallerType = 'trainrunning';
+      this.stopBgNoise();
+      this.startBgNoise();
+      displayMsg = `${this.currentHeadCode} has examined the line. No obstructions found.`;
+      spokenMsg = `Hello Signaller, this is driver of ${this.currentHeadCode}. I have examined the line as requested and found no obstructions`;
+    } else if (this.currentSignalId && /unlit\s+signal/i.test(driverMsg)) {
+      // Unlit signal — signal lamp failure
+      this.isUnlitSignal = true;
+      displayMsg = `${this.currentHeadCode} waiting at unlit signal ${this.currentSignalId}`;
+      spokenMsg = `Hello Signaller, this is driver of ${this.currentHeadCode}. I have come to a stop at signal ${this.currentSignalId} as it is showing no aspect`;
     } else if (this.currentSignalId) {
       // Red signal / waiting at signal scenario
       displayMsg = `${this.currentHeadCode} waiting at red signal ${this.currentSignalId}`;
@@ -2414,6 +2591,7 @@ const PhoneCallsUI = {
     this.isShunterCall = false;
     this.isSignallerCall = false;
     this.isThirdPartyCall = false;
+    this.isUnlitSignal = false;
     this.bgCallerType = 'train';
     this.gameTime = '';
     this.trainSignalCache = {};
