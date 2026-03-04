@@ -1241,6 +1241,7 @@ const PhoneCallsUI = {
 
   // Build driver readback confirmation for a reply (GE/RT8000 style)
   buildConfirmation(replyText) {
+    console.log('[Phone] buildConfirmation rawReply:', JSON.stringify(replyText));
     const lower = replyText.toLowerCase();
     const sig = this.currentSignalId || '';
     const hc = this.currentHeadCode || '';
@@ -1324,12 +1325,12 @@ const PhoneCallsUI = {
     if (/pass.*signal.*at\s*(stop|danger)/i.test(lower)) {
       return `Authorised to pass${sigRef} at danger, proceed at caution to the next signal${trainRef}`;
     }
-    // Continue examining the line
-    if (/continue.*examine/i.test(lower)) {
-      return `Ok, I will continue to examine the line and will report further${trainRef}`;
+    // Continue examining the line (from examine result callback)
+    if (/continue.*examin/i.test(lower) || /examin.*line.*report/i.test(lower)) {
+      return `Ok Signaller, I will continue to examine the line and report further${trainRef}`;
     }
-    // Examine the line only (initial request)
-    if (/examine\s*the\s*line/i.test(lower)) {
+    // Examine the line only (initial request from red signal)
+    if (/ask.*examine|examine\s*the\s*line/i.test(lower)) {
       return `Examine the line from${sigRef} to the next signal, proceed at caution and report${trainRef}`;
     }
     // Wait N minutes — no formal readback required, just acknowledge
