@@ -48,7 +48,8 @@
       "WebFetch(domain:api.github.com)",
       "Bash(grep -i \"admin\\\\|elevation\\\\|requireadministrator\\\\|requestedasinvoker\" /c/dev/SimSig-vGSM-R/src/main/*.ps1)",
       "Bash(head -100 /c/dev/SimSig-vGSM-R/.github/workflows/*.yml)",
-      "Bash(gh run list --limit 3)"
+      "Bash(gh run list --limit 3)",
+      "Bash(curl -sS -H \"Content-Type: application/json\" -d '{:*)"
     ]
   }
 }

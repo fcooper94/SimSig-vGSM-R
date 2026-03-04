@@ -46,7 +46,7 @@ jobs:
             "username": "vGSM-R Control",
             "embeds": [
               {
-                "title": "Push to ${REPO}:${REF}",
+                "title": "New Commit",
                 "url": "${BRANCH_URL}",
                 "description": "• ${ESC_COMMIT_MSG}",
                 "fields": [

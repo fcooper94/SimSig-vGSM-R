@@ -36,6 +36,7 @@ jobs:
           cat > payload.json <<EOF
           {
             "username": "vGSM-R Control",
+            "content": "@everyone",
             "embeds": [
               {
                 "title": "New Release: ${ESC_TITLE}",
