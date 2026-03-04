@@ -323,6 +323,25 @@ try {
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         Start-Sleep -Milliseconds 100
 
+        # Check for "Can't answer a call whilst paused" message box — dismiss it
+        $msgBoxHwnd = [Win32Auto]::FindTopWindowByClass("TMessageForm")
+        if ($msgBoxHwnd -eq [IntPtr]::Zero) {
+            $msgBoxHwnd = [Win32Auto]::FindTopWindowByClass("#32770")
+        }
+        if ($msgBoxHwnd -ne [IntPtr]::Zero) {
+            $msgTitle = New-Object System.Text.StringBuilder 256
+            [Win32Auto]::GetWindowText($msgBoxHwnd, $msgTitle, 256) | Out-Null
+            $msgText = $msgTitle.ToString()
+            # Look for the OK button and click it
+            $okBtn = [Win32Auto]::FindButtonByText($msgBoxHwnd, "OK")
+            if ($okBtn -ne [IntPtr]::Zero) {
+                [Win32Auto]::ClickButton($okBtn)
+                Start-Sleep -Milliseconds 200
+                Write-Output '{"error":"SimSig is paused - cannot answer call"}'
+                exit 0
+            }
+        }
+
         $answerHwnd = [Win32Auto]::FindTopWindowByClass("TAnswerCallForm")
 
         if ($answerHwnd -ne [IntPtr]::Zero) {

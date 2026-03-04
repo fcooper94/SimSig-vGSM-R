@@ -321,6 +321,25 @@
     </div>
   </div>
 
+  <!-- Test Call Simulator (Ctrl+Shift+T) -->
+  <div id="test-call-modal" class="modal hidden">
+    <div class="confirm-content test-call-content">
+      <h3>Simulate Incoming Call</h3>
+      <div class="test-call-buttons">
+        <button class="test-call-btn" data-type="red_signal">Driver at Red Signal</button>
+        <button class="test-call-btn" data-type="delay">Driver Delayed</button>
+        <button class="test-call-btn" data-type="csd">CSD Entry Permission</button>
+        <button class="test-call-btn" data-type="ready_at">Ready at Sidings</button>
+        <button class="test-call-btn" data-type="signaller">Signaller Advisory</button>
+        <button class="test-call-btn" data-type="early_run">Early Running</button>
+        <button class="test-call-btn" data-type="examine">Examine Line Result</button>
+      </div>
+      <div class="confirm-actions">
+        <button id="test-call-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Initialising overlay -->
   <div id="init-overlay" class="hidden">
     <div id="init-text">Initialising...</div>

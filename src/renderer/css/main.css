@@ -77,6 +77,8 @@ body {
   border-top: 1px solid var(--bevel-light);
   flex-shrink: 0;
   -webkit-app-region: drag;
+  position: relative;
+  z-index: 10000;
 }
 
 #top-bar button, #top-bar .window-controls {
@@ -359,6 +361,8 @@ body {
   border-top-color: var(--bevel-light);
   flex-shrink: 0;
   min-height: 105px;
+  position: relative;
+  z-index: 10000;
 }
 
 .toolbar-btn {
@@ -861,6 +865,28 @@ body.disconnected #compact-emrg-btn,
 body.disconnected #compact-dial-btn {
   opacity: 0.35;
   pointer-events: none;
+}
+
+/* ── TEST CALL SIMULATOR ─────────────────────────────────── */
+.test-call-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.test-call-btn {
+  padding: 8px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  background: var(--bg-panel);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  color: var(--text);
+  text-align: left;
+}
+.test-call-btn:hover {
+  background: var(--accent);
+  color: #fff;
 }
 
 /* ── COMPACT MODE ────────────────────────────────────────── */

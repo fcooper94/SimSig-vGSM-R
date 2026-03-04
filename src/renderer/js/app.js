@@ -49,7 +49,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   window.simsigAPI.clock.onUpdate((data) => {
-    if (!ConnectionUI.isConnected && ConnectionUI.indicator.className !== 'no-gateway') return;
     const overlay = document.getElementById('paused-overlay');
     if (data.paused) {
       overlay.classList.remove('hidden');
@@ -63,12 +62,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   window.simsigAPI.phone.onCallsUpdate((calls) => {
-    if (!ConnectionUI.isConnected && ConnectionUI.indicator.className !== 'no-gateway') return;
     PhoneCallsUI.update(calls);
   });
 
   window.simsigAPI.phone.onDriverHungUp(() => {
-    if (!ConnectionUI.isConnected && ConnectionUI.indicator.className !== 'no-gateway') return;
     if (PhoneCallsUI.inCall) {
       // If we already sent a reply, the dialog closing is expected (not a driver hang-up)
       if (PhoneCallsUI._replySent) return;
@@ -432,6 +429,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     confirmYes.addEventListener('click', onYes);
     confirmNo.addEventListener('click', onNo);
   });
+
+  // ── Test Call Simulator (Ctrl+Shift+T) ────────────────────
+  const testCallModal = document.getElementById('test-call-modal');
+  if (testCallModal) {
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.code === 'KeyT') {
+        e.preventDefault();
+        testCallModal.classList.toggle('hidden');
+      }
+    });
+    testCallModal.querySelectorAll('.test-call-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        testCallModal.classList.add('hidden');
+        PhoneCallsUI.simulateCall(btn.dataset.type);
+      });
+    });
+    document.getElementById('test-call-cancel').addEventListener('click', () => {
+      testCallModal.classList.add('hidden');
+    });
+  }
 
   // Show browser overlay if web server is already running (auto-started)
   // Done last so a failure here can't block event listener registration

@@ -177,11 +177,11 @@ public class SimSigListBox {
         IntPtr hdc = GetDC(IntPtr.Zero);
         if (hdc == IntPtr.Zero) return "no_dc";
 
-        // Sample a few points across the clock area
-        // Clock is in toolbar, roughly y=35..55 from window top, x=70..200
+        // Sample points across the clock/status-bar area
+        // Clock is in the status bar at the bottom: y=55..80 from window top, x=90..200
         string result = "no_match";
-        int[] xOff = { 80, 100, 120, 140, 160 };
-        int[] yOff = { 38, 42, 46, 50 };
+        int[] xOff = { 100, 120, 140, 160, 180 };
+        int[] yOff = { 58, 63, 68, 73 };
         foreach (int dx in xOff) {
             foreach (int dy in yOff) {
                 int sx = r.Left + dx;

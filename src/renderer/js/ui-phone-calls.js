@@ -705,9 +705,21 @@ const PhoneCallsUI = {
     return { headcode, via, estimate, booked };
   },
 
+  // Parse delay messages — driver reporting delayed at a location with a reason
+  // "1C51 delayed at Three Bridges due to a technical fault, expected to depart at about 14:15"
+  parseDelayMessage(msg) {
+    const match = msg.match(/(\w+)\s+(?:is\s+)?delayed at\s+(.+?)\s+due to\s+(.+?)\s*(?:[,\.]\s*(?:expected to|expect to)\s+depart\s+(?:at\s+)?(?:about\s+)?(\d{1,2}:?\d{2})|$)/i);
+    if (!match) return null;
+    return { headcode: match[1], location: match[2].trim(), reason: match[3].trim(), departTime: match[4] || null };
+  },
+
   // Keyword patterns for matching user speech to SimSig reply options
   // Order matters — more specific patterns first
   REPLY_MATCHERS: [
+    // Delay call replies
+    { pattern: /understood.*delayed|delayed.*understood/, fragment: 'delayed' },
+    { pattern: /yes.*(?:change|aspect|replaced)/, fragment: 'yes' },
+    { pattern: /no.*(?:change|aspect|replaced)/, fragment: 'no' },
     { pattern: /no\s*obstruction|continue\s*normally/, fragment: 'no obstruction' },
     { pattern: /pass.*examine|authoris[ez].*pass.*examine|authoris[ez].*examine/, fragment: 'pass signal' },
     { pattern: /continue\s*examin/, fragment: 'continue examining' },
@@ -734,6 +746,55 @@ const PhoneCallsUI = {
 
   // "danger" and "stop" are interchangeable in SimSig signalling terminology
   SYNONYMS: [['danger', 'stop']],
+
+  // Mock call data for the test call simulator (Ctrl+Shift+T)
+  TEST_CALLS: {
+    red_signal: {
+      train: '3A90', title: 'Answer call from Driver (3A90)',
+      message: 'I am at signal WK203 displaying red',
+      replies: ['Wait 2 minutes for signal to show proceed before phoning back', 'Wait 5 minutes for signal to show proceed before phoning back', 'Wait 15 minutes for signal to show proceed before phoning back', 'Authorise driver to pass signal at stop', 'Ask driver to examine the line', 'Ask driver to pass signal at stop and examine the line'],
+    },
+    delay: {
+      train: '1C51', title: 'Answer call from Driver (1C51)',
+      message: '1C51 delayed at Three Bridges due to a technical fault, expected to depart at about 14:15',
+      replies: ['Ok, 1C51 delayed', 'Yes, signal will be replaced', 'No, signal will not be replaced'],
+    },
+    csd: {
+      train: '5A20', title: 'Answer call from Shunter (Brighton CSD)',
+      message: '5A20 is ready at entry point Brighton CSD (WK440), scheduled 07:16.\n07+17 Brighton CSD - Hove (SWR 12 450)\n    Hove 07:25    07:25    1',
+      replies: ['Permission granted for 5A20 to enter', 'Call back in 5 minutes'],
+    },
+    ready_at: {
+      train: '5N53', title: 'Answer call from Driver (5N53)',
+      message: '5N53 is ready at Wall Sidings',
+      replies: ['Ok', 'Call back in 5 minutes'],
+    },
+    signaller: {
+      train: '1L33', title: 'Answer call from Exeter Signaller',
+      message: 'I have 1L33 waiting at Honiton',
+      replies: ['Ok', 'Wait 5 minutes', 'Wait 15 minutes'],
+    },
+    early_run: {
+      train: '4022', title: 'Answer call from Aynho Signaller',
+      message: 'I have 4022 running early via Aynho Junction.\nIt can be in your area at about 05:00 if I let it continue.\nDo you want me to hold it until its booked time of 05:22?',
+      replies: ['No, let 4022 run early', 'Please hold 4022 back'],
+    },
+    examine: {
+      train: '3A90', title: 'Answer call from Driver (3A90)',
+      message: 'After examining the line, no obstruction was found',
+      replies: ['Ok, no obstruction found, continue normally', 'Continue examining the line'],
+    },
+  },
+
+  simulateCall(type) {
+    const mock = this.TEST_CALLS[type];
+    if (!mock) return;
+    // Add mock call to the list and trigger answer flow
+    this.calls.push({ train: mock.train, status: 'Unanswered' });
+    this.renderCalls();
+    this._simulateResult = { ...mock };
+    this.answerCall(this.calls.length - 1);
+  },
 
   // Match user's spoken text against available reply options
   matchReply(transcript, replies) {
@@ -987,6 +1048,17 @@ const PhoneCallsUI = {
       return raw.replace(/\bat stop\b/gi, 'at danger');
     }
 
+    // Delay call replies
+    if (/ok.*\w+\s+delayed/i.test(raw)) {
+      const reason = this._delayReason || 'a delay';
+      return `Thanks Driver, understood you are delayed due to ${reason}`;
+    }
+    if (/yes.*signal\s+will\s+be\s+replaced/i.test(raw)) {
+      return 'Thank you driver. you can expect a change of aspect';
+    }
+    if (/no.*signal\s+will\s+not\s+be\s+replaced/i.test(raw)) {
+      return 'Thank you driver.';
+    }
     // "Ok, no obstruction found" — acknowledge and continue normally
     if (/ok.*no\s*obstruction/i.test(raw)) {
       return `${hc}, Thank you. No obstructions found. Continue normally`;
@@ -997,7 +1069,7 @@ const PhoneCallsUI = {
     }
     // Pass signal at danger only
     if (/authoris[ez].*pass.*signal|ask.*pass.*signal|pass.*signal.*at\s*stop/i.test(raw)) {
-      return `Driver of ${hc}, this is${panelRef}. I am authorising you to pass${sigRef} at danger. Proceed at caution to the next signal and be prepared to stop short of any obstruction. Please examine the line and report any obstructions`;
+      return `Driver of ${hc}, this is${panelRef}. I am authorising you to pass${sigRef} at danger. Proceed at caution to the next signal and be prepared to stop short of any obstruction.`;
     }
     // Continue examining the line (no pass at danger)
     if (/continue\s*examin/i.test(raw)) {
@@ -1545,10 +1617,13 @@ const PhoneCallsUI = {
 
     this.addMessage({ type: 'system', text: 'Answering...' });
 
-    // Fetch settings + voices IN PARALLEL with the PowerShell answer script
-    // so they're ready the instant the answer result comes back
+    // Fetch settings + voices IN PARALLEL with the answer script (or mock data)
+    const answerSource = this._simulateResult
+      ? Promise.resolve(this._simulateResult)
+      : window.simsigAPI.phone.answerCall(index, train);
+    this._simulateResult = null;
     const [result, settingsAll, voices] = await Promise.all([
-      window.simsigAPI.phone.answerCall(index, train),
+      answerSource,
       window.simsigAPI.settings.getAll(),
       this.getTTSVoices(),
     ]);
@@ -1587,6 +1662,7 @@ const PhoneCallsUI = {
     const readyAt = !csd ? this.parseReadyAtMessage(driverMsg) : null;
     const earlyRun = this.parseEarlyRunningMessage(driverMsg);
     const sigAdvisory = !csd && !readyAt && !earlyRun ? this.parseSignallerAdvisory(driverMsg) : null;
+    const delay = !csd && !readyAt && !earlyRun && !sigAdvisory ? this.parseDelayMessage(driverMsg) : null;
 
     // Start background noise for the duration of the call
     // Signaller → office ambience, shunter/CSD/yard → yard noise, train → cab noise
@@ -1658,6 +1734,11 @@ const PhoneCallsUI = {
       this.isSignallerCall = true;
       const locPart = sigAdvisory.location ? ` at ${sigAdvisory.location}` : '';
       spokenMsg = `Hello, ${panelName} Signaller, this is ${this.shortenCaller(caller)}. I currently have ${sigAdvisory.headcode} waiting${locPart}`;
+      displayMsg = spokenMsg;
+    } else if (delay) {
+      this._delayReason = delay.reason;
+      const timePart = delay.departTime ? `, expected to depart about ${delay.departTime}` : '';
+      spokenMsg = `Hello Signaller, this is ${delay.headcode} at ${delay.location}. We are delayed due to ${delay.reason}${timePart}`;
       displayMsg = spokenMsg;
     } else if (isExamineResult && this.currentHeadCode) {
       // Examine line result — driver reporting back after examining the line
