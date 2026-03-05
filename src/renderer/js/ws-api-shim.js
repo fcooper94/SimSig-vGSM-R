@@ -234,6 +234,8 @@
     sim: {
       onName: (cb) => on('sim:name', cb),
       onReady: (cb) => on('init:ready', cb),
+      onFailure: (cb) => on('sim:failure-dismissed', cb),
+      onMessageLog: (cb) => on('sim:message-log-lines', cb),
     },
 
     phone: {
@@ -246,6 +248,7 @@
       placeCallReply: (replyIndex, headCode, param2, contactName) => invoke('phone:place-call-reply', replyIndex, headCode, param2, contactName),
       placeCallHangup: () => invoke('phone:place-call-hangup'),
       hideAnswerDialog: () => invoke('phone:hide-answer'),
+      autoWait: (headcode) => invoke('phone:auto-wait', headcode),
       silenceRing: () => invoke('phone:silence-ring'),
       onSilenceRing: (cb) => on('phone:silence-ring', cb),
       notifyCallAnswered: (train) => invoke('phone:call-answered', train),

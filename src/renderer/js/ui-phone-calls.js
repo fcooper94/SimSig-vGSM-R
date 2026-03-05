@@ -505,7 +505,135 @@ const PhoneCallsUI = {
   },
 
   // Words that should be spoken as words, not spelled out as acronyms
-  TTS_WORDS: { 'MOM': 'Mom' },
+  TTS_WORDS: { 'MOM': 'Mom', '3BRIDGES': 'Three Bridges', 'NSW': 'New South Wales' },
+
+  // Route Control callsigns by sim name
+  ROUTE_CONTROL: {
+    'Aston': 'Midlands Control',
+    'Basingstoke Main': 'Wessex Control',
+    'Birmingham New Street': 'Midlands Control',
+    'Brighton': 'Sussex Control',
+    'Cardiff': 'Wales Control',
+    'Cardiff Vale Of Glamorgan': 'Wales Control',
+    'Cardiff Valleys': 'Wales Control',
+    'Carlisle': 'North West Control',
+    'Cathcart': 'Scotland Control',
+    'Central Coast NSW': 'Sydney Trains Control',
+    'Central Scotland': 'Scotland Control',
+    'Cheshire Lines': 'North West Control',
+    'Chester': 'Wales Control',
+    'Chicago L': 'CTA Operations Control Center',
+    'Cornwall': 'Western Control',
+    'Coventry': 'West Coast South Control',
+    'Cowlairs': 'Scotland Control',
+    'Crewe': 'North West Control',
+    'Derby': 'Midlands Control',
+    'Doncaster PSB (North)': 'East Coast Control',
+    'Doncaster PSB (South)': 'East Coast Control',
+    'Doncaster PSB (Station)': 'East Coast Control',
+    'East Coastway': 'Sussex Control',
+    'Edge Hill': 'North West Control',
+    'Edinburgh': 'Scotland Control',
+    'Euston': 'West Coast South Control',
+    'Exeter': 'Western Control',
+    'Feltham': 'Wessex Control',
+    'Fenchurch': 'Anglia Control',
+    'Hereford': 'Western Control',
+    'HongKongEast': 'MTR Operations Control Centre',
+    'Hope Valley': 'North West Control',
+    'Horsham': 'Sussex Control',
+    'Huddersfield': 'North & East Control',
+    'Hunts Cross': 'North West Control',
+    'Huyton & St Helens': 'North West Control',
+    "King's Cross": 'East Coast Control',
+    'Lancing': 'Sussex Control',
+    'Leamington Spa & Fenny Compton': 'Midlands Control',
+    'Leeds Ardsley': 'North & East Control',
+    'Leeds EastWest': 'North & East Control',
+    'Leeds Northwest': 'North & East Control',
+    'Liverpool Lime Street': 'North West Control',
+    'Liverpool Street Station': 'Anglia Control',
+    'Llangollen': 'Wales Control',
+    'London Bridge ASC': 'Kent Control',
+    'London Bridge ASC Mini Sim': 'Kent Control',
+    'LTS': 'Anglia Control',
+    'LUL Victoria line': 'Victoria Line Service Control',
+    'Maidstone East SB': 'Kent Control',
+    'Manchester East': 'North West Control',
+    'Manchester North': 'North West Control',
+    'Manchester Piccadilly': 'North West Control',
+    'Manchester South': 'North West Control',
+    'Marylebone': 'West Coast South Control',
+    'Moss Vale': 'Sydney Trains Control',
+    'Motherwell': 'Scotland Control',
+    'Newport': 'Wales Control',
+    'North East Scotland': 'Scotland Control',
+    'North East Wales': 'Wales Control',
+    'North Kent': 'Kent Control',
+    'North Wales Coast': 'Wales Control',
+    'Norwich': 'Anglia Control',
+    'Oxford': 'Western Control',
+    'Oxted': 'Sussex Control',
+    'Paisley': 'Scotland Control',
+    'Peak District': 'North West Control',
+    'Penrith & St Marys NSW': 'Sydney Trains Control',
+    'Penzance': 'Western Control',
+    'Peterborough': 'East Coast Control',
+    'Plymouth': 'Western Control',
+    'Port Talbot': 'Wales Control',
+    'Portsmouth': 'Wessex Control',
+    'Royston': 'Anglia Control',
+    'Rugby SCC 1+2 (South)': 'West Coast South Control',
+    'Rugby SCC 3+4 (Centre)': 'West Coast South Control',
+    'Rugby SCC 5+6 (North)': 'West Coast South Control',
+    'Salisbury': 'Wessex Control',
+    'Saltley': 'Midlands Control',
+    'Sandhills IECC (Merseyrail)': 'Merseyrail Control',
+    'Sheffield': 'North & East Control',
+    'Shrewsbury': 'Wales Control',
+    'Slough Panel': 'Western Control',
+    'Stafford': 'West Coast South Control',
+    'Staffordshire': 'West Coast South Control',
+    'Stockport': 'North West Control',
+    'Stourbridge Jn': 'Midlands Control',
+    'Strathfield': 'Sydney Trains Control',
+    'Swindon A & B IECC': 'Western Control',
+    'Sydney Box': 'Sydney Trains Control',
+    'Sydney North': 'Sydney Trains Control',
+    'Telford & Oxley': 'West Coast South Control',
+    'Three Bridges ASC': 'Sussex Control',
+    'Tyneside IECC': 'East Coast Control',
+    'Victoria Central': 'Kent Control',
+    'Victoria South Eastern': 'Kent Control',
+    'Walsall': 'Midlands Control',
+    'Warrington PSB': 'North West Control',
+    'Waterloo': 'Wessex Control',
+    'Watford Jn': 'West Coast South Control',
+    'Wembley Mainline': 'West Coast South Control',
+    'Wembley Suburban': 'West Coast South Control',
+    'West Anglia': 'Anglia Control',
+    'West Hampstead': 'Anglia Control',
+    'West Yorkshire': 'North & East Control',
+    'Westbury': 'Western Control',
+    'Wigan Wallgate': 'North West Control',
+    'Wimbledon': 'Wessex Control',
+    'Woking ASC': 'Wessex Control',
+    'Wolverhampton': 'West Coast South Control',
+    'York North and South': 'East Coast Control',
+  },
+
+  // Look up route control callsign for the current sim
+  getRouteControl() {
+    const panel = this.currentPanelName || '';
+    // Exact match first
+    if (this.ROUTE_CONTROL[panel]) return this.ROUTE_CONTROL[panel];
+    // Fuzzy: check if panel starts with or contains a key
+    const lp = panel.toLowerCase();
+    for (const [key, val] of Object.entries(this.ROUTE_CONTROL)) {
+      if (lp.startsWith(key.toLowerCase()) || key.toLowerCase().startsWith(lp)) return val;
+    }
+    return null;
+  },
 
   phoneticize(text) {
     text = this.naturalizeTimes(text);
@@ -543,7 +671,8 @@ const PhoneCallsUI = {
   // Pick a consistent TTS voice for a caller (90% male, 10% female)
   // Cached by headcode so the same train always gets the same voice within a session
   getTTSVoiceId(caller, voices) {
-    const cacheKey = this.currentHeadCode || caller;
+    // All outgoing calls share the same voice for the session
+    const cacheKey = this._outgoingCall ? '_outgoing' : (this.currentHeadCode || caller);
     if (this.voiceCache[cacheKey]) return this.voiceCache[cacheKey];
     const hash = this.hashString(caller);
     const males = voices.filter((v) => v.gender === 'male');
@@ -665,13 +794,28 @@ const PhoneCallsUI = {
 
   // Parse CSD (Carriage Sidings) entry permission messages
   parseCsdMessage(msg) {
-    // "5A20 is ready at entry point Farnham CSD (WK440), scheduled 07:16."
-    const entryMatch = msg.match(/(\w+)\s+is ready at entry point\s+(.+?)\s*\((\w+)\)/i);
-    if (!entryMatch) return null;
+    let headcode, entryPoint, signal;
 
-    const headcode = entryMatch[1];
-    const entryPoint = entryMatch[2].trim();
-    const signal = entryMatch[3];
+    // Format 1: "5A20 is ready at entry point Farnham CSD (WK440), scheduled 07:16."
+    const fmt1 = msg.match(/(\w+)\s+is ready at entry point\s+(.+?)\s*\((\w+)\)/i);
+    // Format 2: "6Y72 is ready at entry point 3Bridges T1210/TD132, scheduled 14:10."
+    const fmt2 = !fmt1 ? msg.match(/(\w+)\s+is ready at entry point\s+(.+?)\s+([\w]+\/[\w]+)/i) : null;
+
+    if (fmt1) {
+      headcode = fmt1[1];
+      entryPoint = fmt1[2].trim();
+      signal = fmt1[3];
+    } else if (fmt2) {
+      headcode = fmt2[1];
+      entryPoint = fmt2[2].trim();
+      signal = fmt2[3];
+    } else {
+      return null;
+    }
+
+    // Extract scheduled time
+    const schedMatch = msg.match(/scheduled\s+(\d{1,2}:\d{2})/i);
+    const scheduled = schedMatch ? schedMatch[1] : '';
 
     // Route line: "07+17 Farnham CSD - Farnham (SWR 12 450)"
     const routeMatch = msg.match(/\d{2}\+\d{2}\s+.+?\s*-\s*(.+?)\s*\(/);
@@ -684,7 +828,7 @@ const PhoneCallsUI = {
       if (platMatch) { platform = platMatch[1]; break; }
     }
 
-    return { headcode, entryPoint, signal, nextStop, platform };
+    return { headcode, entryPoint, signal, nextStop, platform, scheduled };
   },
 
   // Add "the" before Up/Down signal names, but not standard codes like "23" or "WK203"
@@ -698,7 +842,17 @@ const PhoneCallsUI = {
     const isShunter = caller && /shunter/i.test(caller);
     const sigRef = `${this.signalArticle(csd.signal)} signal`;
     if (isShunter) {
-      let msg = `Hello, ${panelName} Signaller, this is the Shunter within ${csd.entryPoint}. I have ${csd.headcode} at ${sigRef}. Request permission to enter`;
+      let msg;
+      if (csd.signal.includes('/')) {
+        // Format 2: "6Y72 is ready at entry point 3Bridges T1210/TD132, scheduled 14:10."
+        msg = `Hello Signaller. This is the Shunter at ${csd.entryPoint}. I have ${csd.headcode} at entry point ${csd.signal} who is ready`;
+        if (csd.scheduled) msg += `. Scheduled at ${csd.scheduled}`;
+        msg += `. Request permission for them to enter`;
+      } else {
+        // Format 1: "5A20 is ready at entry point Farnham CSD (WK440), scheduled 07:16."
+        msg = `Hello, ${panelName} Signaller, this is the Shunter within ${csd.entryPoint}. I have ${csd.headcode} at ${sigRef}. Request permission to enter`;
+        if (csd.scheduled) msg += `. Scheduled at ${csd.scheduled}`;
+      }
       if (csd.nextStop) {
         msg += `. Their next stop will be ${csd.nextStop}`;
         if (csd.platform) msg += ` Platform ${csd.platform}`;
@@ -707,6 +861,7 @@ const PhoneCallsUI = {
     }
     const posStr = position ? `, ${position}` : '';
     let msg = `Hello, ${panelName} Signaller${posStr}, this is driver of ${csd.headcode} at ${sigRef} within ${csd.entryPoint}. Request permission to enter`;
+    if (csd.scheduled) msg += `. Scheduled at ${csd.scheduled}`;
     if (csd.nextStop) {
       msg += `, next stop will be ${csd.nextStop}`;
       if (csd.platform) msg += ` Platform ${csd.platform}`;
@@ -879,6 +1034,11 @@ const PhoneCallsUI = {
       train: '5A20', title: 'Answer call from Shunter (Brighton CSD)',
       message: '5A20 is ready at entry point Brighton CSD (WK440), scheduled 07:16.\n07+17 Brighton CSD - Hove (SWR 12 450)\n    Hove 07:25    07:25    1',
       replies: ['Permission granted for 5A20 to enter', 'Call back in 5 minutes'],
+    },
+    csd_entry: {
+      train: '6Y72', title: 'Answer call from Shunter (Panel 4 (Three Bridges))',
+      message: '6Y72 is ready at entry point 3Bridges T1210/TD132, scheduled 14:10.\n14:10    Three Bridges TL Up Depot-Dollands Moor (GBRF) ZZ (GBRF (6) 66 + 2\n    3Bridges Up TL NX 14:13    14:15    132    SL --- ---',
+      replies: ['Permission granted for 6Y72 to enter', 'Please call back in 2 minutes', 'Please call back in 5 minutes', 'Please call back in 15 minutes'],
     },
     ready_at: {
       train: '5N53', title: 'Answer call from Driver (5N53)',
@@ -1246,6 +1406,7 @@ const PhoneCallsUI = {
     // "Permission granted for 5A20 to enter"
     const permMatch = raw.match(/permission\s+granted\s+for\s+(\w+)\s+to\s+enter/i);
     if (permMatch) {
+      if (this.isShunterCall) return `Hello Shunter, ${permMatch[1]} has permission to enter`;
       return `Permission granted, ${permMatch[1]} can enter`;
     }
     // "No, let 4022 run early" — allow early running train to continue
@@ -1261,8 +1422,8 @@ const PhoneCallsUI = {
     // "Please call back in N minutes"
     const callBackMatch = raw.match(/call\s*back\s+in\s+(\d+)\s*min/i);
     if (callBackMatch) {
-      const who = this.isShunterCall ? 'Shunter' : 'Driver';
-      return `${who}, Please call back in ${callBackMatch[1]} minutes`;
+      if (this.isShunterCall) return `Hello Shunter, call back in ${callBackMatch[1]} minutes`;
+      return `Driver, Please call back in ${callBackMatch[1]} minutes`;
     }
     // Simple "Ok" reply (e.g. ready-at-location acknowledgement)
     if (/^\s*ok\s*$/i.test(raw)) {
@@ -1378,6 +1539,7 @@ const PhoneCallsUI = {
     if (callBackMatch) {
       const n = parseInt(callBackMatch[1], 10);
       const word = this.NUMBERS[n] || callBackMatch[1];
+      if (this.isShunterCall) return `Ok, I will call back in ${word} minutes`;
       return `Ok, will call back in ${word} minutes`;
     }
     // Run early — caller acknowledges
@@ -1393,7 +1555,8 @@ const PhoneCallsUI = {
       return `Understood, I will continue to obey all other aspects${trainRef}`;
     }
     // Permission granted to enter
-    if (/permission\s+granted/i.test(lower)) {
+    if (/permission\s+granted/i.test(lower) || /has\s+permission\s+to\s+enter/i.test(lower)) {
+      if (this.isShunterCall) return `Ok, I shall instruct ${hc} that they have permission to enter`;
       return `Permission granted, ${hc} can enter`;
     }
     // Simple "Ok Thanks" acknowledgement (ready-at-location etc.)
@@ -1901,8 +2064,8 @@ const PhoneCallsUI = {
     const isExamineResult = /examining the line.*no obstruction|no obstruction.*found/i.test(driverMsg);
     let displayMsg, spokenMsg;
     if (csd) {
-      displayMsg = `${csd.headcode} is ready at entry point ${csd.entryPoint} (${csd.signal}). Permission required to enter.`;
       spokenMsg = this.buildCsdSpokenMessage(panelName, position, csd, caller);
+      displayMsg = spokenMsg;
     } else if (readyAt) {
       const isShunter = /shunter/i.test(caller);
       const isDriverAtSidings = /^Driver\s*\(/i.test(caller) && /\b(siding|yard|goods|depot)\b/i.test(readyAt.location);
@@ -2504,6 +2667,63 @@ const PhoneCallsUI = {
     this._resumeIncoming();
   },
 
+  // Dial Route Control — simulated call, not via SimSig Place Call dialog
+  async dialRouteControl() {
+    const callsign = this.getRouteControl();
+    if (!callsign) {
+      console.warn('[RouteControl] No route control found for panel:', this.currentPanelName);
+      return;
+    }
+    if (this.inCall || this._outgoingCall || this._dialingActive) return;
+
+    // Show dialing state with ringing
+    this.showDialingNotification('Route Control');
+
+    // Simulate ringing for 2–4 seconds
+    const ringTime = 2000 + Math.random() * 2000;
+    await new Promise((r) => setTimeout(r, ringTime));
+    if (!this._dialingActive) return; // user cancelled
+
+    // Stop ringing and enter call state
+    this.stopDialing(true);
+    this._outgoingCall = true;
+    this._outgoingContactName = 'Route Control';
+    this._outgoingReplySent = false;
+    window.simsigAPI.keys.setInCall(true);
+    this.notificationEl.classList.remove('hidden', 'flashing');
+    this.notificationEl.classList.add('in-call');
+    this.notificationTrainEl.textContent = 'Route Control';
+    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[Hang Up]';
+    this._updatePhonebookInCall('Route Control', true);
+
+    // Use signaller background noise
+    this.bgCallerType = 'signaller';
+    this.startBgNoise();
+
+    // Route Control answers
+    const greeting = `Hello, ${callsign}`;
+    this.addMessage({ type: 'driver', caller: callsign, text: greeting });
+    this._syncToRemote();
+
+    await this.speakAsDriver(greeting, callsign);
+    if (!this._outgoingCall) return;
+
+    // Show "SPEAK NOW" prompt and wait for user to speak via PTT, then hang up
+    this.addMessage({ type: 'greeting', text: 'Hold PTT and speak...' });
+    this.renderChat();
+    this._syncToRemote();
+
+    // Wait for PTT cycles until user hangs up
+    while (this._outgoingCall) {
+      try {
+        await this.waitForUserSpeech();
+        if (!this._outgoingCall) return;
+      } catch {
+        break;
+      }
+    }
+  },
+
   // Handle phonebook dial triggered from browser remote action
   async _handleRemoteDial(index, name) {
     this.showDialingNotification(name);
@@ -2813,8 +3033,11 @@ const PhoneCallsUI = {
           } else if (this.isThirdPartyCall) {
             items.push({ html: `Ok, get the driver to call back in ${timeParts} minutes.`, replyIndex: -1 });
           } else {
-            const cbWho = this.isShunterCall ? 'Shunter' : 'Driver';
-            items.push({ html: `${cbWho}, Please call back in ${timeParts} minutes.`, replyIndex: -1 });
+            if (this.isShunterCall) {
+              items.push({ html: `Hello Shunter, call back in ${timeParts} minutes.`, replyIndex: -1 });
+            } else {
+              items.push({ html: `Driver, Please call back in ${timeParts} minutes.`, replyIndex: -1 });
+            }
           }
         }
         otherReplies.forEach((o) => {

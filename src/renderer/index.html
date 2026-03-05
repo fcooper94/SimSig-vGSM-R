@@ -66,7 +66,7 @@
         <div class="gsm-section" id="section-messages">
           <div class="gsm-section-icon"><span class="icon-envelope-x"></span></div>
           <div class="gsm-section-content">
-            <div class="empty-grid"></div>
+            <div id="alerts-feed"></div>
           </div>
         </div>
       </section>
@@ -329,6 +329,7 @@
         <button class="test-call-btn" data-type="red_signal">Driver at Red Signal</button>
         <button class="test-call-btn" data-type="delay">Driver Delayed</button>
         <button class="test-call-btn" data-type="csd">CSD Entry Permission</button>
+        <button class="test-call-btn" data-type="csd_entry">Shunter Entry Point</button>
         <button class="test-call-btn" data-type="ready_at">Ready at Sidings</button>
         <button class="test-call-btn" data-type="signaller">Signaller Advisory</button>
         <button class="test-call-btn" data-type="early_run">Early Running</button>
@@ -336,6 +337,13 @@
         <button class="test-call-btn" data-type="unlit_signal">Unlit Signal</button>
         <button class="test-call-btn" data-type="examine">Examine Line Result</button>
         <button class="test-call-btn" data-type="fixed_report">Failure Fixed</button>
+      </div>
+      <h3 style="margin-top:10px">Simulate Alert</h3>
+      <div class="test-call-buttons">
+        <button class="test-alert-btn" data-alert="red_signal">Train at Red Signal</button>
+        <button class="test-alert-btn" data-alert="tcf">Track Circuit Failure</button>
+        <button class="test-alert-btn" data-alert="points">Points Failure</button>
+        <button class="test-alert-btn" data-alert="signal_lamp">Signal Lamp Failure</button>
       </div>
       <div class="confirm-actions">
         <button id="test-call-cancel">Cancel</button>
@@ -367,6 +375,7 @@
   <script src="js/ui-ptt.js"></script>
   <script src="js/ui-phone-calls.js"></script>
   <script src="js/ui-train-tracker.js"></script>
+  <script src="js/ui-alerts-feed.js"></script>
   <script src="js/ui-message-feed.js"></script>
   <script src="js/audio-pipeline.js"></script>
   <script src="js/app.js"></script>

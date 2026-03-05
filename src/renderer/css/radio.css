@@ -833,6 +833,21 @@
   color: #000080;
 }
 
+.phonebook-route-control {
+  border-color: #006600;
+}
+.phonebook-route-control .phonebook-avatar {
+  background: #006600;
+  font-size: 14px;
+}
+.phonebook-route-control:hover {
+  border-color: #004400;
+  background: #dce6dc;
+}
+.phonebook-route-control:hover .phonebook-dial-icon {
+  color: #006600;
+}
+
 .phonebook-item.dialing {
   border-color: #000080;
   background: #e8eef8;
@@ -958,6 +973,27 @@ body.dark-mode #calls-table .call-answer-btn:hover {
 body.dark-mode #calls-table .call-answer-btn.in-call {
   background: #1a3a4d;
   color: var(--accent);
+}
+
+body.dark-mode #alerts-table {
+  color: var(--text);
+}
+
+body.dark-mode #alerts-table td {
+  border-bottom-color: #3a3a3a;
+  border-right-color: #333333;
+}
+
+body.dark-mode #alerts-table tbody tr:hover {
+  background: #1a3a4d;
+}
+
+body.dark-mode .alert-failure-row td {
+  color: #ef4444;
+}
+
+body.dark-mode .alert-wait-btn:hover {
+  background: #3a3a3a;
 }
 
 body.dark-mode #incoming-notification.in-call {
@@ -1109,6 +1145,20 @@ body.dark-mode .phonebook-item.dialing .phonebook-dial-icon {
 
 body.dark-mode .phonebook-item:hover .phonebook-dial-icon {
   color: var(--accent);
+}
+
+body.dark-mode .phonebook-route-control {
+  border-color: #336633;
+}
+body.dark-mode .phonebook-route-control .phonebook-avatar {
+  background: #336633;
+}
+body.dark-mode .phonebook-route-control:hover {
+  border-color: #44aa44;
+  background: #1a3a1a;
+}
+body.dark-mode .phonebook-route-control:hover .phonebook-dial-icon {
+  color: #44aa44;
 }
 
 body.dark-mode .phonebook-dial-icon {

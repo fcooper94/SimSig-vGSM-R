@@ -34,6 +34,84 @@ let lastSimName = null;
 let lastInitReady = false;
 let lastChatState = null;
 
+// Auto-wait state — managed in main process so interception happens at the source
+const pendingAutoWaits = new Map(); // headcode (uppercase) → true
+const suppressedAutoWaits = new Set(); // headcodes currently being auto-answered
+
+function extractHeadcode(text) {
+  const m = (text || '').match(/([0-9][A-Za-z]\d{2})/);
+  return m ? m[1].toUpperCase() : (text || '').trim();
+}
+
+// Runs answer-phone-call.ps1 then reply-phone-call.ps1 — same scripts as normal phone replies
+async function doAutoWait(rawTrain, headcode) {
+  if (!phoneReader) return;
+  phoneReader._locked = true;
+
+  // Wait for any in-flight PS1 scripts to finish
+  await new Promise((resolve) => {
+    const check = () => {
+      if (!phoneReader.polling && !phoneReader._suppressing && !phoneReader._readingLog) {
+        resolve();
+      } else {
+        setTimeout(check, 100);
+      }
+    };
+    check();
+  });
+
+  try {
+    // Step 1: Answer the call (same script as normal phone answer)
+    const answerResult = await new Promise((resolve) => {
+      const args = [
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', ANSWER_SCRIPT, '-Index', '0', '-Train', rawTrain,
+      ];
+      console.log(`[AutoWait] Answering ${rawTrain}...`);
+      execFile('powershell', args, { timeout: 10000 }, (err, stdout, stderr) => {
+        if (stderr) console.error('[AutoWait] answer stderr:', stderr.trim());
+        if (err) { resolve({ error: err.message }); return; }
+        try { resolve(JSON.parse((stdout || '').trim())); }
+        catch { resolve({ error: 'Failed to parse answer response' }); }
+      });
+    });
+
+    if (answerResult.error) {
+      console.warn(`[AutoWait] Answer failed for ${rawTrain}:`, answerResult.error);
+      return;
+    }
+
+    // Step 2: Reply "Wait 2 minutes" (same script as normal phone reply, index 0)
+    await new Promise((resolve) => {
+      const args = [
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', REPLY_SCRIPT, '-ReplyIndex', '0', '-HeadCode', headcode,
+      ];
+      console.log(`[AutoWait] Replying "Wait 2 mins" to ${rawTrain}...`);
+      execFile('powershell', args, { timeout: 30000 }, (err, stdout, stderr) => {
+        if (stderr) console.error('[AutoWait] reply stderr:', stderr.trim());
+        if (err) { resolve({ error: err.message }); return; }
+        try {
+          const lines = (stdout || '').trim().split(/\r?\n/).filter(Boolean);
+          resolve(JSON.parse(lines[lines.length - 1] || '{}'));
+        } catch { resolve({ error: 'Failed to parse reply response' }); }
+      });
+    });
+
+    // Re-raise our window
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) {
+      win.setAlwaysOnTop(true, 'floating');
+      win.moveTop();
+      win.focus();
+    }
+
+    console.log(`[AutoWait] Completed for ${rawTrain}`);
+  } finally {
+    phoneReader._locked = false;
+  }
+}
+
 // Handler map for WebSocket bridge — stores all invoke handlers
 const handlerMap = {};
 
@@ -235,7 +313,33 @@ function registerIpcHandlers() {
       // Start polling for phone calls from the SimSig window (independent of gateway)
       if (phoneReader) phoneReader.stopPolling();
       phoneReader = new PhoneReader(
-        (calls) => sendToMainWindow(channels.PHONE_CALLS_UPDATE, calls),
+        (calls) => {
+          // Intercept calls that match a pending auto-wait before they reach the renderer
+          const filtered = [];
+          for (const call of calls) {
+            const hc = extractHeadcode(call.train);
+            if (pendingAutoWaits.has(hc)) {
+              // Driver just called — suppress and fire auto-wait
+              console.log(`[AutoWait] Intercepted call from ${call.train} (${hc})`);
+              pendingAutoWaits.delete(hc);
+              suppressedAutoWaits.add(hc);
+              phoneReader._locked = true; // lock immediately to prevent next poll
+              doAutoWait(call.train, hc);
+            } else if (suppressedAutoWaits.has(hc)) {
+              // Still being auto-answered — keep suppressing
+            } else {
+              filtered.push(call);
+            }
+          }
+          // Clean up suppressions for calls no longer in list (auto-wait completed)
+          for (const hc of suppressedAutoWaits) {
+            if (!calls.some((c) => extractHeadcode(c.train) === hc)) {
+              suppressedAutoWaits.delete(hc);
+            }
+          }
+          lastPhoneCalls = filtered;
+          sendToMainWindow(channels.PHONE_CALLS_UPDATE, filtered);
+        },
         (simName) => {
           sendToMainWindow(channels.SIM_NAME, simName);
           settings.set('signaller.panelName', simName);
@@ -249,6 +353,12 @@ function registerIpcHandlers() {
         },
         () => {
           sendToMainWindow(channels.PHONE_DRIVER_HUNG_UP);
+        },
+        (dismissed) => {
+          sendToMainWindow(channels.FAILURE_DISMISSED, dismissed);
+        },
+        (lines) => {
+          sendToMainWindow(channels.MESSAGE_LOG_LINES, lines);
         },
       );
       phoneReader.startPolling(2000);
@@ -383,6 +493,15 @@ function registerIpcHandlers() {
         }
       });
     });
+  });
+
+  // Queue an auto-wait — when the driver's call arrives in the next phone poll,
+  // the onChange callback intercepts it and runs answer + reply silently.
+  registerHandler(channels.PHONE_AUTO_WAIT, (_event, headcode) => {
+    const hc = (headcode || '').toUpperCase();
+    pendingAutoWaits.set(hc, true);
+    console.log(`[AutoWait] Queued for ${hc} — will intercept when driver calls`);
+    return { ok: true };
   });
 
   // Phone Book — read contacts

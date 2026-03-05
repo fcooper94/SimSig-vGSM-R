@@ -32,6 +32,7 @@ const channels = {
   PHONE_DRIVER_HUNG_UP: 'phone:driver-hung-up',
   PHONE_SILENCE_RING: 'phone:silence-ring',
   PHONE_CALL_ANSWERED: 'phone:call-answered',
+  PHONE_AUTO_WAIT: 'phone:auto-wait',
   TTS_GET_VOICES: 'tts:get-voices',
   TTS_SPEAK: 'tts:speak',
   TTS_CHECK_CREDITS: 'tts:check-credits',
@@ -50,6 +51,8 @@ const channels = {
   PHONE_REMOTE_ACTION: 'phone:remote-action',
   WEB_START: 'web:start',
   WEB_STOP: 'web:stop',
+  FAILURE_DISMISSED: 'sim:failure-dismissed',
+  MESSAGE_LOG_LINES: 'sim:message-log-lines',
 };
 
 contextBridge.exposeInMainWorld('simsigAPI', {
@@ -99,6 +102,16 @@ contextBridge.exposeInMainWorld('simsigAPI', {
     onReady: (callback) => {
       ipcRenderer.on(channels.INIT_READY, () => callback());
     },
+    onFailure: (callback) => {
+      const listener = (_event, dismissed) => callback(dismissed);
+      ipcRenderer.on(channels.FAILURE_DISMISSED, listener);
+      return () => ipcRenderer.removeListener(channels.FAILURE_DISMISSED, listener);
+    },
+    onMessageLog: (callback) => {
+      const listener = (_event, lines) => callback(lines);
+      ipcRenderer.on(channels.MESSAGE_LOG_LINES, listener);
+      return () => ipcRenderer.removeListener(channels.MESSAGE_LOG_LINES, listener);
+    },
   },
 
   phone: {
@@ -115,6 +128,7 @@ contextBridge.exposeInMainWorld('simsigAPI', {
     placeCallReply: (replyIndex, headCode, param2, contactName) => ipcRenderer.invoke(channels.PHONE_PLACE_CALL_REPLY, replyIndex, headCode, param2, contactName),
     placeCallHangup: () => ipcRenderer.invoke(channels.PHONE_PLACE_CALL_HANGUP),
     hideAnswerDialog: () => ipcRenderer.invoke(channels.PHONE_HIDE_ANSWER),
+    autoWait: (headcode) => ipcRenderer.invoke(channels.PHONE_AUTO_WAIT, headcode),
     silenceRing: () => ipcRenderer.invoke(channels.PHONE_SILENCE_RING),
     onSilenceRing: (callback) => {
       const listener = () => callback();

@@ -35,6 +35,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (statusStr === 'disconnected') {
       PhoneCallsUI.reset();
       TrainTracker.reset();
+      AlertsFeed.clear();
       MessageFeed.reset();
       // Reset panel name
       document.getElementById('panel-name-tab').textContent = '-';
@@ -75,10 +76,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Feed STOMP messages to TrainTracker and MessageFeed
+  AlertsFeed.init();
   window.simsigAPI.messages.onMessage((msg) => {
     if (!ConnectionUI.isConnected && ConnectionUI.indicator.className !== 'no-gateway') return;
     TrainTracker.handleMessage(msg);
     MessageFeed.handleMessage(msg);
+  });
+
+  // Failure dialog auto-suppression — show dismissed failures in alerts feed
+  window.simsigAPI.sim.onFailure((dismissed) => {
+    AlertsFeed.addFailure(dismissed);
+  });
+
+  // SimSig message log — feed relevant lines into alerts feed
+  window.simsigAPI.sim.onMessageLog((lines) => {
+    AlertsFeed.addMessageLogLines(lines);
   });
 
   // Auto-populate panel name and subtitle from SimSig window title
@@ -88,6 +100,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('panel-name-tab').textContent = trimmed;
     // Show full name in subtitle row
     document.getElementById('panel-subtitle').textContent = name;
+    // Keep PhoneCallsUI in sync so Route Control lookup works
+    PhoneCallsUI.currentPanelName = name;
   });
 
   // Now do async initialization (PTTUI needs settings from main process)
@@ -171,6 +185,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     phonebookStatus.textContent = '';
     phonebookList.innerHTML = '';
+
+    // Route Control — simulated call (always available if sim has a mapping)
+    const routeControl = PhoneCallsUI.getRouteControl();
+    if (routeControl) {
+      const rcRow = document.createElement('div');
+      rcRow.className = 'phonebook-item phonebook-route-control';
+
+      const rcAvatar = document.createElement('div');
+      rcAvatar.className = 'phonebook-avatar';
+      rcAvatar.textContent = 'RC';
+      rcRow.appendChild(rcAvatar);
+
+      const rcLabel = document.createElement('div');
+      rcLabel.className = 'phonebook-name';
+      rcLabel.textContent = `Route Control (${routeControl})`;
+      rcRow.appendChild(rcLabel);
+
+      const rcIcon = document.createElement('div');
+      rcIcon.className = 'phonebook-dial-icon';
+      rcIcon.innerHTML = '&#128222;';
+      rcRow.appendChild(rcIcon);
+
+      rcRow.addEventListener('click', () => {
+        if (PhoneCallsUI.inCall || PhoneCallsUI._outgoingCall || PhoneCallsUI._dialingActive) {
+          phonebookStatus.textContent = 'Cannot dial while in a call';
+          return;
+        }
+        PhoneCallsUI.dialRouteControl();
+      });
+      phonebookList.appendChild(rcRow);
+    }
+
     phonebookContacts.forEach((name, idx) => {
       const row = document.createElement('div');
       row.className = 'phonebook-item';
@@ -443,6 +489,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       btn.addEventListener('click', () => {
         testCallModal.classList.add('hidden');
         PhoneCallsUI.simulateCall(btn.dataset.type);
+      });
+    });
+    testCallModal.querySelectorAll('.test-alert-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        testCallModal.classList.add('hidden');
+        AlertsFeed.simulateAlert(btn.dataset.alert);
       });
     });
     document.getElementById('test-call-cancel').addEventListener('click', () => {

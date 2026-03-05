@@ -270,7 +270,7 @@ body {
   background: var(--grid-bg);
 }
 
-/* Empty grid — spreadsheet-like rows */
+/* Empty grid — spreadsheet-like rows (kept for fallback) */
 .empty-grid {
   flex: 1;
   background:
@@ -291,6 +291,82 @@ body {
       transparent 100%
     );
   background-color: var(--grid-bg);
+}
+
+/* Alerts feed — trains at red signals + infrastructure failures */
+#alerts-feed {
+  flex: 1;
+  overflow-y: auto;
+}
+
+#alerts-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 15px;
+  color: #000;
+}
+
+#alerts-table thead {
+  background: var(--bg-panel);
+  position: sticky;
+  top: 0;
+}
+
+#alerts-table th {
+  padding: 6px 10px;
+  text-align: left;
+  font-weight: bold;
+  border-right: 1px solid #a0a0a0;
+  border-bottom: 2px solid #808080;
+  color: var(--text);
+}
+
+#alerts-table th:last-child {
+  border-right: none;
+}
+
+#alerts-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #c0c0c0;
+  border-right: 1px solid #d0d0d0;
+  background: var(--grid-bg);
+}
+
+#alerts-table td:last-child {
+  border-right: none;
+}
+
+#alerts-table .col-train { width: 40%; }
+#alerts-table .col-signal { width: 30%; }
+#alerts-table .col-action { width: 30%; text-align: center; }
+
+#alerts-table tbody tr:hover {
+  background: #c0d0e8;
+}
+
+.alert-failure-row td {
+  color: #cc0000;
+  font-weight: bold;
+}
+
+.alert-wait-btn {
+  background: var(--bg-panel);
+  color: var(--text);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  padding: 3px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.alert-wait-btn:hover {
+  background: #e0dcd4;
+}
+
+.alert-wait-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 /* RIGHT PANEL */

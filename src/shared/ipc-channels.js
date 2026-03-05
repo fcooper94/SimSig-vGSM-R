@@ -40,6 +40,7 @@ module.exports = {
   PHONE_DRIVER_HUNG_UP: 'phone:driver-hung-up',
   PHONE_SILENCE_RING: 'phone:silence-ring',
   PHONE_CALL_ANSWERED: 'phone:call-answered',
+  PHONE_AUTO_WAIT: 'phone:auto-wait',
 
   // TTS
   TTS_GET_VOICES: 'tts:get-voices',
@@ -48,6 +49,8 @@ module.exports = {
 
   // Sim info
   SIM_NAME: 'sim:name',
+  FAILURE_DISMISSED: 'sim:failure-dismissed',
+  MESSAGE_LOG_LINES: 'sim:message-log-lines',
 
   // Init
   INIT_READY: 'init:ready',
