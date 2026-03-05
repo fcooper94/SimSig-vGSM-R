@@ -63,6 +63,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   window.simsigAPI.phone.onCallsUpdate((calls) => {
+    AlertsFeed.pruneFromCalls(calls);
     PhoneCallsUI.update(calls);
   });
 
@@ -186,7 +187,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     phonebookStatus.textContent = '';
     phonebookList.innerHTML = '';
 
-    // Route Control — simulated call (always available if sim has a mapping)
+    // Route Control — simulated call (available if sim has a mapping and failures exist)
     const routeControl = PhoneCallsUI.getRouteControl();
     if (routeControl) {
       const rcRow = document.createElement('div');
@@ -207,7 +208,31 @@ document.addEventListener('DOMContentLoaded', async () => {
       rcIcon.innerHTML = '&#128222;';
       rcRow.appendChild(rcIcon);
 
+      // Update enabled/disabled state based on active failures
+      const updateRcState = () => {
+        const hasFailures = typeof AlertsFeed !== 'undefined' && AlertsFeed.getActiveFailures().length > 0;
+        if (hasFailures) {
+          rcRow.classList.remove('disabled');
+          rcRow.title = '';
+          rcIcon.classList.remove('disabled');
+          rcIcon.title = '';
+        } else {
+          rcRow.classList.add('disabled');
+          rcRow.title = 'No failures are active';
+          rcIcon.classList.add('disabled');
+          rcIcon.title = 'No failures are active';
+        }
+      };
+      updateRcState();
+      // Re-check whenever AlertsFeed renders (failures added/removed)
+      AlertsFeed._onRenderCallback = updateRcState;
+
       rcRow.addEventListener('click', () => {
+        const hasFailures = typeof AlertsFeed !== 'undefined' && AlertsFeed.getActiveFailures().length > 0;
+        if (!hasFailures) {
+          phonebookStatus.textContent = 'No failures are active';
+          return;
+        }
         if (PhoneCallsUI.inCall || PhoneCallsUI._outgoingCall || PhoneCallsUI._dialingActive) {
           phonebookStatus.textContent = 'Cannot dial while in a call';
           return;

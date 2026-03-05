@@ -1241,11 +1241,11 @@ const PhoneCallsUI = {
   // Returns a promise that resolves when PTT is pressed
   waitForPTTPress() {
     return new Promise((resolve, reject) => {
-      if (this._replyClicked) { reject(new Error('reply_clicked')); return; }
+      if (this._replyClicked || this._outgoingReplySent) { reject(new Error('reply_clicked')); return; }
       if (this._useTextInput) { reject(new Error('use_text')); return; }
       if (typeof PTTUI !== 'undefined' && PTTUI.isActive) { resolve(); return; }
       const check = () => {
-        if (this._replyClicked) { reject(new Error('reply_clicked')); return; }
+        if (this._replyClicked || this._outgoingReplySent) { reject(new Error('reply_clicked')); return; }
         if (this._useTextInput) { reject(new Error('use_text')); return; }
         if (typeof PTTUI !== 'undefined' && PTTUI.isActive) {
           resolve();
@@ -2667,7 +2667,7 @@ const PhoneCallsUI = {
     this._resumeIncoming();
   },
 
-  // Dial Route Control — simulated call, not via SimSig Place Call dialog
+  // Dial Route Control — simulated call reporting active failures
   async dialRouteControl() {
     const callsign = this.getRouteControl();
     if (!callsign) {
@@ -2675,6 +2675,12 @@ const PhoneCallsUI = {
       return;
     }
     if (this.inCall || this._outgoingCall || this._dialingActive) return;
+
+    // Check for active failures — don't allow call if none
+    if (typeof AlertsFeed !== 'undefined' && AlertsFeed.getActiveFailures().length === 0) {
+      console.log('[RouteControl] No active failures to report');
+      return;
+    }
 
     // Show dialing state with ringing
     this.showDialingNotification('Route Control');
@@ -2708,20 +2714,170 @@ const PhoneCallsUI = {
     await this.speakAsDriver(greeting, callsign);
     if (!this._outgoingCall) return;
 
-    // Show "SPEAK NOW" prompt and wait for user to speak via PTT, then hang up
-    this.addMessage({ type: 'greeting', text: 'Hold PTT and speak...' });
+    // Build our failure report message
+    const panelName = this.currentPanelName || 'Panel';
+    const allFailures = typeof AlertsFeed !== 'undefined' ? AlertsFeed.getActiveFailures() : [];
+
+    // Compose what we say — list all active failures
+    const failureList = allFailures.map((f) => 'a ' + this._formatFailureForSpeech(f)).join(', and ');
+    const ourMessage = `Hello ${callsign}, this is ${panelName}. I am showing ${failureList}.`;
+
+    // Show each failure as a separate reply option
+    const replies = allFailures.map((f) => 'I am showing a ' + this._formatFailureForSpeech(f));
+    this._outgoingReplySent = false;
+    let selectedIdx = -1;
+
+    // Click handler for reply options
+    const rcClickHandler = (e) => {
+      if (this._outgoingReplySent) return;
+      const li = e.target.closest('.reply-options-list li');
+      if (li) {
+        selectedIdx = parseInt(li.dataset.replyIndex, 10);
+        if (isNaN(selectedIdx)) selectedIdx = 0;
+        this._outgoingReplySent = true;
+        this.chatEl.removeEventListener('click', rcClickHandler);
+      }
+    };
+
+    // Voice reply loop — record, transcribe, match (same as outgoing calls)
+    const MAX_ATTEMPTS = 3;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      if (this._outgoingReplySent || !this._outgoingCall) break;
+
+      this.addMessage({ type: 'reply-options', replies });
+      this.addMessage({ type: 'greeting', text: 'Hold PTT to report failures...' });
+      this.renderChat();
+      this._syncToRemote();
+      this.chatEl.addEventListener('click', rcClickHandler);
+
+      let transcript = '';
+      try {
+        transcript = await this.recordAndTranscribe();
+      } catch (e) {
+        if (this._outgoingReplySent || !this._outgoingCall) break;
+        continue;
+      }
+      if (this._outgoingReplySent || !this._outgoingCall) break;
+
+      if (transcript) {
+        console.log(`[RouteControl] Heard: "${transcript}", matching against:`, replies);
+        const matchIdx = this.matchReply(transcript, replies);
+        if (matchIdx >= 0) {
+          selectedIdx = matchIdx;
+          this._outgoingReplySent = true;
+          this.addMessage({ type: 'signaller', text: transcript });
+          break;
+        }
+      }
+
+      // Not understood — ask again
+      if (attempt < MAX_ATTEMPTS - 1) {
+        const sorry = 'Can you say again please';
+        this.addMessage({ type: 'driver', caller: callsign, text: sorry });
+        await this.speakAsDriver(sorry, callsign);
+      }
+    }
+    this.chatEl.removeEventListener('click', rcClickHandler);
+    if (!this._outgoingCall) return;
+
+    // If not matched via voice or click, fallback to clickable options
+    if (selectedIdx < 0) {
+      this.addMessage({ type: 'reply-options', replies });
+      this.renderChat();
+      this._syncToRemote();
+      selectedIdx = await new Promise((resolve) => {
+        const fallbackClick = (e) => {
+          const li = e.target.closest('.reply-options-list li');
+          if (li) {
+            this.chatEl.removeEventListener('click', fallbackClick);
+            const idx = parseInt(li.dataset.replyIndex, 10);
+            resolve(isNaN(idx) ? 0 : idx);
+          }
+        };
+        this.chatEl.addEventListener('click', fallbackClick);
+      });
+      if (!this._outgoingCall) return;
+    }
+
+    // Show what we said (the selected failure)
+    this.addMessage({ type: 'signaller', text: replies[selectedIdx] || ourMessage });
     this.renderChat();
     this._syncToRemote();
 
-    // Wait for PTT cycles until user hangs up
-    while (this._outgoingCall) {
-      try {
-        await this.waitForUserSpeech();
-        if (!this._outgoingCall) return;
-      } catch {
-        break;
-      }
+    // Pause briefly before Route Control responds
+    await new Promise((r) => setTimeout(r, 500));
+    if (!this._outgoingCall) return;
+
+    // Route Control responds only about the selected failure
+    const selectedFailure = allFailures[selectedIdx] || allFailures[0];
+    const isAlreadyReported = typeof AlertsFeed !== 'undefined' &&
+      AlertsFeed._activeFailures[selectedIdx] && AlertsFeed._activeFailures[selectedIdx].reported;
+
+    let response;
+    if (isAlreadyReported) {
+      response = `Hi ${panelName}. Yes, we are already aware of that issue. No update yet. The MOM will call you as soon as they have an update.`;
+    } else {
+      const ack = 'a ' + this._formatFailureForSpeech(selectedFailure);
+      response = `Hi ${panelName}. Understood you are showing ${ack}. We will arrange some S&T guys to investigate. Also, we are going to send a MOM down incase a line block is required. They will call you with an update.`;
     }
+
+    // Mark only the selected failure as reported
+    if (typeof AlertsFeed !== 'undefined' && AlertsFeed._activeFailures[selectedIdx]) {
+      AlertsFeed._activeFailures[selectedIdx].reported = true;
+      AlertsFeed._reportedFailures.add(selectedFailure);
+    }
+
+    this.addMessage({ type: 'driver', caller: callsign, text: response });
+    this._syncToRemote();
+    await this.speakAsDriver(response, callsign);
+    if (!this._outgoingCall) return;
+
+    // Wait for user to acknowledge (PTT or click)
+    this.addMessage({ type: 'greeting', text: 'Hold PTT to acknowledge...' });
+    this.renderChat();
+    this._syncToRemote();
+
+    try {
+      const ackTranscript = await this.recordAndTranscribe();
+      if (!this._outgoingCall) return;
+      if (ackTranscript) {
+        this.addMessage({ type: 'signaller', text: ackTranscript });
+      } else {
+        this.addMessage({ type: 'signaller', text: 'Ok, that\'s understood. Bye now.' });
+      }
+    } catch {
+      if (!this._outgoingCall) return;
+      this.addMessage({ type: 'signaller', text: 'Ok, that\'s understood. Bye now.' });
+    }
+    this.renderChat();
+    this._syncToRemote();
+    if (!this._outgoingCall) return;
+
+    // Route Control says goodbye and we hang up
+    const goodbyes = [
+      'Ok, thanks for letting us know. Bye.',
+      'Right, thanks. Bye now.',
+      'Ok, cheers. Bye.',
+      'Very good, thanks. Bye now.',
+      'Ok, thanks. Speak later, bye.',
+    ];
+    const bye = goodbyes[Math.floor(Math.random() * goodbyes.length)];
+    this.addMessage({ type: 'driver', caller: callsign, text: bye });
+    this._syncToRemote();
+    await this.speakAsDriver(bye, callsign);
+
+    this.stopBgNoise();
+    this.endOutgoingCall();
+  },
+
+  // Format a failure status string for natural speech
+  _formatFailureForSpeech(failureText) {
+    // Already fairly natural — just lowercase the first letter and strip trailing period
+    let text = failureText.replace(/\.\s*$/, '').trim();
+    // Make "detected" optional for brevity in speech
+    text = text.replace(/\s+detected\b/i, '');
+    // Lowercase first char for mid-sentence use
+    return text.charAt(0).toLowerCase() + text.slice(1);
   },
 
   // Handle phonebook dial triggered from browser remote action
