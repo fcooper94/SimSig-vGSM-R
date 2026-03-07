@@ -33,6 +33,7 @@ const channels = {
   PHONE_SILENCE_RING: 'phone:silence-ring',
   PHONE_CALL_ANSWERED: 'phone:call-answered',
   PHONE_AUTO_WAIT: 'phone:auto-wait',
+  PHONE_CLEAR_AUTO_WAIT: 'phone:clear-auto-wait',
   TTS_GET_VOICES: 'tts:get-voices',
   TTS_SPEAK: 'tts:speak',
   TTS_CHECK_CREDITS: 'tts:check-credits',
@@ -128,7 +129,8 @@ contextBridge.exposeInMainWorld('simsigAPI', {
     placeCallReply: (replyIndex, headCode, param2, contactName) => ipcRenderer.invoke(channels.PHONE_PLACE_CALL_REPLY, replyIndex, headCode, param2, contactName),
     placeCallHangup: () => ipcRenderer.invoke(channels.PHONE_PLACE_CALL_HANGUP),
     hideAnswerDialog: () => ipcRenderer.invoke(channels.PHONE_HIDE_ANSWER),
-    autoWait: (headcode) => ipcRenderer.invoke(channels.PHONE_AUTO_WAIT, headcode),
+    autoWait: (headcode, signal) => ipcRenderer.invoke(channels.PHONE_AUTO_WAIT, headcode, signal),
+    clearAutoWait: (headcode) => ipcRenderer.invoke(channels.PHONE_CLEAR_AUTO_WAIT, headcode),
     silenceRing: () => ipcRenderer.invoke(channels.PHONE_SILENCE_RING),
     onSilenceRing: (callback) => {
       const listener = () => callback();

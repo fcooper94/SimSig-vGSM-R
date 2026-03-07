@@ -304,68 +304,38 @@ body {
   border-collapse: collapse;
   table-layout: fixed;
   font-size: 15px;
-  color: #000;
-}
-
-#alerts-table thead {
-  background: var(--bg-panel);
-  position: sticky;
-  top: 0;
-}
-
-#alerts-table th {
-  padding: 6px 10px;
-  text-align: left;
-  font-weight: bold;
-  border-right: 1px solid #a0a0a0;
-  border-bottom: 2px solid #808080;
-  color: var(--text);
-}
-
-#alerts-table th:last-child {
-  border-right: none;
 }
 
 #alerts-table td {
-  padding: 6px 10px;
-  border-bottom: 1px solid #c0c0c0;
-  border-right: 1px solid #d0d0d0;
-  background: var(--grid-bg);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-light);
+  background: #ffffff;
+  cursor: pointer;
 }
 
-#alerts-table td:last-child {
-  border-right: none;
+#alerts-table .col-alert-train {
+  width: 70%;
+  font-weight: bold;
 }
 
-#alerts-table .col-train { width: 40%; }
-#alerts-table .col-signal { width: 30%; }
-#alerts-table .col-action { width: 30%; text-align: center; }
+#alerts-table .col-alert-status {
+  width: 30%;
+  text-align: right;
+  color: var(--text-dim);
+}
 
-#alerts-table tbody tr:hover {
-  background: #c0d0e8;
+#alerts-table tr[data-hc]:hover td {
+  background: #d0dce8;
+}
+
+#alerts-table tr.alert-row-selected td {
+  background: var(--accent);
+  color: #ffffff;
 }
 
 .alert-failure-row td {
   color: #cc0000;
   font-weight: bold;
-}
-
-.alert-wait-btn {
-  background: var(--bg-panel);
-  color: var(--text);
-  border: 2px solid;
-  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
-  padding: 3px 16px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.alert-wait-btn:hover {
-  background: #e0dcd4;
-}
-
-.alert-wait-btn:disabled {
-  opacity: 0.6;
   cursor: default;
 }
 
@@ -385,6 +355,66 @@ body {
   color: #ffffff;
 }
 
+/* Alert detail panel — shows when a train row is selected */
+#alert-detail {
+  flex-shrink: 0;
+  border-top: 2px solid var(--border);
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+#alert-detail.hidden {
+  display: none;
+}
+
+#alert-detail-text {
+  font-size: 14px;
+  font-weight: bold;
+  padding: 6px 8px;
+  margin-bottom: 10px;
+  border: 2px solid;
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+  background: var(--grid-bg);
+}
+
+#alert-detail-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.alert-action-btn {
+  background: var(--bg-panel);
+  color: var(--text);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  padding: 6px 20px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.alert-action-btn:hover {
+  background: #e0dcd4;
+}
+
+.alert-action-btn:active {
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+}
+
+/* Alert indicator — highlights yellow when trains at red */
+#alert-indicator.active {
+  background: #e6a817;
+  color: #ffffff;
+}
+
+#alert-indicator.active .toolbar-icon {
+  color: #ffffff;
+}
+
+#alert-indicator.active span {
+  color: #ffffff;
+}
+
 /* RIGHT PANEL */
 #right-panel {
   flex: 1;
@@ -394,6 +424,105 @@ body {
   border: 2px solid;
   border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
   background: var(--grid-bg);
+}
+
+/* ── WAITED TABLE (right panel) ─────────────────────────── */
+#waited-header {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: bold;
+  color: var(--text);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+#waited-feed {
+  flex: 1;
+  overflow-y: auto;
+}
+
+#waited-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 15px;
+}
+
+#waited-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-light);
+  background: #ffffff;
+  cursor: pointer;
+}
+
+#waited-table tr[data-hc]:hover td {
+  background: #d0dce8;
+}
+
+#waited-table tr.alert-row-selected td {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+#waited-table .col-waited-train {
+  width: 70%;
+  font-weight: bold;
+}
+
+#waited-table .col-waited-status {
+  width: 30%;
+  text-align: right;
+  color: var(--text-dim);
+}
+
+.alert-action-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── COMMS OVERLAY ─────────────────────────────────────────── */
+#comms-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#comms-overlay.hidden {
+  display: none;
+}
+#comms-overlay-panel {
+  width: 460px;
+  max-width: 90%;
+  height: 70%;
+  max-height: 600px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* ── BOTTOM AREA: wrapper for tab bar + toolbar + notification ── */
+#bottom-area {
+  display: flex;
+  flex-shrink: 0;
+}
+
+#bottom-left {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ── TAB BAR ───────────────────────────────────────────────── */
@@ -447,17 +576,18 @@ body {
   display: flex;
   align-items: stretch;
   gap: 0;
-  padding: 6px 6px;
+  padding: 4px;
   background: var(--toolbar-bg);
   border-top: 2px solid;
   border-top-color: var(--bevel-light);
   flex-shrink: 0;
-  min-height: 105px;
+  min-height: 90px;
   position: relative;
   z-index: 10000;
 }
 
 .toolbar-btn {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -471,7 +601,7 @@ body {
   font-family: inherit;
   font-size: 15px;
   color: var(--text);
-  min-width: 84px;
+  min-width: 0;
 }
 
 .toolbar-btn:active:not(:disabled) {
@@ -542,10 +672,6 @@ body {
   display: none;
 }
 
-/* Push notification box to far right */
-.toolbar-spacer {
-  flex: 1;
-}
 
 /* ── CHAT HEADER ───────────────────────────────────────────── */
 #chat-header {
@@ -904,6 +1030,39 @@ body.dark-mode .compact-emrg-confirm-no:hover {
   background: #3a3a3a;
 }
 
+body.dark-mode #alerts-table td,
+body.dark-mode #waited-table td,
+body.dark-mode #alert-detail {
+  background: #2a2a2a;
+}
+
+body.dark-mode #alerts-table tr[data-hc]:hover td,
+body.dark-mode #waited-table tr[data-hc]:hover td {
+  background: #333333;
+}
+
+body.dark-mode #alert-detail-text {
+  background: #222222;
+}
+
+body.dark-mode .alert-action-btn:hover {
+  background: #3a3a3a;
+}
+
+body.dark-mode .alert-failure-row td {
+  color: var(--error);
+}
+
+body.dark-mode .alert-clear-btn {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+body.dark-mode .alert-clear-btn:hover {
+  background: var(--error);
+  color: #ffffff;
+}
+
 /* ── DISCONNECTED STATE ──────────────────────────────────── */
 #disconnected-overlay {
   display: none;
@@ -990,8 +1149,7 @@ body.disconnected #compact-dial-btn {
 body.compact-mode #top-bar,
 body.compact-mode #panel-subtitle-row,
 body.compact-mode #app-content,
-body.compact-mode #tab-bar,
-body.compact-mode #bottom-bar,
+body.compact-mode #bottom-area,
 body.compact-mode .modal:not(#emrg-confirm-modal),
 body.compact-mode #init-overlay,
 body.compact-mode #paused-overlay,

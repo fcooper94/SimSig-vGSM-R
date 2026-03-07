@@ -35,12 +35,30 @@ let lastInitReady = false;
 let lastChatState = null;
 
 // Auto-wait state — managed in main process so interception happens at the source
-const pendingAutoWaits = new Map(); // headcode (uppercase) → true
+const pendingAutoWaits = new Map(); // headcode (uppercase) → signal string
 const suppressedAutoWaits = new Set(); // headcodes currently being auto-answered
+const autoWaitQueue = []; // queue of { rawTrain, headcode } to process one at a time
+let autoWaitRunning = false;
 
 function extractHeadcode(text) {
   const m = (text || '').match(/([0-9][A-Za-z]\d{2})/);
   return m ? m[1].toUpperCase() : (text || '').trim();
+}
+
+// Queue an auto-wait and process sequentially
+function queueAutoWait(rawTrain, headcode) {
+  autoWaitQueue.push({ rawTrain, headcode });
+  if (!autoWaitRunning) processAutoWaitQueue();
+}
+
+async function processAutoWaitQueue() {
+  if (autoWaitRunning || autoWaitQueue.length === 0) return;
+  autoWaitRunning = true;
+  while (autoWaitQueue.length > 0) {
+    const { rawTrain, headcode } = autoWaitQueue.shift();
+    await doAutoWait(rawTrain, headcode);
+  }
+  autoWaitRunning = false;
 }
 
 // Runs answer-phone-call.ps1 then reply-phone-call.ps1 — same scripts as normal phone replies
@@ -81,13 +99,13 @@ async function doAutoWait(rawTrain, headcode) {
       return;
     }
 
-    // Step 2: Reply "Wait 2 minutes" (same script as normal phone reply, index 0)
+    // Step 2: Reply "Wait 15 minutes" (same script as normal phone reply, index 2)
     await new Promise((resolve) => {
       const args = [
         '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-        '-File', REPLY_SCRIPT, '-ReplyIndex', '0', '-HeadCode', headcode,
+        '-File', REPLY_SCRIPT, '-ReplyIndex', '2', '-HeadCode', headcode,
       ];
-      console.log(`[AutoWait] Replying "Wait 2 mins" to ${rawTrain}...`);
+      console.log(`[AutoWait] Replying "Wait 15 mins" to ${rawTrain}...`);
       execFile('powershell', args, { timeout: 30000 }, (err, stdout, stderr) => {
         if (stderr) console.error('[AutoWait] reply stderr:', stderr.trim());
         if (err) { resolve({ error: err.message }); return; }
@@ -319,12 +337,11 @@ function registerIpcHandlers() {
           for (const call of calls) {
             const hc = extractHeadcode(call.train);
             if (pendingAutoWaits.has(hc)) {
-              // Driver just called — suppress and fire auto-wait
+              // Driver just called — suppress and queue auto-wait (keep pending for repeat calls)
               console.log(`[AutoWait] Intercepted call from ${call.train} (${hc})`);
-              pendingAutoWaits.delete(hc);
               suppressedAutoWaits.add(hc);
               phoneReader._locked = true; // lock immediately to prevent next poll
-              doAutoWait(call.train, hc);
+              queueAutoWait(call.train, hc);
             } else if (suppressedAutoWaits.has(hc)) {
               // Still being auto-answered — keep suppressing
             } else {
@@ -497,10 +514,20 @@ function registerIpcHandlers() {
 
   // Queue an auto-wait — when the driver's call arrives in the next phone poll,
   // the onChange callback intercepts it and runs answer + reply silently.
-  registerHandler(channels.PHONE_AUTO_WAIT, (_event, headcode) => {
+  registerHandler(channels.PHONE_AUTO_WAIT, (_event, headcode, signal) => {
     const hc = (headcode || '').toUpperCase();
-    pendingAutoWaits.set(hc, true);
-    console.log(`[AutoWait] Queued for ${hc} — will intercept when driver calls`);
+    const sig = (signal || '').toUpperCase();
+    pendingAutoWaits.set(hc, sig);
+    console.log(`[AutoWait] Queued for ${hc} at ${sig} — will intercept when driver calls`);
+    return { ok: true };
+  });
+
+  // Clear an auto-wait (train moved to a different signal)
+  registerHandler(channels.PHONE_CLEAR_AUTO_WAIT, (_event, headcode) => {
+    const hc = (headcode || '').toUpperCase();
+    pendingAutoWaits.delete(hc);
+    suppressedAutoWaits.delete(hc);
+    console.log(`[AutoWait] Cleared for ${hc} — train moved to new signal`);
     return { ok: true };
   });
 

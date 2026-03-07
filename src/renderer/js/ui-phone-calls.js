@@ -26,9 +26,9 @@ const PhoneCallsUI = {
     this.listEl = document.getElementById('phone-calls-list');
     this.countEl = document.getElementById('phone-calls-count');
     this.chatEl = document.getElementById('chat-messages');
+    this.commsOverlay = document.getElementById('comms-overlay');
     this.notificationEl = document.getElementById('incoming-notification');
     this.notificationTrainEl = document.getElementById('notification-train');
-    this.notificationSignalEl = document.getElementById('notification-signal');
     this.notificationAnswerBtn = document.getElementById('notification-answer-btn');
     this.noCallsEl = document.getElementById('no-calls-message');
     this.tabIncomingEl = document.getElementById('tab-incoming');
@@ -41,7 +41,8 @@ const PhoneCallsUI = {
       const compactTrain = document.getElementById('compact-notif-train');
       const compactAction = document.getElementById('compact-notif-action');
       const syncCompact = () => {
-        if (this.notificationEl.classList.contains('hidden')) {
+        const isActive = this.notificationEl.classList.contains('flashing') || this.notificationEl.classList.contains('in-call');
+        if (!isActive) {
           compactNotif.classList.add('hidden');
           compactNotif.classList.remove('flashing', 'in-call');
         } else {
@@ -114,7 +115,7 @@ const PhoneCallsUI = {
       });
 
       // Silence button — still forward to host
-      this.silenceBtn.addEventListener('click', (e) => {
+      if (this.silenceBtn) this.silenceBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         window.simsigAPI.phone.silenceRing();
       });
@@ -178,7 +179,7 @@ const PhoneCallsUI = {
     });
 
     // Silence ring for this call only — broadcast to all clients
-    this.silenceBtn.addEventListener('click', (e) => {
+    if (this.silenceBtn) this.silenceBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       window.simsigAPI.phone.silenceRing();
     });
@@ -187,7 +188,7 @@ const PhoneCallsUI = {
     window.simsigAPI.phone.onSilenceRing(() => {
       this.silenced = true;
       this._stopRingSource();
-      this.silenceBtn.classList.add('hidden');
+      if (this.silenceBtn) this.silenceBtn.classList.add('hidden');
       this._syncToRemote();
     });
 
@@ -385,7 +386,7 @@ const PhoneCallsUI = {
     if (this._isBrowser) return; // no audio on browser
     this.wasRinging = true;
     this.silenced = false;
-    this.silenceBtn.classList.remove('hidden');
+    if (this.silenceBtn) this.silenceBtn.classList.remove('hidden');
     this._syncToRemote();
     if (this.isPaused() || !this.initReady) return;
     this._startRingSource();
@@ -395,7 +396,7 @@ const PhoneCallsUI = {
     if (this._isBrowser) return; // no audio on browser
     this.wasRinging = false;
     this.silenced = false;
-    this.silenceBtn.classList.add('hidden');
+    if (this.silenceBtn) this.silenceBtn.classList.add('hidden');
     this._syncToRemote();
     this._stopRingSource();
   },
@@ -1925,6 +1926,7 @@ const PhoneCallsUI = {
     this.stopBgNoise();
     this.bgCallerType = 'train';
     this.messages = [];
+    this.hideCommsOverlay();
     if (this._replyDelegateHandler) {
       this.chatEl.removeEventListener('click', this._replyDelegateHandler);
       this._replyDelegateHandler = null;
@@ -1951,6 +1953,7 @@ const PhoneCallsUI = {
     const callId = ++this._callSeq; // unique ID to detect stale async continuations
     window.simsigAPI.keys.setInCall(true);
     this._replyClicked = false;
+    this.showCommsOverlay();
     this._hasReplyOptions = false;
     this._replySent = false;
     this.stopRinging();
@@ -2252,14 +2255,14 @@ const PhoneCallsUI = {
     if (!this.notificationEl) return;
     // Silence incoming ringing while placing an outgoing call
     this.stopRinging();
-    this.notificationEl.classList.remove('hidden');
     this.notificationEl.classList.remove('in-call');
     this.notificationEl.classList.add('flashing');
-    this.notificationTrainEl.textContent = contactName;
-    if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
-    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[Cancel]';
+    const readyText = this.notificationEl.querySelector('#notification-ready-text');
+    if (readyText) readyText.style.display = 'none';
+    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = contactName; this.notificationTrainEl.style.display = 'block'; }
+    if (this.notificationAnswerBtn) { this.notificationAnswerBtn.textContent = '[Cancel]'; this.notificationAnswerBtn.style.display = 'block'; }
     const icon = this.notificationEl.querySelector('#notification-icon');
-    if (icon) icon.innerHTML = '&#128222;';
+    if (icon) icon.style.display = 'block';
     this._dialingActive = true;
     this._syncToRemote();
     // No audio on browser — host plays the ringing-out sound
@@ -2328,16 +2331,17 @@ const PhoneCallsUI = {
     if (!this.notificationEl) return;
     this._outgoingCall = true;
     window.simsigAPI.keys.setInCall(true);
+    this.showCommsOverlay();
     this._outgoingContactName = contactName;
     this._outgoingReplySent = false;
-    this.notificationEl.classList.remove('hidden');
     this.notificationEl.classList.remove('flashing');
     this.notificationEl.classList.add('in-call');
-    this.notificationTrainEl.textContent = contactName;
-    if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
-    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[Hang Up]';
+    const readyText = this.notificationEl.querySelector('#notification-ready-text');
+    if (readyText) readyText.style.display = 'none';
+    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = contactName; this.notificationTrainEl.style.display = 'block'; }
+    if (this.notificationAnswerBtn) { this.notificationAnswerBtn.textContent = '[Hang Up]'; this.notificationAnswerBtn.style.display = 'block'; }
     const icon = this.notificationEl.querySelector('#notification-icon');
-    if (icon) icon.innerHTML = '&#128222;';
+    if (icon) icon.style.display = 'block';
     // Mark the phone book row as in-call
     this._updatePhonebookInCall(contactName, true);
     this._syncToRemote();
@@ -2659,6 +2663,7 @@ const PhoneCallsUI = {
     }
     this.stopBgNoise();
     this.bgCallerType = 'train';
+    this.hideCommsOverlay();
     this.messages = [];
     this.renderChat();
     this.hideNotification(); // includes _syncToRemote()
@@ -2696,10 +2701,15 @@ const PhoneCallsUI = {
     this._outgoingContactName = 'Route Control';
     this._outgoingReplySent = false;
     window.simsigAPI.keys.setInCall(true);
-    this.notificationEl.classList.remove('hidden', 'flashing');
+    this.showCommsOverlay();
+    this.notificationEl.classList.remove('flashing');
     this.notificationEl.classList.add('in-call');
-    this.notificationTrainEl.textContent = 'Route Control';
-    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[Hang Up]';
+    const readyText = this.notificationEl.querySelector('#notification-ready-text');
+    if (readyText) readyText.style.display = 'none';
+    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = 'Route Control'; this.notificationTrainEl.style.display = 'block'; }
+    if (this.notificationAnswerBtn) { this.notificationAnswerBtn.textContent = '[Hang Up]'; this.notificationAnswerBtn.style.display = 'block'; }
+    const rcIcon = this.notificationEl.querySelector('#notification-icon');
+    if (rcIcon) rcIcon.style.display = 'block';
     this._updatePhonebookInCall('Route Control', true);
 
     // Use signaller background noise
@@ -2947,16 +2957,16 @@ const PhoneCallsUI = {
 
   showInCallNotification(trainText) {
     if (!this.notificationEl) return;
-    this.notificationEl.classList.remove('hidden');
     const match = (trainText || '').match(/([0-9][A-Z][0-9]{2})/i);
     const headcode = match ? match[1].toUpperCase() : this.shortenCaller(trainText || '');
     this.notificationEl.classList.remove('flashing');
     this.notificationEl.classList.add('in-call');
-    this.notificationTrainEl.textContent = headcode;
-    if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
-    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[End Call]';
+    const readyText = this.notificationEl.querySelector('#notification-ready-text');
+    if (readyText) readyText.style.display = 'none';
+    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = headcode; this.notificationTrainEl.style.display = 'block'; }
+    if (this.notificationAnswerBtn) { this.notificationAnswerBtn.textContent = '[End Call]'; this.notificationAnswerBtn.style.display = 'block'; }
     const icon = this.notificationEl.querySelector('#notification-icon');
-    if (icon) icon.innerHTML = '&#128643;';
+    if (icon) icon.style.display = 'block';
     // Update radio display to In Call
     const radioDisplay = document.getElementById('radio-display');
     if (radioDisplay) radioDisplay.classList.add('in-call');
@@ -2969,14 +2979,16 @@ const PhoneCallsUI = {
 
   showNotification(trainText) {
     if (!this.notificationEl) return;
-    this.notificationEl.classList.remove('hidden');
+    this.notificationEl.classList.remove('flashing', 'in-call');
     const match = trainText.match(/([0-9][A-Z][0-9]{2})/i);
     const headcode = match ? match[1].toUpperCase() : this.shortenCaller(trainText);
-    this.notificationTrainEl.textContent = headcode;
-    if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
-    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '[Answer]';
+    // Hide ready text, show call elements
+    const readyText = this.notificationEl.querySelector('#notification-ready-text');
+    if (readyText) readyText.style.display = 'none';
+    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = headcode; this.notificationTrainEl.style.display = 'block'; }
+    if (this.notificationAnswerBtn) { this.notificationAnswerBtn.textContent = '[Answer]'; this.notificationAnswerBtn.style.display = 'block'; }
     const icon = this.notificationEl.querySelector('#notification-icon');
-    if (icon) icon.innerHTML = '&#128643;';
+    if (icon) icon.style.display = 'block';
     this.notificationEl.classList.add('flashing');
     this._syncToRemote();
   },
@@ -3039,19 +3051,19 @@ const PhoneCallsUI = {
     this.renderCalls();
     this.renderChat();
     this.hideNotification();
+    this.hideCommsOverlay();
   },
 
   hideNotification() {
     if (!this.notificationEl) return;
-    this.notificationEl.classList.add('hidden');
-    this.notificationEl.classList.remove('flashing');
-    this.notificationEl.classList.remove('in-call');
-    this.notificationTrainEl.textContent = '';
-    if (this.notificationSignalEl) this.notificationSignalEl.textContent = '';
-    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = '';
-    if (this.notificationEl.querySelector('#notification-icon')) {
-      this.notificationEl.querySelector('#notification-icon').textContent = '';
-    }
+    this.notificationEl.classList.remove('flashing', 'in-call');
+    // Hide call elements, show ready text
+    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = ''; this.notificationTrainEl.style.display = 'none'; }
+    if (this.notificationAnswerBtn) { this.notificationAnswerBtn.style.display = 'none'; }
+    const icon = this.notificationEl.querySelector('#notification-icon');
+    if (icon) icon.style.display = 'none';
+    const readyText = this.notificationEl.querySelector('#notification-ready-text');
+    if (readyText) readyText.style.display = 'inline';
     // Reset radio display
     const radioDisplay = document.getElementById('radio-display');
     if (radioDisplay) radioDisplay.classList.remove('in-call');
@@ -3060,6 +3072,14 @@ const PhoneCallsUI = {
     if (line1) line1.textContent = 'GSM-R';
     if (line2) line2.textContent = 'Ready';
     this._syncToRemote();
+  },
+
+  showCommsOverlay() {
+    if (this.commsOverlay) this.commsOverlay.classList.remove('hidden');
+  },
+
+  hideCommsOverlay() {
+    if (this.commsOverlay) this.commsOverlay.classList.add('hidden');
   },
 
   // Sync chat/notification state to browser clients (host only)
@@ -3082,32 +3102,35 @@ const PhoneCallsUI = {
   },
 
   _getNotificationState() {
-    if (!this.notificationEl) return { type: 'hidden' };
-    if (this.notificationEl.classList.contains('hidden')) return { type: 'hidden' };
+    if (!this.notificationEl) return { type: 'ready' };
     const icon = this.notificationEl.querySelector('#notification-icon');
+    const isReady = !this.notificationEl.classList.contains('in-call') && !this.notificationEl.classList.contains('flashing');
     return {
-      type: this.notificationEl.classList.contains('in-call') ? 'in-call'
-        : this.notificationEl.classList.contains('flashing') ? 'flashing' : 'visible',
+      type: isReady ? 'ready'
+        : this.notificationEl.classList.contains('in-call') ? 'in-call' : 'flashing',
       trainText: this.notificationTrainEl ? this.notificationTrainEl.textContent : '',
       buttonText: this.notificationAnswerBtn ? this.notificationAnswerBtn.textContent : '',
-      iconHtml: icon ? icon.innerHTML : '',
     };
   },
 
   _applyNotification(state) {
     if (!this.notificationEl) return;
-    if (state.type === 'hidden') {
-      this.notificationEl.classList.add('hidden');
+    const readyText = this.notificationEl.querySelector('#notification-ready-text');
+    const icon = this.notificationEl.querySelector('#notification-icon');
+    if (state.type === 'ready') {
       this.notificationEl.classList.remove('flashing', 'in-call');
+      if (this.notificationTrainEl) this.notificationTrainEl.style.display = 'none';
+      if (this.notificationAnswerBtn) this.notificationAnswerBtn.style.display = 'none';
+      if (icon) icon.style.display = 'none';
+      if (readyText) readyText.style.display = 'inline';
       return;
     }
-    this.notificationEl.classList.remove('hidden');
+    if (readyText) readyText.style.display = 'none';
     this.notificationEl.classList.toggle('in-call', state.type === 'in-call');
     this.notificationEl.classList.toggle('flashing', state.type === 'flashing');
-    if (this.notificationTrainEl) this.notificationTrainEl.textContent = state.trainText || '';
-    if (this.notificationAnswerBtn) this.notificationAnswerBtn.textContent = state.buttonText || '';
-    const icon = this.notificationEl.querySelector('#notification-icon');
-    if (icon && state.iconHtml) icon.innerHTML = state.iconHtml;
+    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = state.trainText || ''; this.notificationTrainEl.style.display = 'block'; }
+    if (this.notificationAnswerBtn) { this.notificationAnswerBtn.textContent = state.buttonText || ''; this.notificationAnswerBtn.style.display = 'block'; }
+    if (icon) icon.style.display = 'block';
   },
 
   renderChat() {

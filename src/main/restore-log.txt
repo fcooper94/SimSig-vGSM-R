@@ -1,4 +1,4 @@
-﻿SimSig hwnd: 395482  PID: 19616
+﻿SimSig hwnd: 329212  PID: 18632
 Monitor: (0,0)-(1463,866)
 Restore target: (532, 283)
 Found 3 off-screen SimSig window(s)

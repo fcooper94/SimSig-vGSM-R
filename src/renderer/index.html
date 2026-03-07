@@ -134,8 +134,30 @@
       </section>
     </div>
 
-    <!-- RIGHT: Comms chat (always visible) -->
+    <!-- RIGHT: Waited trains -->
     <div id="right-panel">
+      <div class="gsm-section" id="section-waited" style="flex:1">
+        <div class="gsm-section-icon"><span class="icon-envelope"></span></div>
+        <div class="gsm-section-content">
+          <div id="waited-header">
+            <span>Waited Trains</span>
+          </div>
+          <div id="waited-feed"></div>
+          <div id="alert-detail" class="hidden">
+            <div id="alert-detail-text"></div>
+            <div id="alert-detail-actions">
+              <button id="alert-detail-wait" class="alert-action-btn">Wait</button>
+              <button id="alert-detail-remove" class="alert-action-btn">Remove</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── COMMS OVERLAY (shown during calls) ──────────────────── -->
+  <div id="comms-overlay" class="hidden">
+    <div id="comms-overlay-panel">
       <div id="chat-header">
         <span>Comms</span>
         <span id="comms-zoom-btn" title="Text size">&#128269;</span>
@@ -147,77 +169,77 @@
       </div>
       <div id="chat-messages"></div>
     </div>
-  </main>
-
-  <!-- ── TAB BAR ────────────────────────────────────────────── -->
-  <div id="tab-bar">
-    <span class="tab-item disabled">Speed Dial</span>
-    <span class="tab-item disabled">Speed Dial</span>
-    <span class="tab-item">&nbsp;&nbsp;&nbsp;</span>
-    <span class="tab-item" id="tab-log">Log</span>
-    <span class="tab-item" id="tab-trains">Trains Mobiles (0)</span>
-    <span class="tab-item highlight" id="tab-incoming">Incoming (0)</span>
   </div>
 
-  <!-- ── BOTTOM TOOLBAR ─────────────────────────────────────── -->
-  <footer id="bottom-bar">
-    <!-- Hidden but kept in DOM for JS -->
-    <div id="radio-display" style="display:none">
-      <div class="display-line" id="display-line-1">GSM-R</div>
-      <div class="display-line" id="display-line-2">Ready</div>
-    </div>
-    <button class="toolbar-btn ptt-toolbar" id="ptt-btn">
-      <div class="toolbar-icon">&#9743;</div>
-      <span>PTT</span>
-    </button>
-    <div id="ptt-status" class="toolbar-ptt-status">OFF</div>
+  <!-- ── BOTTOM AREA: tab bar + toolbar + notification ────── -->
+  <div id="bottom-area">
+    <div id="bottom-left">
+      <div id="tab-bar">
+        <span class="tab-item disabled">Speed Dial</span>
+        <span class="tab-item disabled">Speed Dial</span>
+        <span class="tab-item">&nbsp;&nbsp;&nbsp;</span>
+        <span class="tab-item" id="tab-log">Log</span>
+        <span class="tab-item" id="tab-trains">Trains Mobiles (0)</span>
+        <span class="tab-item highlight" id="tab-incoming">Incoming (0)</span>
+      </div>
+      <footer id="bottom-bar">
+        <!-- Hidden but kept in DOM for JS -->
+        <div id="radio-display" style="display:none">
+          <div class="display-line" id="display-line-1">GSM-R</div>
+          <div class="display-line" id="display-line-2">Ready</div>
+        </div>
+        <button class="toolbar-btn ptt-toolbar" id="ptt-btn">
+          <div class="toolbar-icon">&#9743;</div>
+          <span>PTT</span>
+        </button>
+        <div id="ptt-status" class="toolbar-ptt-status">OFF</div>
 
-    <!-- Visible toolbar buttons -->
-    <button class="toolbar-btn emrg" id="emrg-btn">
-      <div class="toolbar-icon">&#9888;</div>
-      <span>Emerg.</span>
-    </button>
-    <button class="toolbar-btn" disabled>
-      <div class="toolbar-icon">&#9654;</div>
-      <span>More</span>
-    </button>
-    <button class="toolbar-btn" disabled>
-      <div class="toolbar-icon">&#9998;</div>
-      <span>Broadc.</span>
-    </button>
-    <button class="toolbar-btn" id="settings-toolbar-btn">
-      <div class="toolbar-icon">&#128203;</div>
-      <span>Setting</span>
-    </button>
-    <button class="toolbar-btn" id="phonebook-btn">
-      <div class="toolbar-icon">&#128222;</div>
-      <span>Dial</span>
-    </button>
-    <button class="toolbar-btn" disabled>
-      <div class="toolbar-icon">&#9881;</div>
-      <span>Conf.</span>
-    </button>
-    <button class="toolbar-btn" disabled>
-      <div class="toolbar-icon">&#10145;</div>
-      <span>Forward</span>
-    </button>
-    <button class="toolbar-btn" disabled>
-      <div class="toolbar-icon">&#9208;</div>
-      <span>Hold</span>
-    </button>
-    <button class="toolbar-btn" disabled>
-      <div class="toolbar-icon">&#9993;</div>
-      <span></span>
-    </button>
-    <div class="toolbar-spacer"></div>
-    <button id="silence-btn" class="silence-btn hidden" title="Silence ring">&#128264;</button>
-    <div id="incoming-notification" class="hidden">
+        <!-- Visible toolbar buttons -->
+        <button class="toolbar-btn emrg" id="emrg-btn">
+          <div class="toolbar-icon">&#9888;</div>
+          <span>Emerg.</span>
+        </button>
+        <button class="toolbar-btn" disabled>
+          <div class="toolbar-icon">&#9654;</div>
+          <span>More</span>
+        </button>
+        <button class="toolbar-btn" disabled>
+          <div class="toolbar-icon">&#9998;</div>
+          <span>Broadc.</span>
+        </button>
+        <button class="toolbar-btn" id="settings-toolbar-btn">
+          <div class="toolbar-icon">&#128203;</div>
+          <span>Setting</span>
+        </button>
+        <button class="toolbar-btn" id="phonebook-btn">
+          <div class="toolbar-icon">&#128222;</div>
+          <span>Dial</span>
+        </button>
+        <button class="toolbar-btn" disabled>
+          <div class="toolbar-icon">&#9881;</div>
+          <span>Conf.</span>
+        </button>
+        <button class="toolbar-btn" disabled>
+          <div class="toolbar-icon">&#10145;</div>
+          <span>Forward</span>
+        </button>
+        <button class="toolbar-btn" disabled>
+          <div class="toolbar-icon">&#9208;</div>
+          <span>Hold</span>
+        </button>
+        <button class="toolbar-btn" id="alert-indicator" title="Trains at red signal">
+          <div class="toolbar-icon">&#9993;</div>
+          <span></span>
+        </button>
+      </footer>
+    </div>
+    <div id="incoming-notification">
       <div id="notification-train"></div>
-      <div id="notification-icon">&#128643;</div>
-      <div id="notification-signal"></div>
+      <div id="notification-icon"></div>
+      <span id="notification-ready-text">Ready</span>
       <button id="notification-answer-btn">[Answer]</button>
     </div>
-  </footer>
+  </div>
 
   <!-- ── SETTINGS MODAL ─────────────────────────────────────── -->
   <div id="settings-modal" class="modal hidden">

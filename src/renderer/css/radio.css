@@ -216,68 +216,79 @@
   display: none;
 }
 
+/* Notification box: stretches full height of tab bar + toolbar */
 #incoming-notification {
-  width: 135px;
-  min-height: 90px;
-  padding: 5px;
+  width: 130px;
+  flex-shrink: 0;
   box-sizing: border-box;
+  padding: 5px;
   background: var(--bg-panel);
   border: 2px solid;
-  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
   color: var(--text);
-  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: 0;
-  cursor: pointer;
-}
-
-#incoming-notification.hidden {
-  display: none;
+  justify-content: flex-end;
+  gap: 2px;
+  cursor: default;
 }
 
 #incoming-notification.flashing {
+  background: #e6a817;
   animation: flash-notification 0.8s infinite;
+  cursor: pointer;
 }
 
 #incoming-notification.in-call {
-  background: #ffffc0;
-  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+  background: #e6a817;
+  cursor: pointer;
 }
 
 @keyframes flash-notification {
-  0%, 100% { background: var(--bg-panel); }
+  0%, 100% { background: #e6a817; }
   50% { background: #ffffc0; }
 }
 
+#notification-ready-text {
+  font-size: 14px;
+  color: var(--text-dim);
+  align-self: flex-end;
+  margin-top: auto;
+}
+
+/* Hidden by default — shown via JS when a call is active */
+#notification-train,
+#notification-icon,
+#notification-answer-btn {
+  display: none;
+}
+
 #notification-train {
-  font-size: 18px;
+  font-size: 22px;
   font-weight: bold;
-  color: var(--text);
+  color: #000;
   text-align: center;
   line-height: 1;
 }
 
 #notification-icon {
-  font-size: 27px;
-  line-height: 1;
-}
-
-#notification-signal {
-  display: none;
+  width: 36px;
+  height: 36px;
+  background: url('../../../images/train-icon.png') center/contain no-repeat;
+  align-self: flex-start;
 }
 
 #notification-answer-btn {
   background: transparent;
-  color: var(--text);
+  color: #000;
   border: none;
   padding: 2px 0;
   font-family: inherit;
   font-size: 14px;
   font-weight: bold;
   cursor: pointer;
+  align-self: flex-end;
 }
 
 #notification-answer-btn:hover {
@@ -1009,7 +1020,7 @@ body.dark-mode .alert-wait-btn:hover {
 }
 
 body.dark-mode #incoming-notification.in-call {
-  background: #3d3d00;
+  background: #b8860b;
 }
 
 body.dark-mode .compact-notification.in-call {

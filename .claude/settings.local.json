@@ -52,7 +52,9 @@
       "Bash(curl -sS -H \"Content-Type: application/json\" -d '{:*)",
       "Bash(cat:*)",
       "Bash(grep -n \"section-messages\\\\|empty-grid\\\\|red.*signal\\\\|trainAtSignal\\\\|redSignal\" /c/dev/SimSig-vGSM-R/src/renderer/js/*.js)",
-      "Bash(powershell -NoProfile -Command '$j = $input | Out-String | ConvertFrom-Json; Write-Output \"\"lineCount: $\\($j.lineCount\\)\"\"; $j.lines | Select-Object -Last 5 | ForEach-Object { Write-Output $_ }')"
+      "Bash(powershell -NoProfile -Command '$j = $input | Out-String | ConvertFrom-Json; Write-Output \"\"lineCount: $\\($j.lineCount\\)\"\"; $j.lines | Select-Object -Last 5 | ForEach-Object { Write-Output $_ }')",
+      "Bash(xargs grep -l \"phonebook\\\\|phone.*book\" -i)",
+      "Bash(where gh)"
     ]
   }
 }
