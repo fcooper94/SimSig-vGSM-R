@@ -27,6 +27,14 @@ const PhoneCallsUI = {
     this.countEl = document.getElementById('phone-calls-count');
     this.chatEl = document.getElementById('chat-messages');
     this.commsOverlay = document.getElementById('comms-overlay');
+    // Click on backdrop (outside panel) closes comms if not in an active call
+    if (this.commsOverlay) {
+      this.commsOverlay.addEventListener('click', (e) => {
+        if (e.target === this.commsOverlay && !this.inCall && !this._outgoingCall && !this._dialingActive) {
+          this.hideCommsOverlay();
+        }
+      });
+    }
     this.notificationEl = document.getElementById('incoming-notification');
     this.notificationTrainEl = document.getElementById('notification-train');
     this.notificationAnswerBtn = document.getElementById('notification-answer-btn');
@@ -2259,7 +2267,7 @@ const PhoneCallsUI = {
     this.notificationEl.classList.add('flashing');
     const readyText = this.notificationEl.querySelector('#notification-ready-text');
     if (readyText) readyText.style.display = 'none';
-    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = contactName; this.notificationTrainEl.style.display = 'block'; }
+    this._setTrainText(contactName);
     if (this.notificationAnswerBtn) { this.notificationAnswerBtn.textContent = '[Cancel]'; this.notificationAnswerBtn.style.display = 'block'; }
     const icon = this.notificationEl.querySelector('#notification-icon');
     if (icon) icon.style.display = 'block';
@@ -2338,7 +2346,7 @@ const PhoneCallsUI = {
     this.notificationEl.classList.add('in-call');
     const readyText = this.notificationEl.querySelector('#notification-ready-text');
     if (readyText) readyText.style.display = 'none';
-    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = contactName; this.notificationTrainEl.style.display = 'block'; }
+    this._setTrainText(contactName);
     if (this.notificationAnswerBtn) { this.notificationAnswerBtn.textContent = '[Hang Up]'; this.notificationAnswerBtn.style.display = 'block'; }
     const icon = this.notificationEl.querySelector('#notification-icon');
     if (icon) icon.style.display = 'block';
@@ -2706,7 +2714,7 @@ const PhoneCallsUI = {
     this.notificationEl.classList.add('in-call');
     const readyText = this.notificationEl.querySelector('#notification-ready-text');
     if (readyText) readyText.style.display = 'none';
-    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = 'Route Control'; this.notificationTrainEl.style.display = 'block'; }
+    this._setTrainText('Route Control');
     if (this.notificationAnswerBtn) { this.notificationAnswerBtn.textContent = '[Hang Up]'; this.notificationAnswerBtn.style.display = 'block'; }
     const rcIcon = this.notificationEl.querySelector('#notification-icon');
     if (rcIcon) rcIcon.style.display = 'block';
@@ -2933,24 +2941,11 @@ const PhoneCallsUI = {
   },
 
   _updatePhonebookInCall(contactName, active) {
-    const rows = document.querySelectorAll('.phonebook-item');
+    const rows = document.querySelectorAll('.pb-row');
     rows.forEach((row) => {
-      const label = row.querySelector('.phonebook-name');
-      const icon = row.querySelector('.phonebook-dial-icon');
-      if (label && label.textContent === contactName) {
-        if (active) {
-          if (icon) {
-            icon.dataset.originalHtml = icon.innerHTML;
-            icon.innerHTML = '';
-            icon.textContent = 'In Call';
-            icon.classList.add('in-call');
-          }
-        } else {
-          if (icon) {
-            icon.innerHTML = icon.dataset.originalHtml || '&#128222;';
-            icon.classList.remove('in-call');
-          }
-        }
+      const nameCell = row.querySelector('.pb-cell-name');
+      if (nameCell && nameCell.textContent === contactName) {
+        row.classList.toggle('in-call', active);
       }
     });
   },
@@ -2963,7 +2958,7 @@ const PhoneCallsUI = {
     this.notificationEl.classList.add('in-call');
     const readyText = this.notificationEl.querySelector('#notification-ready-text');
     if (readyText) readyText.style.display = 'none';
-    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = headcode; this.notificationTrainEl.style.display = 'block'; }
+    this._setTrainText(headcode);
     if (this.notificationAnswerBtn) { this.notificationAnswerBtn.textContent = '[End Call]'; this.notificationAnswerBtn.style.display = 'block'; }
     const icon = this.notificationEl.querySelector('#notification-icon');
     if (icon) icon.style.display = 'block';
@@ -2985,7 +2980,7 @@ const PhoneCallsUI = {
     // Hide ready text, show call elements
     const readyText = this.notificationEl.querySelector('#notification-ready-text');
     if (readyText) readyText.style.display = 'none';
-    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = headcode; this.notificationTrainEl.style.display = 'block'; }
+    this._setTrainText(headcode);
     if (this.notificationAnswerBtn) { this.notificationAnswerBtn.textContent = '[Answer]'; this.notificationAnswerBtn.style.display = 'block'; }
     const icon = this.notificationEl.querySelector('#notification-icon');
     if (icon) icon.style.display = 'block';
@@ -3058,7 +3053,7 @@ const PhoneCallsUI = {
     if (!this.notificationEl) return;
     this.notificationEl.classList.remove('flashing', 'in-call');
     // Hide call elements, show ready text
-    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = ''; this.notificationTrainEl.style.display = 'none'; }
+    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = ''; this.notificationTrainEl.style.display = 'none'; this.notificationTrainEl.style.fontSize = ''; }
     if (this.notificationAnswerBtn) { this.notificationAnswerBtn.style.display = 'none'; }
     const icon = this.notificationEl.querySelector('#notification-icon');
     if (icon) icon.style.display = 'none';
@@ -3072,6 +3067,20 @@ const PhoneCallsUI = {
     if (line1) line1.textContent = 'GSM-R';
     if (line2) line2.textContent = 'Ready';
     this._syncToRemote();
+  },
+
+  _setTrainText(text) {
+    if (!this.notificationTrainEl) return;
+    this.notificationTrainEl.textContent = text;
+    this.notificationTrainEl.style.display = 'block';
+    // Start at default size, shrink until it fits the container width
+    const maxWidth = this.notificationEl.clientWidth - 10; // account for padding
+    let size = 22;
+    this.notificationTrainEl.style.fontSize = size + 'px';
+    while (size > 10 && this.notificationTrainEl.scrollWidth > maxWidth) {
+      size--;
+      this.notificationTrainEl.style.fontSize = size + 'px';
+    }
   },
 
   showCommsOverlay() {
@@ -3128,7 +3137,7 @@ const PhoneCallsUI = {
     if (readyText) readyText.style.display = 'none';
     this.notificationEl.classList.toggle('in-call', state.type === 'in-call');
     this.notificationEl.classList.toggle('flashing', state.type === 'flashing');
-    if (this.notificationTrainEl) { this.notificationTrainEl.textContent = state.trainText || ''; this.notificationTrainEl.style.display = 'block'; }
+    this._setTrainText(state.trainText || '');
     if (this.notificationAnswerBtn) { this.notificationAnswerBtn.textContent = state.buttonText || ''; this.notificationAnswerBtn.style.display = 'block'; }
     if (icon) icon.style.display = 'block';
   },

@@ -269,7 +269,9 @@
   font-weight: bold;
   color: #000;
   text-align: center;
-  line-height: 1;
+  line-height: 1.1;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 #notification-icon {
@@ -752,159 +754,256 @@
 
 #no-trains-message.hidden { display: none; }
 
-/* ── PHONEBOOK ─────────────────────────────────────────────── */
-#phonebook-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  font-size: 16px;
-  font-weight: bold;
-  color: var(--text);
+/* ── PHONEBOOK OVERLAY ─────────────────────────────────────── */
+#phonebook-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-#phonebook-refresh {
-  margin-left: auto;
-  background: var(--bg-panel);
-  color: var(--text);
-  border: 2px solid;
-  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
-  padding: 4px 12px;
-  font-family: inherit;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-#phonebook-refresh:hover {
-  background: #e0dcd4;
-}
-
-#phonebook-list {
-  flex: 1;
-  overflow-y: auto;
-  background: var(--grid-bg);
-  padding: 8px;
+  z-index: 50;
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
-.phonebook-item {
+#phonebook-overlay.hidden {
+  display: none;
+}
+
+#phonebook-body {
+  flex: 1;
   display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 16px;
-  background: #ffffff;
-  border: 2px solid var(--border-light);
-  border-radius: 4px;
-  cursor: pointer;
-  transition: border-color 0.1s, background 0.1s;
+  gap: 0;
+  min-height: 0;
+  padding: 8px;
 }
 
-.phonebook-item:hover {
-  background: #dce6f4;
-  border-color: #000080;
+/* Keypad */
+#phonebook-keypad {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  width: 180px;
+  flex-shrink: 0;
+  align-content: start;
+  padding: 4px;
 }
 
-.phonebook-item:active {
-  background: #b8cce8;
-}
-
-.phonebook-avatar {
-  width: 44px;
-  height: 44px;
-  background: #000080;
-  color: #ffffff;
+.keypad-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
-  font-weight: bold;
-  flex-shrink: 0;
-  border-radius: 4px;
+  gap: 6px;
+  padding: 10px 8px;
+  background: var(--bg-panel);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  font-family: inherit;
+  cursor: default;
+  min-height: 48px;
 }
 
-.phonebook-name {
-  font-size: 18px;
-  font-weight: 600;
+.keypad-letters {
+  font-size: 13px;
+  font-weight: bold;
   color: var(--text);
 }
 
-.phonebook-dial-icon {
-  margin-left: auto;
-  font-size: 24px;
-  color: var(--border);
-  flex-shrink: 0;
+.keypad-num {
+  font-size: 18px;
+  font-weight: bold;
+  color: var(--text);
 }
 
-.phonebook-item:hover .phonebook-dial-icon {
-  color: #000080;
+/* Centre: contact list + bottom tabs */
+#phonebook-centre {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 2px solid;
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
 }
 
-.phonebook-route-control {
-  border-color: #006600;
-}
-.phonebook-route-control .phonebook-avatar {
-  background: #006600;
-  font-size: 14px;
-}
-.phonebook-route-control:hover {
-  border-color: #004400;
-  background: #dce6dc;
-}
-.phonebook-route-control:hover .phonebook-dial-icon {
-  color: #006600;
-}
-.phonebook-item.disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.phonebook-item.disabled:hover {
+#phonebook-list-wrap {
+  flex: 1;
+  overflow-y: auto;
   background: #ffffff;
-  border-color: #006600;
-}
-.phonebook-dial-icon.disabled {
-  opacity: 0.4;
-  cursor: help;
 }
 
-.phonebook-item.dialing {
-  border-color: #000080;
+#phonebook-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+#phonebook-table td {
+  padding: 8px 14px;
+  font-size: 16px;
+  color: var(--text);
+  border-bottom: 1px solid #e0e0e0;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#phonebook-table td:first-child {
+  width: 60%;
+  font-weight: 500;
+}
+
+#phonebook-table td:last-child {
+  width: 40%;
+  text-align: right;
+  color: var(--text-dim);
+}
+
+#phonebook-table tr:hover {
   background: #e8eef8;
 }
 
-.phonebook-item.dialing .phonebook-name {
-  color: #000080;
+#phonebook-table tr.pb-selected {
+  background: #000080;
 }
 
-.phonebook-item.dialing .phonebook-dial-icon {
-  color: #000080;
+#phonebook-table tr.pb-selected td {
+  color: #ffffff;
 }
 
-.phonebook-dial-icon.in-call {
-  color: #0044aa;
-  font-size: 16px;
+#phonebook-table tr.pb-route-control td:first-child {
+  color: #006600;
   font-weight: bold;
 }
 
-#phonebook-status {
-  padding: 6px 12px;
-  font-size: 14px;
-  color: var(--text-dim);
-  background: var(--bg-panel);
-  flex-shrink: 0;
-  min-height: 28px;
+#phonebook-table tr.pb-selected.pb-route-control td:first-child {
+  color: #ffffff;
 }
 
-.phonebook-loading {
+#phonebook-table tr.pb-dialing {
+  background: #e8eef8;
+}
+
+#phonebook-table tr.pb-dialing td {
+  color: #000080;
+}
+
+/* Bottom bar: tabs + count */
+#phonebook-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+#phonebook-tabs {
+  display: flex;
+  gap: 0;
+}
+
+.pb-tab {
+  padding: 6px 20px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-dim);
+}
+
+.pb-tab.active {
+  background: #ffffff;
+  color: #0088cc;
+  border-bottom-color: #ffffff;
+}
+
+#phonebook-count {
+  font-size: 14px;
+  color: var(--text-dim);
+  margin-left: 8px;
+}
+
+/* Right sidebar: action buttons */
+#phonebook-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 90px;
+  flex-shrink: 0;
+  padding-left: 8px;
+}
+
+.pb-action-btn {
+  padding: 14px 8px;
+  background: var(--bg-panel);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--text);
+  cursor: pointer;
+  text-align: center;
+}
+
+.pb-action-btn:hover:not(:disabled) {
+  background: #e0dcd4;
+}
+
+.pb-action-btn:active:not(:disabled) {
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+}
+
+.pb-action-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#pb-dial-btn {
+  font-size: 32px;
+  padding: 18px 8px;
+}
+
+#pb-close-btn {
+  font-size: 28px;
+  padding: 18px 8px;
+}
+
+.pb-sidebar-spacer {
+  flex: 1;
+}
+
+#phonebook-status {
+  padding: 4px 12px;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-align: center;
+  min-height: 20px;
+}
+
+.pb-loading {
   color: var(--text-dim);
   font-size: 16px;
   font-style: italic;
   text-align: center;
   padding: 40px 12px;
+}
+
+#phonebook-table tr.disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#phonebook-table tr.in-call {
+  background: #1a3a4d;
+}
+
+#phonebook-table tr.in-call td {
+  color: #ffffff;
 }
 
 /* ── EMERGENCY PANEL ───────────────────────────────────────── */
@@ -1135,72 +1234,30 @@ body.dark-mode .use-text-link {
   color: var(--accent);
 }
 
-body.dark-mode .phonebook-item {
-  background: #2a2a2a;
-  border-color: #444444;
+body.dark-mode #phonebook-list-wrap {
+  background: #1e1e1e;
 }
 
-body.dark-mode .phonebook-avatar {
-  background: var(--accent);
+body.dark-mode #phonebook-table td {
+  border-bottom-color: #444;
 }
 
-body.dark-mode .phonebook-item:hover {
+body.dark-mode #phonebook-table tr:hover {
+  background: #2a3a4d;
+}
+
+body.dark-mode #phonebook-table tr.pb-selected {
+  background: #000060;
+}
+
+body.dark-mode .pb-tab.active {
+  background: #1e1e1e;
+  color: var(--accent);
+  border-bottom-color: #1e1e1e;
+}
+
+body.dark-mode .pb-action-btn:hover:not(:disabled) {
   background: #3a3a3a;
-  border-color: var(--accent);
-}
-
-body.dark-mode .phonebook-item:active {
-  background: #1a3a4d;
-}
-
-body.dark-mode .phonebook-item.dialing {
-  border-color: var(--accent);
-  background: #1a3a4d;
-}
-
-body.dark-mode .phonebook-item.dialing .phonebook-name {
-  color: var(--accent);
-}
-
-body.dark-mode .phonebook-item.dialing .phonebook-dial-icon {
-  color: var(--accent);
-}
-
-body.dark-mode .phonebook-item:hover .phonebook-dial-icon {
-  color: var(--accent);
-}
-
-body.dark-mode .phonebook-route-control {
-  border-color: #336633;
-}
-body.dark-mode .phonebook-route-control .phonebook-avatar {
-  background: #336633;
-}
-body.dark-mode .phonebook-route-control:hover {
-  border-color: #44aa44;
-  background: #1a3a1a;
-}
-body.dark-mode .phonebook-route-control:hover .phonebook-dial-icon {
-  color: #44aa44;
-}
-body.dark-mode .phonebook-item.disabled {
-  opacity: 0.4;
-}
-body.dark-mode .phonebook-item.disabled:hover {
-  background: #2a2a2a;
-  border-color: #336633;
-}
-
-body.dark-mode .phonebook-dial-icon {
-  color: var(--accent);
-}
-
-body.dark-mode .phonebook-item.in-call {
-  border-color: var(--accent);
-}
-
-body.dark-mode .phonebook-item.in-call .phonebook-dial-icon {
-  color: var(--accent);
 }
 
 body.dark-mode #emrg-feedback {

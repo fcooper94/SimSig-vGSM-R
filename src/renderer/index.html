@@ -103,15 +103,8 @@
         </div>
       </section>
 
-      <!-- Phone Book (tab-switched) -->
-      <section id="phonebook-view" class="tab-view">
-        <div id="phonebook-header">
-          <span>Phone Book</span>
-          <button id="phonebook-refresh">Refresh</button>
-        </div>
-        <div id="phonebook-list"></div>
-        <div id="phonebook-status"></div>
-      </section>
+      <!-- Phone Book placeholder (actual UI is in #phonebook-overlay) -->
+      <section id="phonebook-view" class="tab-view"></section>
 
       <!-- Message Log (tab-switched) -->
       <section id="message-log" class="tab-view">
@@ -152,6 +145,46 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- ── PHONE BOOK OVERLAY (covers content area only) ──────── -->
+    <div id="phonebook-overlay" class="hidden">
+      <div id="phonebook-body">
+        <!-- Left: Keypad -->
+        <div id="phonebook-keypad">
+          <button class="keypad-btn"><span class="keypad-num">1</span></button>
+          <button class="keypad-btn"><span class="keypad-letters">ABC</span><span class="keypad-num">2</span></button>
+          <button class="keypad-btn"><span class="keypad-letters">DEF</span><span class="keypad-num">3</span></button>
+          <button class="keypad-btn"><span class="keypad-letters">GHI</span><span class="keypad-num">4</span></button>
+          <button class="keypad-btn"><span class="keypad-letters">JKL</span><span class="keypad-num">5</span></button>
+          <button class="keypad-btn"><span class="keypad-letters">MNO</span><span class="keypad-num">6</span></button>
+          <button class="keypad-btn"><span class="keypad-letters">PQR</span><span class="keypad-num">7</span></button>
+          <button class="keypad-btn"><span class="keypad-letters">STU</span><span class="keypad-num">8</span></button>
+          <button class="keypad-btn"><span class="keypad-letters">VWX</span><span class="keypad-num">9</span></button>
+          <button class="keypad-btn"><span class="keypad-letters">YZ</span><span class="keypad-num">0</span></button>
+        </div>
+        <!-- Centre: Contact list -->
+        <div id="phonebook-centre">
+          <div id="phonebook-list-wrap">
+            <table id="phonebook-table"><tbody id="phonebook-list"></tbody></table>
+          </div>
+          <div id="phonebook-bottom">
+            <div id="phonebook-tabs">
+              <span class="pb-tab" id="pb-tab-global">Global</span>
+              <span class="pb-tab active" id="pb-tab-local">Local</span>
+            </div>
+            <span id="phonebook-count"></span>
+          </div>
+        </div>
+        <!-- Right: Action buttons -->
+        <div id="phonebook-sidebar">
+          <button class="pb-action-btn" id="pb-search-btn" disabled>Search...</button>
+          <div class="pb-sidebar-spacer"></div>
+          <button class="pb-action-btn" id="pb-dial-btn">&#128222;</button>
+          <button class="pb-action-btn" id="pb-close-btn">&#10005;</button>
+        </div>
+      </div>
+      <div id="phonebook-status"></div>
     </div>
   </main>
 

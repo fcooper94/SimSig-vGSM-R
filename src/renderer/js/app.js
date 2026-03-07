@@ -42,10 +42,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('panel-subtitle').textContent = '';
       // Hide paused overlay
       document.getElementById('paused-overlay').classList.add('hidden');
-      // Clear phonebook cache so it re-fetches on next connect
+      // Clear phonebook cache and hide overlay
       phonebookContacts = [];
       phonebookList.innerHTML = '';
       phonebookStatus.textContent = '';
+      phonebookOverlay.classList.add('hidden');
     }
   });
 
@@ -167,178 +168,245 @@ document.addEventListener('DOMContentLoaded', async () => {
     emrgConfirmModal.classList.add('hidden');
   });
 
-  // Phone Book view (declared here; also cleared on disconnect above)
+  // Phone Book overlay
+  const phonebookOverlay = document.getElementById('phonebook-overlay');
   const phonebookList = document.getElementById('phonebook-list');
   const phonebookStatus = document.getElementById('phonebook-status');
+  const phonebookCount = document.getElementById('phonebook-count');
+  const pbDialBtn = document.getElementById('pb-dial-btn');
+  const pbCloseBtn = document.getElementById('pb-close-btn');
+  const pbTabGlobal = document.getElementById('pb-tab-global');
+  const pbTabLocal = document.getElementById('pb-tab-local');
   let phonebookContacts = [];
+  let _selectedPhonebookIndex = -1;
+  let _phonebookTab = 'local'; // 'local' or 'global'
+
+  // Generate a deterministic fake GSM-R number from a contact name
+  function _gsmrNumber(name) {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
+    }
+    // 8-digit number starting with 74
+    const suffix = Math.abs(hash) % 1000000;
+    return '74' + String(suffix).padStart(6, '0');
+  }
+
+  function _renderPhonebook() {
+    phonebookList.innerHTML = '';
+    phonebookStatus.textContent = '';
+    _selectedPhonebookIndex = -1;
+
+    if (_phonebookTab === 'global') {
+      phonebookCount.textContent = '0 items in global phone book.';
+      return;
+    }
+
+    const entries = []; // { name, number, isRouteControl, contactIndex }
+
+    // Route Control entry at top
+    const routeControl = PhoneCallsUI.getRouteControl();
+    if (routeControl) {
+      entries.push({
+        name: `Route Control (${routeControl})`,
+        number: '74000001',
+        isRouteControl: true,
+        contactIndex: -1
+      });
+    }
+
+    phonebookContacts.forEach((name, idx) => {
+      entries.push({
+        name,
+        number: _gsmrNumber(name),
+        isRouteControl: false,
+        contactIndex: idx
+      });
+    });
+
+    if (entries.length === 0) {
+      phonebookCount.textContent = 'No outside contacts available for this simulation.';
+      return;
+    }
+
+    phonebookCount.textContent = `${entries.length} item${entries.length !== 1 ? 's' : ''} in local phone book.`;
+
+    entries.forEach((entry, idx) => {
+      const tr = document.createElement('tr');
+      tr.className = 'pb-row';
+      if (entry.isRouteControl) tr.classList.add('pb-route-control');
+
+      const tdName = document.createElement('td');
+      tdName.className = 'pb-cell-name';
+      tdName.textContent = entry.name;
+      tr.appendChild(tdName);
+
+      const tdNum = document.createElement('td');
+      tdNum.className = 'pb-cell-number';
+      tdNum.textContent = entry.number;
+      tr.appendChild(tdNum);
+
+      tr.addEventListener('click', () => {
+        _selectedPhonebookIndex = idx;
+        phonebookList.querySelectorAll('.pb-row').forEach((r, i) => {
+          r.classList.toggle('pb-selected', i === idx);
+        });
+      });
+
+      phonebookList.appendChild(tr);
+    });
+
+    // Update Route Control enabled/disabled state
+    if (routeControl) {
+      const updateRcState = () => {
+        const rcRow = phonebookList.querySelector('.pb-route-control');
+        if (!rcRow) return;
+        const hasFailures = typeof AlertsFeed !== 'undefined' && AlertsFeed.getActiveFailures().length > 0;
+        rcRow.classList.toggle('disabled', !hasFailures);
+        rcRow.title = hasFailures ? '' : 'No failures are active';
+      };
+      updateRcState();
+      AlertsFeed._onRenderCallback = updateRcState;
+    }
+  }
+
+  function _getPhonebookEntries() {
+    const entries = [];
+    const routeControl = PhoneCallsUI.getRouteControl();
+    if (routeControl) {
+      entries.push({ name: `Route Control (${routeControl})`, isRouteControl: true, contactIndex: -1 });
+    }
+    phonebookContacts.forEach((name, idx) => {
+      entries.push({ name, isRouteControl: false, contactIndex: idx });
+    });
+    return entries;
+  }
+
+  function _dialSelectedContact() {
+    if (_selectedPhonebookIndex < 0) {
+      phonebookStatus.textContent = 'Select a contact first';
+      return;
+    }
+    const entries = _getPhonebookEntries();
+    const entry = entries[_selectedPhonebookIndex];
+    if (!entry) return;
+
+    if (!ConnectionUI.isConnected) {
+      phonebookStatus.textContent = 'Cannot dial while disconnected';
+      return;
+    }
+    if (PhoneCallsUI.inCall || PhoneCallsUI._outgoingCall || PhoneCallsUI._dialingActive) {
+      phonebookStatus.textContent = 'Cannot dial while in a call';
+      return;
+    }
+
+    if (entry.isRouteControl) {
+      const hasFailures = typeof AlertsFeed !== 'undefined' && AlertsFeed.getActiveFailures().length > 0;
+      if (!hasFailures) {
+        phonebookStatus.textContent = 'No failures are active';
+        return;
+      }
+      PhoneCallsUI.dialRouteControl();
+      return;
+    }
+
+    // Browser: forward dial action to host
+    if (window.simsigAPI._isBrowser) {
+      window.simsigAPI.phone.remoteAction({ type: 'dial', index: entry.contactIndex, name: entry.name });
+      return;
+    }
+
+    const selectedRow = phonebookList.querySelectorAll('.pb-row')[_selectedPhonebookIndex];
+    if (selectedRow) selectedRow.classList.add('pb-dialing');
+    PhoneCallsUI.showDialingNotification(entry.name);
+
+    (async () => {
+      const res = await window.simsigAPI.phone.dialPhoneBook(entry.contactIndex);
+      if (res.error) {
+        if (selectedRow) selectedRow.classList.remove('pb-dialing');
+        PhoneCallsUI.stopDialing();
+        phonebookStatus.textContent = res.error;
+      } else {
+        // Poll SimSig's Place Call dialog until connected
+        await new Promise((r) => setTimeout(r, 3000));
+        for (let i = 0; i < 30; i++) {
+          if (!PhoneCallsUI._dialingActive) return;
+          const status = await window.simsigAPI.phone.placeCallStatus(entry.name);
+          if (status.connected && status.replies && status.replies.length > 0) {
+            if (selectedRow) selectedRow.classList.remove('pb-dialing');
+            PhoneCallsUI.stopDialing(true);
+            PhoneCallsUI.showOutgoingCallNotification(entry.name, status.message, status.replies);
+            return;
+          }
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+        if (selectedRow) selectedRow.classList.remove('pb-dialing');
+        PhoneCallsUI.stopDialing();
+        phonebookStatus.textContent = 'No answer';
+      }
+    })();
+  }
 
   async function loadPhoneBook() {
     phonebookStatus.textContent = '';
-    phonebookList.innerHTML = '<div class="phonebook-loading">Loading contacts...</div>';
+    phonebookList.innerHTML = '<tr><td colspan="2" class="pb-loading">Loading contacts...</td></tr>';
     const result = await window.simsigAPI.phone.readPhoneBook();
     if (result.error) {
-      // If we have cached contacts, use them instead of showing an error
       if (phonebookContacts.length > 0) {
         phonebookStatus.textContent = '';
       } else {
-        phonebookList.innerHTML = '<div class="phonebook-loading">Could not load contacts</div>';
+        phonebookList.innerHTML = '<tr><td colspan="2" class="pb-loading">Could not load contacts</td></tr>';
         phonebookStatus.textContent = result.error;
         return;
       }
     } else {
       const freshContacts = result.contacts || [];
       if (freshContacts.length === 0 && phonebookContacts.length > 0) {
-        // Read returned empty but we had contacts before — SimSig may be in background
-        // Keep using cached contacts
+        // SimSig may be in background — keep cached contacts
       } else {
         phonebookContacts = freshContacts;
       }
     }
+    _renderPhonebook();
+  }
+
+  function showPhonebook() {
+    phonebookOverlay.classList.remove('hidden');
     if (phonebookContacts.length === 0) {
-      phonebookList.innerHTML = '<div class="phonebook-loading">No outside contacts available for this simulation.</div>';
-      return;
-    }
-    phonebookStatus.textContent = '';
-    phonebookList.innerHTML = '';
-
-    // Route Control — simulated call (available if sim has a mapping and failures exist)
-    const routeControl = PhoneCallsUI.getRouteControl();
-    if (routeControl) {
-      const rcRow = document.createElement('div');
-      rcRow.className = 'phonebook-item phonebook-route-control';
-
-      const rcAvatar = document.createElement('div');
-      rcAvatar.className = 'phonebook-avatar';
-      rcAvatar.textContent = 'RC';
-      rcRow.appendChild(rcAvatar);
-
-      const rcLabel = document.createElement('div');
-      rcLabel.className = 'phonebook-name';
-      rcLabel.textContent = `Route Control (${routeControl})`;
-      rcRow.appendChild(rcLabel);
-
-      const rcIcon = document.createElement('div');
-      rcIcon.className = 'phonebook-dial-icon';
-      rcIcon.innerHTML = '&#128222;';
-      rcRow.appendChild(rcIcon);
-
-      // Update enabled/disabled state based on active failures
-      const updateRcState = () => {
-        const hasFailures = typeof AlertsFeed !== 'undefined' && AlertsFeed.getActiveFailures().length > 0;
-        if (hasFailures) {
-          rcRow.classList.remove('disabled');
-          rcRow.title = '';
-          rcIcon.classList.remove('disabled');
-          rcIcon.title = '';
-        } else {
-          rcRow.classList.add('disabled');
-          rcRow.title = 'No failures are active';
-          rcIcon.classList.add('disabled');
-          rcIcon.title = 'No failures are active';
-        }
-      };
-      updateRcState();
-      // Re-check whenever AlertsFeed renders (failures added/removed)
-      AlertsFeed._onRenderCallback = updateRcState;
-
-      rcRow.addEventListener('click', () => {
-        const hasFailures = typeof AlertsFeed !== 'undefined' && AlertsFeed.getActiveFailures().length > 0;
-        if (!hasFailures) {
-          phonebookStatus.textContent = 'No failures are active';
-          return;
-        }
-        if (PhoneCallsUI.inCall || PhoneCallsUI._outgoingCall || PhoneCallsUI._dialingActive) {
-          phonebookStatus.textContent = 'Cannot dial while in a call';
-          return;
-        }
-        PhoneCallsUI.dialRouteControl();
-      });
-      phonebookList.appendChild(rcRow);
-    }
-
-    phonebookContacts.forEach((name, idx) => {
-      const row = document.createElement('div');
-      row.className = 'phonebook-item';
-
-      const avatar = document.createElement('div');
-      avatar.className = 'phonebook-avatar';
-      avatar.textContent = name.charAt(0).toUpperCase();
-      row.appendChild(avatar);
-
-      const label = document.createElement('div');
-      label.className = 'phonebook-name';
-      label.textContent = name;
-      row.appendChild(label);
-
-      const dialIcon = document.createElement('div');
-      dialIcon.className = 'phonebook-dial-icon';
-      dialIcon.innerHTML = '&#128222;';
-      row.appendChild(dialIcon);
-
-      row.addEventListener('click', async () => {
-        if (!ConnectionUI.isConnected) {
-          phonebookStatus.textContent = 'Cannot dial while disconnected';
-          return;
-        }
-        if (PhoneCallsUI.inCall || PhoneCallsUI._outgoingCall || PhoneCallsUI._dialingActive) {
-          phonebookStatus.textContent = 'Cannot dial while in a call';
-          return;
-        }
-        // Browser: forward dial action to host (host runs the full outgoing call flow)
-        if (window.simsigAPI._isBrowser) {
-          window.simsigAPI.phone.remoteAction({ type: 'dial', index: idx, name });
-          return;
-        }
-        row.classList.add('dialing');
-        PhoneCallsUI.showDialingNotification(name);
-        const res = await window.simsigAPI.phone.dialPhoneBook(idx);
-        if (res.error) {
-          row.classList.remove('dialing');
-          PhoneCallsUI.stopDialing();
-          phonebookStatus.textContent = res.error;
-        } else {
-          // Poll SimSig's Place Call dialog until connected
-          const pollForConnection = async () => {
-            // Minimum ring time of 3 seconds before first check
-            await new Promise((r) => setTimeout(r, 3000));
-            for (let i = 0; i < 30; i++) {
-              if (!PhoneCallsUI._dialingActive) return; // user cancelled
-              const status = await window.simsigAPI.phone.placeCallStatus(name);
-              if (status.connected && status.replies && status.replies.length > 0) {
-                row.classList.remove('dialing');
-                PhoneCallsUI.stopDialing(true);  // keep Place Call dialog open for replies
-                PhoneCallsUI.showOutgoingCallNotification(name, status.message, status.replies);
-                return;
-              }
-              await new Promise((r) => setTimeout(r, 1000));
-            }
-            // Timed out — stop dialing
-            row.classList.remove('dialing');
-            PhoneCallsUI.stopDialing();
-            phonebookStatus.textContent = 'No answer';
-          };
-          pollForConnection();
-        }
-      });
-      phonebookList.appendChild(row);
-    });
-    // Re-apply In Call state if an outgoing call is active
-    if (PhoneCallsUI._outgoingCall && PhoneCallsUI._outgoingContactName) {
-      PhoneCallsUI._updatePhonebookInCall(PhoneCallsUI._outgoingContactName, true);
+      loadPhoneBook();
+    } else {
+      _renderPhonebook();
     }
   }
 
-  document.getElementById('phonebook-btn').addEventListener('click', () => {
-    switchTab('phonebook');
-    // Only fetch from SimSig on first open — use cache after that
-    if (phonebookContacts.length === 0) {
-      loadPhoneBook();
-    }
+  pbDialBtn.addEventListener('click', () => _dialSelectedContact());
+  pbCloseBtn.addEventListener('click', () => phonebookOverlay.classList.add('hidden'));
+
+  pbTabLocal.addEventListener('click', () => {
+    if (_phonebookTab === 'local') return;
+    _phonebookTab = 'local';
+    pbTabLocal.classList.add('active');
+    pbTabGlobal.classList.remove('active');
+    _renderPhonebook();
   });
 
-  document.getElementById('phonebook-refresh').addEventListener('click', () => {
-    loadPhoneBook();
+  pbTabGlobal.addEventListener('click', () => {
+    if (_phonebookTab === 'global') return;
+    _phonebookTab = 'global';
+    pbTabGlobal.classList.add('active');
+    pbTabLocal.classList.remove('active');
+    _renderPhonebook();
   });
+
+  document.getElementById('phonebook-btn').addEventListener('click', () => {
+    showPhonebook();
+  });
+
+  // Keep refresh button working if it exists
+  const phonebookRefreshBtn = document.getElementById('phonebook-refresh');
+  if (phonebookRefreshBtn) {
+    phonebookRefreshBtn.addEventListener('click', () => loadPhoneBook());
+  }
 
   // ── Compact Mode ──────────────────────────────────────────
   const compactToggleBtn = document.getElementById('compact-toggle-btn');
@@ -428,10 +496,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (compactDialBtn) {
     compactDialBtn.addEventListener('click', () => {
       window.simsigAPI.window.toggleCompact();
-      setTimeout(() => {
-        switchTab('phonebook');
-        if (phonebookContacts.length === 0) loadPhoneBook();
-      }, 100);
+      setTimeout(() => showPhonebook(), 100);
     });
   }
 
