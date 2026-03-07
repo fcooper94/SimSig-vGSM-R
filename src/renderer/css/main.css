@@ -516,6 +516,8 @@ body {
 #bottom-area {
   display: flex;
   flex-shrink: 0;
+  position: relative;
+  z-index: 10000;
 }
 
 #bottom-left {
@@ -1101,7 +1103,8 @@ body.disconnected #panel-subtitle-row {
 }
 
 /* Keep these toolbar buttons active when disconnected */
-body.disconnected #bottom-bar {
+body.disconnected #bottom-bar,
+body.disconnected #incoming-notification {
   pointer-events: none;
   opacity: 0.35;
 }

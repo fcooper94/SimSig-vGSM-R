@@ -262,13 +262,18 @@ try {
 
     # Detect pause state by reading the clock background color
     $clockColor = ""
-    $paused = $false
     if ([SimSigListBox]::simsigHwnd -ne [IntPtr]::Zero) {
         $clockColor = [SimSigListBox]::ReadClockColor([SimSigListBox]::simsigHwnd)
-        $paused = $clockColor -eq "red"
     }
 
-    $result = @{ calls = $calls; simName = $simName; simsigFound = $simsigFound; clockColor = $clockColor; paused = $paused; answerDialogOpen = $answerDialogOpen }
+    $result = @{ calls = $calls; simName = $simName; simsigFound = $simsigFound; clockColor = $clockColor; answerDialogOpen = $answerDialogOpen }
+    # Only report pause state when clock color is definitively red or green
+    # When SimSig is covered by another window, pixel reading is unreliable
+    if ($clockColor -eq "red") {
+        $result.paused = $true
+    } elseif ($clockColor -eq "green") {
+        $result.paused = $false
+    }
     if ($calls.Count -eq 0) {
         $result.calls = @()
     }
