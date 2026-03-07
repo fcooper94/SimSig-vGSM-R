@@ -103,6 +103,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('panel-subtitle').textContent = name;
     // Keep PhoneCallsUI in sync so Route Control lookup works
     PhoneCallsUI.currentPanelName = name;
+    // Restore saved alerts state (waited trains, failures) for this sim
+    AlertsFeed.restoreState();
   });
 
   // Now do async initialization (PTTUI needs settings from main process)
@@ -175,13 +177,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     phonebookList.innerHTML = '<div class="phonebook-loading">Loading contacts...</div>';
     const result = await window.simsigAPI.phone.readPhoneBook();
     if (result.error) {
-      phonebookList.innerHTML = '<div class="phonebook-loading">Could not load contacts</div>';
-      phonebookStatus.textContent = result.error;
-      return;
+      // If we have cached contacts, use them instead of showing an error
+      if (phonebookContacts.length > 0) {
+        phonebookStatus.textContent = '';
+      } else {
+        phonebookList.innerHTML = '<div class="phonebook-loading">Could not load contacts</div>';
+        phonebookStatus.textContent = result.error;
+        return;
+      }
+    } else {
+      const freshContacts = result.contacts || [];
+      if (freshContacts.length === 0 && phonebookContacts.length > 0) {
+        // Read returned empty but we had contacts before — SimSig may be in background
+        // Keep using cached contacts
+      } else {
+        phonebookContacts = freshContacts;
+      }
     }
-    phonebookContacts = result.contacts || [];
     if (phonebookContacts.length === 0) {
-      phonebookList.innerHTML = '<div class="phonebook-loading">No contacts available. Open a sim in SimSig first.</div>';
+      phonebookList.innerHTML = '<div class="phonebook-loading">No outside contacts available for this simulation.</div>';
       return;
     }
     phonebookStatus.textContent = '';

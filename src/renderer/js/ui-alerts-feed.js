@@ -12,6 +12,7 @@ const AlertsFeed = {
   _waitedPairs: null, // Set of 'HC|SIG' pairs already auto-waited
   _onRenderCallback: null, // Called after render to update external UI (e.g. Route Control button)
   _selectedHc: null, // Currently selected headcode (for detail panel)
+  _stateRestored: false, // Prevents duplicate restoreState calls
 
   init() {
     this.feedEl = document.getElementById('alerts-feed');
@@ -135,7 +136,9 @@ const AlertsFeed = {
       const hcMatch = text.match(/^([0-9][A-Za-z]\d{2})\s/);
       if (hcMatch) {
         const hc = hcMatch[1].toUpperCase();
-        if (this._activeRedSignals.has(hc)) {
+        const entry = this._activeRedSignals.get(hc);
+        // Only remove un-waited trains; waited trains persist until manually removed
+        if (entry && !entry.waited) {
           if (this._selectedHc === hc) this._selectedHc = null;
           this._activeRedSignals.delete(hc);
           changed = true;
@@ -147,6 +150,7 @@ const AlertsFeed = {
       this._playMsgSound();
       this.render();
       this.renderWaited();
+      this._saveState();
     }
   },
 
@@ -167,6 +171,7 @@ const AlertsFeed = {
     if (added) {
       this._playMsgSound();
       this.render();
+      this._saveState();
     }
   },
 
@@ -196,12 +201,13 @@ const AlertsFeed = {
     if (changed) {
       this.render();
       this.renderWaited();
+      this._saveState();
     }
   },
 
   _handleWait(headcode, signal) {
     const key = headcode + '|' + signal;
-    if (this._waitedPairs.has(key)) return;
+    const alreadySent = this._waitedPairs.has(key);
     this._waitedPairs.add(key);
 
     const entry = this._activeRedSignals.get(headcode);
@@ -210,7 +216,8 @@ const AlertsFeed = {
       entry.waitedAt = Date.now();
     }
 
-    window.simsigAPI.phone.autoWait(headcode, signal);
+    // Only send auto-wait if we haven't already for this headcode+signal
+    if (!alreadySent) window.simsigAPI.phone.autoWait(headcode, signal);
     console.log(`[AlertsFeed] Queued auto-wait for ${headcode} at ${signal}`);
 
     if (typeof PhoneCallsUI !== 'undefined') {
@@ -227,6 +234,7 @@ const AlertsFeed = {
     // Keep selected so detail updates with disabled Wait button
     this.render();
     this.renderWaited();
+    this._saveState();
   },
 
   _removeTrain(hc) {
@@ -235,6 +243,7 @@ const AlertsFeed = {
       this._activeRedSignals.delete(hc);
       this.render();
       this.renderWaited();
+      this._saveState();
     }
   },
 
@@ -356,6 +365,7 @@ const AlertsFeed = {
     this._reportedFailures = new Set();
     this._waitedPairs = new Set();
     this._selectedHc = null;
+    this._stateRestored = false;
     if (this.feedEl) this.feedEl.innerHTML = '';
     if (this.waitedFeedEl) this.waitedFeedEl.innerHTML = '';
     this._hideDetail();
@@ -425,6 +435,7 @@ const AlertsFeed = {
       const removed = this._activeFailures.splice(index, 1)[0];
       if (removed) this._failureSeen.delete(removed.status);
       this.render();
+      this._saveState();
     }
   },
 
@@ -453,6 +464,57 @@ const AlertsFeed = {
         this.addFailure([`Signal lamp failure at signal ${sigId}`]);
         break;
     }
+  },
+
+  _getStorageKey() {
+    const panel = (typeof PhoneCallsUI !== 'undefined' && PhoneCallsUI.currentPanelName) || '';
+    return panel ? 'alertsFeed_' + panel : '';
+  },
+
+  _saveState() {
+    const key = this._getStorageKey();
+    if (!key) return;
+    try {
+      const signals = [];
+      for (const [hc, data] of this._activeRedSignals) {
+        signals.push({ hc, signal: data.signal, waited: data.waited, waitedAt: data.waitedAt });
+      }
+      const state = {
+        signals,
+        failures: this._activeFailures,
+        failureSeen: [...this._failureSeen],
+        reportedFailures: [...this._reportedFailures],
+        waitedPairs: [...this._waitedPairs],
+      };
+      localStorage.setItem(key, JSON.stringify(state));
+    } catch (e) { /* ignore */ }
+  },
+
+  restoreState() {
+    if (this._stateRestored) return;
+    this._stateRestored = true;
+    const key = this._getStorageKey();
+    if (!key) return;
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return;
+      const state = JSON.parse(raw);
+      if (state.signals && state.signals.length > 0) {
+        for (const s of state.signals) {
+          // Overwrite any entry added by early polls with the saved state
+          this._activeRedSignals.set(s.hc, {
+            signal: s.signal, waited: s.waited,
+            addedAt: Date.now(), waitedAt: s.waitedAt || 0,
+          });
+        }
+      }
+      if (state.failures) this._activeFailures = state.failures;
+      if (state.failureSeen) this._failureSeen = new Set(state.failureSeen);
+      if (state.reportedFailures) this._reportedFailures = new Set(state.reportedFailures);
+      if (state.waitedPairs) this._waitedPairs = new Set(state.waitedPairs);
+      this.render();
+      this.renderWaited();
+    } catch (e) { /* ignore */ }
   },
 
   _esc(s) {
