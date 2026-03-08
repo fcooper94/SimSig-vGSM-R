@@ -56,7 +56,11 @@
       "Bash(xargs grep -l \"phonebook\\\\|phone.*book\" -i)",
       "Bash(where gh)",
       "Bash(xargs grep -l \"phonebook\")",
-      "Bash(Start-Sleep -Milliseconds 2000)"
+      "Bash(Start-Sleep -Milliseconds 2000)",
+      "Bash(ffprobe -v quiet -show_format -show_streams \"c:/dev/SimSig-vGSM-R/sounds/ringing.wav\")",
+      "Bash(ffprobe -v quiet -show_format -show_streams \"c:/Users/Admin/Downloads/untitled.wav\")",
+      "Bash(where ffprobe)",
+      "Bash(where ffmpeg)"
     ]
   }
 }

@@ -119,7 +119,6 @@ async function doAutoWait(rawTrain, headcode) {
     // Re-raise our window
     const win = BrowserWindow.getAllWindows()[0];
     if (win) {
-      win.setAlwaysOnTop(true, 'floating');
       win.moveTop();
       win.focus();
     }

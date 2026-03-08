@@ -40,15 +40,25 @@ const AlertsFeed = {
       const row = e.target.closest('tr[data-hc]');
       if (row) {
         this._selectedHc = row.dataset.hc;
+      } else if (this._selectedHc) {
+        this._selectedHc = null;
+      } else {
+        return;
+      }
+      this.render();
+      this.renderWaited();
+    });
+
+    // Right panel: clicking a train toggles selection; clicking empty space deselects
+    this.waitedFeedEl.addEventListener('click', (e) => {
+      const row = e.target.closest('tr[data-hc]');
+      if (row) {
+        this._selectTrain(row.dataset.hc);
+      } else if (this._selectedHc) {
+        this._selectedHc = null;
         this.render();
         this.renderWaited();
       }
-    });
-
-    // Right panel: clicking a train toggles selection (detail panel)
-    this.waitedFeedEl.addEventListener('click', (e) => {
-      const row = e.target.closest('tr[data-hc]');
-      if (row) this._selectTrain(row.dataset.hc);
     });
 
     // Detail panel buttons
@@ -441,6 +451,8 @@ const AlertsFeed = {
   },
 
   _playMsgSound() {
+    // Don't play alert sound while phone is ringing — avoids audio interference
+    if (typeof PhoneCallsUI !== 'undefined' && PhoneCallsUI.wasRinging) return;
     if (this._msgAudio) {
       this._msgAudio.currentTime = 0;
       this._msgAudio.play().catch(() => {});
@@ -526,6 +538,10 @@ const AlertsFeed = {
             signal: s.signal, waited: s.waited,
             addedAt: Date.now(), waitedAt: s.waitedAt || 0,
           });
+          // Re-queue auto-wait in the main process so repeat calls are intercepted
+          if (s.waited) {
+            window.simsigAPI.phone.autoWait(s.hc, s.signal);
+          }
         }
       }
       if (state.failures) this._activeFailures = state.failures;

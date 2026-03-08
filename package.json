@@ -1,6 +1,6 @@
 {
   "name": "vGSM-R",
-  "version": "1.0.30",
+  "version": "1.0.31",
   "description": "SimSig VGSM-R Radio Communications Simulator",
   "main": "src/main/main.js",
   "scripts": {

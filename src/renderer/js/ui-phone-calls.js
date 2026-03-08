@@ -4,10 +4,7 @@ const PhoneCallsUI = {
   chatEl: null,
   calls: [],
   messages: [],
-  ringCtx: null,
-  ringBuffer: null,
-  ringSource: null,
-  ringGain: null,
+  ringAudio: null,
   wasRinging: false,
   inCall: false,
   gameTime: '',         // formatted game time from gateway (empty = no connection)
@@ -85,10 +82,6 @@ const PhoneCallsUI = {
         this.renderChat();
         this.renderCalls(); // re-render call list so In Call badge matches
         if (state.notification) this._applyNotification(state.notification);
-        // Sync silence button visibility
-        if (this.silenceBtn) {
-          this.silenceBtn.classList.toggle('hidden', !state.silenceBtnVisible);
-        }
         // Update radio display
         const radioDisplay = document.getElementById('radio-display');
         const line1 = document.getElementById('display-line-1');
@@ -167,17 +160,19 @@ const PhoneCallsUI = {
       }
     });
 
-    // Gapless ringing via Web Audio API (HTML5 Audio.loop has a seek gap)
-    this.ringCtx = new AudioContext();
-    this.ringBuffer = null;
-    this.ringSource = null;
-    this.ringGain = this.ringCtx.createGain();
-    this.ringGain.connect(this.ringCtx.destination);
-    fetch('../../sounds/ringing.wav')
-      .then((r) => r.arrayBuffer())
-      .then((buf) => this.ringCtx.decodeAudioData(buf))
-      .then((buffer) => { this._crossfadeBuffer(buffer); this.ringBuffer = buffer; })
-      .catch(() => {});
+    // Ringing audio — play full file, 1s gap, repeat
+    this.ringAudio = new Audio('../../sounds/ringing.wav');
+    this.ringAudio.volume = 1;
+    this._ringLooping = false;
+    this._ringTimer = null;
+    this.ringAudio.addEventListener('ended', () => {
+      if (!this._ringLooping) return;
+      this._ringTimer = setTimeout(() => {
+        if (!this._ringLooping) return;
+        this.ringAudio.currentTime = 0;
+        this.ringAudio.play().catch(() => {});
+      }, 1000);
+    });
 
     // Apply saved ring output device
     window.simsigAPI.settings.getAll().then((s) => {
@@ -196,7 +191,6 @@ const PhoneCallsUI = {
     window.simsigAPI.phone.onSilenceRing(() => {
       this.silenced = true;
       this._stopRingSource();
-      if (this.silenceBtn) this.silenceBtn.classList.add('hidden');
       this._syncToRemote();
     });
 
@@ -306,6 +300,7 @@ const PhoneCallsUI = {
 
     // Gapless background noise via Web Audio API — alternate between two clips
     this.bgCtx = new AudioContext();
+    this.bgCtx.suspend(); // keep suspended until a call starts, to avoid interfering with ringing
     this.bgBuffers = [];
     this.bgBufferIndex = 0;
     this.bgSignallerBuffer = null;
@@ -394,7 +389,6 @@ const PhoneCallsUI = {
     if (this._isBrowser) return; // no audio on browser
     this.wasRinging = true;
     this.silenced = false;
-    if (this.silenceBtn) this.silenceBtn.classList.remove('hidden');
     this._syncToRemote();
     if (this.isPaused() || !this.initReady) return;
     this._startRingSource();
@@ -404,51 +398,33 @@ const PhoneCallsUI = {
     if (this._isBrowser) return; // no audio on browser
     this.wasRinging = false;
     this.silenced = false;
-    if (this.silenceBtn) this.silenceBtn.classList.add('hidden');
     this._syncToRemote();
     this._stopRingSource();
   },
 
   _startRingSource() {
+    if (this._ringLooping) return; // already playing
     this._stopRingSource();
-    if (!this.ringBuffer || !this.ringCtx) return;
-    if (this.ringCtx.state === 'suspended') this.ringCtx.resume();
-    const source = this.ringCtx.createBufferSource();
-    source.buffer = this.ringBuffer;
-    source.loop = true;
-    source.connect(this.ringGain);
-    this.ringGain.gain.value = 1;
-    source.start();
-    this.ringSource = source;
+    if (!this.ringAudio) return;
+    this._ringLooping = true;
+    this.ringAudio.currentTime = 0;
+    this.ringAudio.play().catch(() => {});
   },
 
   _stopRingSource() {
-    if (this.ringSource) {
-      try { this.ringSource.stop(); } catch {}
-      this.ringSource = null;
+    this._ringLooping = false;
+    if (this._ringTimer) { clearTimeout(this._ringTimer); this._ringTimer = null; }
+    if (this.ringAudio) {
+      this.ringAudio.pause();
+      this.ringAudio.currentTime = 0;
     }
   },
 
   setRingDevice(deviceId) {
-    if (this.ringCtx && this.ringCtx.setSinkId) {
-      this.ringCtx.setSinkId(deviceId || 'default').catch((e) => {
+    if (this.ringAudio && this.ringAudio.setSinkId) {
+      this.ringAudio.setSinkId(deviceId || 'default').catch((e) => {
         console.warn('[Phone] Could not set ring output device:', e.message);
       });
-    }
-  },
-
-  // Crossfade the tail into the head of an AudioBuffer for seamless looping
-  _crossfadeBuffer(buffer, fadeSec = 0.05) {
-    const samples = Math.min(Math.floor(fadeSec * buffer.sampleRate), buffer.length >> 2);
-    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
-      const d = buffer.getChannelData(ch);
-      const len = d.length;
-      for (let i = 0; i < samples; i++) {
-        const t = i / samples;
-        // Blend tail into head so the loop boundary is seamless
-        d[i] = d[i] * t + d[len - samples + i] * (1 - t);
-        d[len - samples + i] *= t;
-      }
     }
   },
 
@@ -708,6 +684,7 @@ const PhoneCallsUI = {
   // Start background noise (cab for trains, office for signallers, yard for shunters/CSD)
   startBgNoise() {
     if (!this.bgCtx) return; // no audio context on browser
+    if (this.bgCtx.state === 'suspended') this.bgCtx.resume();
     let buffer;
     if (this.bgCallerType === 'yard' && this.bgYardBuffer) {
       buffer = this.bgYardBuffer;
@@ -744,7 +721,10 @@ const PhoneCallsUI = {
     this.bgGain.gain.linearRampToValueAtTime(0, now + 0.5);
     const src = this.bgSource;
     this.bgSource = null;
-    setTimeout(() => { try { src.stop(); } catch {} }, 600);
+    setTimeout(() => {
+      try { src.stop(); } catch {}
+      if (!this.bgSource && this.bgCtx) this.bgCtx.suspend();
+    }, 600);
   },
 
   // Play pre-fetched audio data
@@ -2315,8 +2295,8 @@ const PhoneCallsUI = {
     source.connect(gain);
     // Fade out over last 50ms
     const dur = this._ringOutBuffer.duration;
-    gain.gain.setValueAtTime(1, ctx.currentTime);
-    gain.gain.setValueAtTime(1, ctx.currentTime + dur - 0.05);
+    gain.gain.setValueAtTime(2, ctx.currentTime);
+    gain.gain.setValueAtTime(2, ctx.currentTime + dur - 0.05);
     gain.gain.linearRampToValueAtTime(0, ctx.currentTime + dur);
     source.start(0);
     this._ringOutSource = source;
@@ -3164,11 +3144,13 @@ const PhoneCallsUI = {
     if (!this.notificationTrainEl) return;
     this.notificationTrainEl.textContent = text;
     this.notificationTrainEl.style.display = 'block';
-    // Start at default size, shrink until it fits the container width
-    const maxWidth = this.notificationEl.clientWidth - 10; // account for padding
+    // Start at default size, shrink until it fits the container
+    const maxWidth = this.notificationEl.clientWidth - 10;
     let size = 22;
     this.notificationTrainEl.style.fontSize = size + 'px';
-    while (size > 10 && this.notificationTrainEl.scrollWidth > maxWidth) {
+    const maxHeight = this.notificationTrainEl.clientHeight; // capped by CSS max-height
+    while (size > 10 && (this.notificationTrainEl.scrollWidth > maxWidth
+        || this.notificationTrainEl.scrollHeight > maxHeight)) {
       size--;
       this.notificationTrainEl.style.fontSize = size + 'px';
     }

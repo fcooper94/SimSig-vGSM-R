@@ -27,7 +27,6 @@ function createWindow() {
     },
   });
 
-  mainWindow.setAlwaysOnTop(true, 'floating');
   mainWindow.setMenu(null);
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 
@@ -45,7 +44,6 @@ function createWindow() {
   mainWindow.on('close', (e) => {
     if (closeConfirmed) return; // already confirmed, let it close
     e.preventDefault();
-    mainWindow.setAlwaysOnTop(false);
     try {
       mainWindow.webContents.send(channels.WINDOW_CONFIRM_CLOSE);
     } catch (err) {
@@ -71,7 +69,6 @@ function createWindow() {
       closeConfirmed = true;
       mainWindow.close();
     } else {
-      mainWindow.setAlwaysOnTop(true, 'floating');
     }
   });
 
