@@ -13,6 +13,7 @@ const AlertsFeed = {
   _onRenderCallback: null, // Called after render to update external UI (e.g. Route Control button)
   _selectedHc: null, // Currently selected headcode (for detail panel)
   _stateRestored: false, // Prevents duplicate restoreState calls
+  _lastClockSeconds: 0, // Last known game clock seconds
 
   init() {
     this.feedEl = document.getElementById('alerts-feed');
@@ -471,6 +472,17 @@ const AlertsFeed = {
     return panel ? 'alertsFeed_' + panel : '';
   },
 
+  _getSessionId() {
+    // sessionStorage is cleared each time the Electron app starts,
+    // so we use it to generate a unique ID per app launch.
+    let id = sessionStorage.getItem('alertsFeed_sessionId');
+    if (!id) {
+      id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      sessionStorage.setItem('alertsFeed_sessionId', id);
+    }
+    return id;
+  },
+
   _saveState() {
     const key = this._getStorageKey();
     if (!key) return;
@@ -485,6 +497,7 @@ const AlertsFeed = {
         failureSeen: [...this._failureSeen],
         reportedFailures: [...this._reportedFailures],
         waitedPairs: [...this._waitedPairs],
+        sessionId: this._getSessionId(),
       };
       localStorage.setItem(key, JSON.stringify(state));
     } catch (e) { /* ignore */ }
@@ -499,9 +512,16 @@ const AlertsFeed = {
       const raw = localStorage.getItem(key);
       if (!raw) return;
       const state = JSON.parse(raw);
+      // Only restore if the state was saved in THIS app session.
+      // sessionStorage resets on each app launch, so a different session
+      // (different sim, different timetable, app restart) won't match.
+      if (state.sessionId !== this._getSessionId()) {
+        console.log('[AlertsFeed] Stale session data — clearing stored state for', key);
+        localStorage.removeItem(key);
+        return;
+      }
       if (state.signals && state.signals.length > 0) {
         for (const s of state.signals) {
-          // Overwrite any entry added by early polls with the saved state
           this._activeRedSignals.set(s.hc, {
             signal: s.signal, waited: s.waited,
             addedAt: Date.now(), waitedAt: s.waitedAt || 0,
@@ -515,6 +535,10 @@ const AlertsFeed = {
       this.render();
       this.renderWaited();
     } catch (e) { /* ignore */ }
+  },
+
+  onClockUpdate(clockSeconds) {
+    this._lastClockSeconds = clockSeconds;
   },
 
   _esc(s) {

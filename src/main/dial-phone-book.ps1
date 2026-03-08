@@ -102,6 +102,57 @@ public class PhoneBookDial {
     public static void HideOffScreen(IntPtr hWnd) {
         SetWindowPos(hWnd, IntPtr.Zero, -32000, -32000, 0, 0, 0x0001 | 0x0004 | 0x0010);
     }
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxLength);
+
+    // Find all child windows of a given class name
+    public static IntPtr[] FindChildrenByClass(IntPtr parent, string className) {
+        var results = new System.Collections.Generic.List<IntPtr>();
+        _callback = (hWnd, lParam) => {
+            var sb = new StringBuilder(256);
+            GetClassName(hWnd, sb, 256);
+            if (sb.ToString() == className) results.Add(hWnd);
+            return true;
+        };
+        EnumChildWindows(parent, _callback, IntPtr.Zero);
+        return results.ToArray();
+    }
+
+    // Find a child button by text
+    public static IntPtr FindButtonByText(IntPtr parent, string text) {
+        IntPtr result = IntPtr.Zero;
+        _callback = (hWnd, lParam) => {
+            var sb = new StringBuilder(256);
+            GetClassName(hWnd, sb, 256);
+            string cls = sb.ToString();
+            if (cls == "TButton" || cls == "Button") {
+                sb.Clear();
+                GetWindowText(hWnd, sb, 256);
+                if (sb.ToString() == text) { result = hWnd; return false; }
+            }
+            return true;
+        };
+        EnumChildWindows(parent, _callback, IntPtr.Zero);
+        return result;
+    }
+
+    public static IntPtr FindWindowByTitle(string title) {
+        IntPtr result = IntPtr.Zero;
+        _callback = (hWnd, lParam) => {
+            StringBuilder sb = new StringBuilder(256);
+            GetWindowText(hWnd, sb, 256);
+            if (sb.ToString() == title) {
+                result = hWnd;
+                return false;
+            }
+            return true;
+        };
+        EnumWindows(_callback, IntPtr.Zero);
+        return result;
+    }
 }
 "@
 
@@ -125,6 +176,14 @@ try {
         $nameCond
     )
 
+    # Fallback: UI Automation can miss off-screen windows
+    if ($null -eq $placeCallDialog) {
+        $hwnd = [PhoneBookDial]::FindWindowByTitle("Place Call")
+        if ($hwnd -ne [IntPtr]::Zero) {
+            $placeCallDialog = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+        }
+    }
+
     # If not open, send 'O' key via PostMessage
     if ($null -eq $placeCallDialog) {
         [PhoneBookDial]::SendKey([PhoneBookDial]::simsigHwnd, [PhoneBookDial]::VK_O)
@@ -137,6 +196,12 @@ try {
                 $nameCond
             )
             if ($null -ne $placeCallDialog) { break }
+            # EnumWindows fallback in poll loop too
+            $hwnd = [PhoneBookDial]::FindWindowByTitle("Place Call")
+            if ($hwnd -ne [IntPtr]::Zero) {
+                $placeCallDialog = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+                if ($null -ne $placeCallDialog) { break }
+            }
         }
     }
 
@@ -145,27 +210,19 @@ try {
         exit 0
     }
 
-    # Hide dialog off-screen
+    # Use Win32 APIs to find controls (works even when dialog is off-screen)
     $dialogHwnd = [IntPtr]$placeCallDialog.Current.NativeWindowHandle
+
+    # Hide dialog off-screen immediately
     if ($dialogHwnd -ne [IntPtr]::Zero) {
         [void][PhoneBookDial]::HideOffScreen($dialogHwnd)
     }
 
-    # Find the contacts ComboBox (the one whose first item isn't a request keyword)
-    # FindFirst doesn't guarantee visual order in UI Automation
-    $comboCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-        "TComboBox"
-    )
-    $allCombos = $placeCallDialog.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $comboCond
-    )
+    # Find the contacts ComboBox via EnumChildWindows (reliable off-screen)
+    $allComboHwnds = [PhoneBookDial]::FindChildrenByClass($dialogHwnd, "TComboBox")
 
     $bestHwnd = [IntPtr]::Zero
-    foreach ($combo in $allCombos) {
-        $hw = [IntPtr]$combo.Current.NativeWindowHandle
-        if ($hw -eq [IntPtr]::Zero) { continue }
+    foreach ($hw in $allComboHwnds) {
         $cnt = [PhoneBookDial]::GetComboCount($hw)
         if ($cnt -gt 0) {
             $firstItem = [PhoneBookDial]::GetComboText($hw, 0)
@@ -188,26 +245,17 @@ try {
         exit 0
     }
 
-    # Select the contact
-    [PhoneBookDial]::SelectComboItem($bestHwnd, $Index)
-    Start-Sleep -Milliseconds 100
+    # Find the Dial button via EnumChildWindows
+    $dialBtnHwnd = [PhoneBookDial]::FindButtonByText($dialogHwnd, "Dial")
 
-    # Find and click the Dial button
-    $dialBtnCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::NameProperty,
-        "Dial"
-    )
-    $dialBtn = $placeCallDialog.FindFirst(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $dialBtnCond
-    )
-
-    if ($null -eq $dialBtn) {
+    if ($dialBtnHwnd -eq [IntPtr]::Zero) {
         Write-Output '{"error":"Dial button not found"}'
         exit 0
     }
 
-    $dialBtnHwnd = [IntPtr]$dialBtn.Current.NativeWindowHandle
+    # Select the contact and click Dial (Win32 messages work off-screen)
+    [PhoneBookDial]::SelectComboItem($bestHwnd, $Index)
+    Start-Sleep -Milliseconds 100
     [PhoneBookDial]::ClickButton($dialBtnHwnd)
 
     Write-Output '{"success":true}'

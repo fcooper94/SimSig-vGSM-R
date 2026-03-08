@@ -7,9 +7,6 @@ param(
     [string]$ContactName = ""
 )
 
-Add-Type -AssemblyName UIAutomationClient | Out-Null
-Add-Type -AssemblyName UIAutomationTypes | Out-Null
-
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -63,60 +60,82 @@ public class PlaceCallReader {
     public static void HideOffScreen(IntPtr hWnd) {
         SetWindowPos(hWnd, IntPtr.Zero, -32000, -32000, 0, 0, 0x0001 | 0x0004 | 0x0010);
     }
+
+    // WM_GETTEXT for reading control text (works off-screen unlike UI Automation)
+    public const int WM_GETTEXTLENGTH = 0x000E;
+    public const int WM_GETTEXT = 0x000D;
+
+    public static string GetWindowTextByMsg(IntPtr hWnd) {
+        int len = (int)SendMessage(hWnd, WM_GETTEXTLENGTH, IntPtr.Zero, IntPtr.Zero);
+        if (len <= 0) return "";
+        StringBuilder sb = new StringBuilder(len + 1);
+        SendMessage(hWnd, WM_GETTEXT, (IntPtr)(len + 1), sb);
+        return sb.ToString();
+    }
+
+    // EnumWindows / EnumChildWindows for finding off-screen windows and children
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumCallback callback, IntPtr lParam);
+    [DllImport("user32.dll")]
+    public static extern bool EnumChildWindows(IntPtr parent, EnumCallback callback, IntPtr lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxLength);
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxLength);
+    public delegate bool EnumCallback(IntPtr hWnd, IntPtr lParam);
+
+    public static IntPtr FindWindowByTitle(string title) {
+        IntPtr result = IntPtr.Zero;
+        EnumWindows((hWnd, lParam) => {
+            var sb = new StringBuilder(256);
+            GetWindowText(hWnd, sb, 256);
+            if (sb.ToString() == title) {
+                result = hWnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return result;
+    }
+
+    public static List<IntPtr> FindChildrenByClass(IntPtr parent, string className) {
+        List<IntPtr> results = new List<IntPtr>();
+        EnumChildWindows(parent, (hWnd, lParam) => {
+            var sb = new StringBuilder(256);
+            GetClassName(hWnd, sb, 256);
+            if (sb.ToString() == className) {
+                results.Add(hWnd);
+            }
+            return true;
+        }, IntPtr.Zero);
+        return results;
+    }
 }
 "@
 
 try {
-    $root = [System.Windows.Automation.AutomationElement]::RootElement
+    # Find the "Place Call" dialog by title using Win32 EnumWindows
+    $dialogHwnd = [PlaceCallReader]::FindWindowByTitle("Place Call")
 
-    # Find the "Place Call" dialog by title
-    $nameCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::NameProperty,
-        "Place Call"
-    )
-    $dialog = $root.FindFirst(
-        [System.Windows.Automation.TreeScope]::Children,
-        $nameCond
-    )
-
-    if ($null -eq $dialog) {
+    if ($dialogHwnd -eq [IntPtr]::Zero) {
         Write-Output '{"connected":false,"debug":"dialog not found"}'
         exit 0
     }
 
     # Keep it hidden off-screen
-    $dialogHwnd = [IntPtr]$dialog.Current.NativeWindowHandle
-    if ($dialogHwnd -ne [IntPtr]::Zero) {
-        [PlaceCallReader]::HideOffScreen($dialogHwnd)
-    }
+    [PlaceCallReader]::HideOffScreen($dialogHwnd)
 
     $replyItems = @()
     $replyControlType = ""  # "listbox" or "combo"
 
-    # Check if connected by looking for TMemo (the message area that appears once the call connects)
-    $memoCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-        "TMemo"
-    )
-    $memoCheck = $dialog.FindFirst(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $memoCond
-    )
-    $isConnected = ($null -ne $memoCheck)
+    # Check if connected by looking for TMemo child (the message area that appears once the call connects)
+    $memoChildren = [PlaceCallReader]::FindChildrenByClass($dialogHwnd, "TMemo")
+    $isConnected = ($memoChildren.Count -gt 0)
 
     if ($isConnected) {
         # Look for reply options in TListBox first
-        $listCond = New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-            "TListBox"
-        )
-        $allLists = $dialog.FindAll(
-            [System.Windows.Automation.TreeScope]::Descendants,
-            $listCond
-        )
-        foreach ($lb in $allLists) {
-            $hw = [IntPtr]$lb.Current.NativeWindowHandle
-            if ($hw -eq [IntPtr]::Zero) { continue }
+        $allLists = [PlaceCallReader]::FindChildrenByClass($dialogHwnd, "TListBox")
+        foreach ($hw in $allLists) {
             $cnt = [PlaceCallReader]::GetListBoxCount($hw)
             if ($cnt -gt 0) {
                 $replyControlType = "listbox"
@@ -131,17 +150,8 @@ try {
         # If no listbox replies, check TComboBox controls
         # Skip the contacts combo by checking if it contains the contact we dialed.
         if ($replyItems.Count -eq 0) {
-            $comboCond = New-Object System.Windows.Automation.PropertyCondition(
-                [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-                "TComboBox"
-            )
-            $allCombos = $dialog.FindAll(
-                [System.Windows.Automation.TreeScope]::Descendants,
-                $comboCond
-            )
-            foreach ($combo in $allCombos) {
-                $hw = [IntPtr]$combo.Current.NativeWindowHandle
-                if ($hw -eq [IntPtr]::Zero) { continue }
+            $allCombos = [PlaceCallReader]::FindChildrenByClass($dialogHwnd, "TComboBox")
+            foreach ($hw in $allCombos) {
                 $cnt = [PlaceCallReader]::GetComboCount($hw)
                 if ($cnt -le 0) { continue }
 
@@ -173,10 +183,10 @@ try {
         exit 0
     }
 
-    # Connected — read TMemo message text
+    # Connected — read TMemo message text via WM_GETTEXT (works off-screen)
     $messageText = ""
-    if ($null -ne $memoCheck) {
-        $messageText = ($memoCheck.Current.Name).Trim()
+    if ($memoChildren.Count -gt 0) {
+        $messageText = ([PlaceCallReader]::GetWindowTextByMsg($memoChildren[0])).Trim()
     }
 
     # Build JSON manually to guarantee replies is always a JSON array

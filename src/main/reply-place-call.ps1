@@ -38,9 +38,6 @@ param(
     [string]$ContactName = ""
 )
 
-Add-Type -AssemblyName UIAutomationClient | Out-Null
-Add-Type -AssemblyName UIAutomationTypes | Out-Null
-
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -55,6 +52,25 @@ public class PlaceCallReply {
 
     [DllImport("user32.dll", EntryPoint = "SendMessage", CharSet = CharSet.Auto)]
     public static extern IntPtr SendMessageStr(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetParent(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern int GetDlgCtrlID(IntPtr hWnd);
+
+    public const int WM_COMMAND = 0x0111;
+    public const int CBN_SELCHANGE = 1;
+
+    // Notify parent of combo selection change (required for Delphi TComboBox)
+    public static void NotifyComboSelChange(IntPtr comboHwnd) {
+        IntPtr parent = GetParent(comboHwnd);
+        int ctrlId = GetDlgCtrlID(comboHwnd);
+        IntPtr wParam = (IntPtr)((CBN_SELCHANGE << 16) | (ctrlId & 0xFFFF));
+        SendMessage(parent, WM_COMMAND, wParam, comboHwnd);
+    }
 
     public const int WM_SETTEXT = 0x000C;
 
@@ -101,6 +117,31 @@ public class PlaceCallReply {
     public static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxLength);
 
     public delegate bool EnumCallback(IntPtr hWnd, IntPtr lParam);
+
+    // WM_GETTEXT for reading control text (works off-screen unlike UI Automation)
+    public const int WM_GETTEXTLENGTH = 0x000E;
+    public const int WM_GETTEXT_MSG = 0x000D;
+
+    public static string GetWindowTextByMsg(IntPtr hWnd) {
+        int len = (int)SendMessage(hWnd, WM_GETTEXTLENGTH, IntPtr.Zero, IntPtr.Zero);
+        if (len <= 0) return "";
+        StringBuilder sb = new StringBuilder(len + 1);
+        SendMessageSb(hWnd, WM_GETTEXT_MSG, (IntPtr)(len + 1), sb);
+        return sb.ToString();
+    }
+
+    public static System.Collections.Generic.List<IntPtr> FindChildrenByClass(IntPtr parent, string className) {
+        var results = new System.Collections.Generic.List<IntPtr>();
+        EnumChildWindows(parent, (hWnd, lParam) => {
+            var sb = new StringBuilder(256);
+            GetClassName(hWnd, sb, 256);
+            if (sb.ToString() == className) {
+                results.Add(hWnd);
+            }
+            return true;
+        }, IntPtr.Zero);
+        return results;
+    }
 
     public const uint KEYEVENTF_KEYUP = 0x0002;
     public const byte VK_DOWN   = 0x28;
@@ -244,6 +285,20 @@ public class PlaceCallReply {
         return result;
     }
 
+    public static IntPtr FindWindowByTitle(string title) {
+        IntPtr result = IntPtr.Zero;
+        EnumWindows((hWnd, lParam) => {
+            var sb = new StringBuilder(256);
+            GetWindowText(hWnd, sb, 256);
+            if (sb.ToString() == title) {
+                result = hWnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return result;
+    }
+
     public static IntPtr FindButtonByAnyText(IntPtr parent, string[] texts) {
         IntPtr result = IntPtr.Zero;
         EnumChildWindows(parent, (hWnd, lParam) => {
@@ -270,45 +325,23 @@ try {
     $savedCursor = New-Object PlaceCallReply+POINT
     [PlaceCallReply]::GetCursorPos([ref]$savedCursor) | Out-Null
 
-    $root = [System.Windows.Automation.AutomationElement]::RootElement
+    # Find the "Place Call" dialog by title using Win32 EnumWindows
+    $dialogHwnd = [PlaceCallReply]::FindWindowByTitle("Place Call")
 
-    # Find the "Place Call" dialog by title
-    $nameCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::NameProperty,
-        "Place Call"
-    )
-    $dialog = $root.FindFirst(
-        [System.Windows.Automation.TreeScope]::Children,
-        $nameCond
-    )
-
-    if ($null -eq $dialog) {
+    if ($dialogHwnd -eq [IntPtr]::Zero) {
         Write-Output '{"error":"Place Call dialog not found"}'
         exit 0
     }
 
-    $dialogHwnd = [IntPtr]$dialog.Current.NativeWindowHandle
-
     # Keep dialog off-screen
-    if ($dialogHwnd -ne [IntPtr]::Zero) {
-        [PlaceCallReply]::HideOffScreen($dialogHwnd)
-    }
+    [PlaceCallReply]::HideOffScreen($dialogHwnd)
 
     $replyControlHwnd = [IntPtr]::Zero
     $replyControlType = ""  # "listbox" or "combo"
 
     # 1) Check TListBox controls first — any listbox with items is a reply control
-    $listCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-        "TListBox"
-    )
-    $allLists = $dialog.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $listCond
-    )
-    foreach ($lb in $allLists) {
-        $hw = [IntPtr]$lb.Current.NativeWindowHandle
-        if ($hw -eq [IntPtr]::Zero) { continue }
+    $allLists = [PlaceCallReply]::FindChildrenByClass($dialogHwnd, "TListBox")
+    foreach ($hw in $allLists) {
         $cnt = [PlaceCallReply]::GetListBoxCount($hw)
         if ($cnt -gt 0) {
             $replyControlHwnd = $hw
@@ -320,17 +353,8 @@ try {
     # 2) If no listbox, check TComboBox controls
     #    Skip the contacts combo by checking if it contains the contact we dialed.
     if ($replyControlHwnd -eq [IntPtr]::Zero) {
-        $comboCond = New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-            "TComboBox"
-        )
-        $allCombos = $dialog.FindAll(
-            [System.Windows.Automation.TreeScope]::Descendants,
-            $comboCond
-        )
-        foreach ($combo in $allCombos) {
-            $hw = [IntPtr]$combo.Current.NativeWindowHandle
-            if ($hw -eq [IntPtr]::Zero) { continue }
+        $allCombos = [PlaceCallReply]::FindChildrenByClass($dialogHwnd, "TComboBox")
+        foreach ($hw in $allCombos) {
             $cnt = [PlaceCallReply]::GetComboCount($hw)
             if ($cnt -le 0) { continue }
 
@@ -359,32 +383,27 @@ try {
         exit 0
     }
 
-    # Find the "Send request/message" button
-    $sendBtnCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::NameProperty,
-        "Send request/message"
-    )
-    $sendBtn = $dialog.FindFirst(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $sendBtnCond
-    )
-    $sendBtnHwnd = if ($null -ne $sendBtn) { [IntPtr]$sendBtn.Current.NativeWindowHandle } else { [IntPtr]::Zero }
+    # Find the "Send request/message" button using Win32 EnumChildWindows
+    $sendBtnHwnd = [PlaceCallReply]::FindButtonByAnyText($dialogHwnd, @("Send request/message"))
 
     if ($replyControlType -eq "listbox") {
         # For TListBox: use LB_SETCURSEL to select the item, then BM_CLICK Send button
         [PlaceCallReply]::SetListBoxSel($replyControlHwnd, $ReplyIndex)
         Start-Sleep -Milliseconds 100
 
+        # Use PostMessage for BM_CLICK — SendMessage blocks if a modal dialog opens
         if ($sendBtnHwnd -ne [IntPtr]::Zero) {
-            [PlaceCallReply]::SendMessage($sendBtnHwnd, [PlaceCallReply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+            [PlaceCallReply]::PostMessage($sendBtnHwnd, [uint32][PlaceCallReply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
         }
     } else {
-        # For TComboBox: use CB_SETCURSEL to select the item, then BM_CLICK Send button
+        # For TComboBox: use CB_SETCURSEL to select the item + CBN_SELCHANGE notification
         [PlaceCallReply]::SendMessage($replyControlHwnd, 0x014E, [IntPtr]$ReplyIndex, [IntPtr]::Zero) | Out-Null  # CB_SETCURSEL
+        [PlaceCallReply]::NotifyComboSelChange($replyControlHwnd)
         Start-Sleep -Milliseconds 100
 
+        # Use PostMessage for BM_CLICK — SendMessage blocks if a modal dialog opens
         if ($sendBtnHwnd -ne [IntPtr]::Zero) {
-            [PlaceCallReply]::SendMessage($sendBtnHwnd, [PlaceCallReply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+            [PlaceCallReply]::PostMessage($sendBtnHwnd, [uint32][PlaceCallReply]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
         }
     }
 
@@ -546,33 +565,20 @@ try {
     # Wait a moment for SimSig to update the TMemo response
     Start-Sleep -Milliseconds 500
 
-    # Read the TMemo response text
+    # Read the TMemo response text via Win32 (works off-screen)
     $responseText = ""
 
     # Re-find the dialog in case it refreshed
-    $dialog2 = $root.FindFirst(
-        [System.Windows.Automation.TreeScope]::Children,
-        $nameCond
-    )
+    $dialogHwnd2 = [PlaceCallReply]::FindWindowByTitle("Place Call")
 
-    if ($null -ne $dialog2) {
-        $memoCond = New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-            "TMemo"
-        )
-        $memo = $dialog2.FindFirst(
-            [System.Windows.Automation.TreeScope]::Descendants,
-            $memoCond
-        )
-        if ($null -ne $memo) {
-            $responseText = $memo.Current.Name
+    if ($dialogHwnd2 -ne [IntPtr]::Zero) {
+        $memoChildren = [PlaceCallReply]::FindChildrenByClass($dialogHwnd2, "TMemo")
+        if ($memoChildren.Count -gt 0) {
+            $responseText = [PlaceCallReply]::GetWindowTextByMsg($memoChildren[0])
         }
 
         # Keep dialog hidden
-        $dh2 = [IntPtr]$dialog2.Current.NativeWindowHandle
-        if ($dh2 -ne [IntPtr]::Zero) {
-            [PlaceCallReply]::HideOffScreen($dh2)
-        }
+        [PlaceCallReply]::HideOffScreen($dialogHwnd2)
     }
 
     # Restore cursor to original position

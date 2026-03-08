@@ -15,12 +15,26 @@ const SettingsUI = {
       btn.addEventListener('click', () => this.startKeybindListen(btn));
     });
 
-    // Live volume percentage display
-    document.getElementById('setting-mic-volume').addEventListener('input', (e) => {
+    // Live volume percentage display + real-time gain update for meter feedback
+    const micSlider = document.getElementById('setting-mic-volume');
+    micSlider.addEventListener('input', (e) => {
       document.getElementById('mic-volume-val').textContent = e.target.value + '%';
+      if (typeof AudioPipeline !== 'undefined') AudioPipeline.setMicVolume(parseInt(e.target.value, 10));
     });
     document.getElementById('setting-output-volume').addEventListener('input', (e) => {
       document.getElementById('output-volume-val').textContent = e.target.value + '%';
+    });
+
+    // Mic gain +/- buttons
+    document.getElementById('mic-gain-down').addEventListener('click', () => {
+      const val = Math.max(0, parseInt(micSlider.value, 10) - 5);
+      micSlider.value = val;
+      micSlider.dispatchEvent(new Event('input'));
+    });
+    document.getElementById('mic-gain-up').addEventListener('click', () => {
+      const val = Math.min(200, parseInt(micSlider.value, 10) + 5);
+      micSlider.value = val;
+      micSlider.dispatchEvent(new Event('input'));
     });
 
     // Show/hide ElevenLabs API key row and check credits on provider change
@@ -55,10 +69,41 @@ const SettingsUI = {
       browserOverlay.classList.add('settings-open');
     }
     this.modal.classList.remove('hidden');
+
+    // Start live mic meter
+    this._startMicMeter();
+  },
+
+  async _startMicMeter() {
+    if (typeof AudioPipeline === 'undefined') return;
+    try {
+      await AudioPipeline.startCapture();
+      const barEl = document.getElementById('mic-meter-fill');
+      const labelEl = document.getElementById('mic-meter-label');
+      if (barEl && AudioPipeline.analyserNode) {
+        AudioPipeline.startMeter(barEl);
+        labelEl.textContent = 'Speak to test';
+      } else {
+        labelEl.textContent = 'No mic access';
+      }
+    } catch {
+      const labelEl = document.getElementById('mic-meter-label');
+      if (labelEl) labelEl.textContent = 'Mic error';
+    }
+  },
+
+  _stopMicMeter() {
+    if (typeof AudioPipeline !== 'undefined') {
+      AudioPipeline.stopMeter();
+      AudioPipeline.stopCapture();
+    }
+    const barEl = document.getElementById('mic-meter-fill');
+    if (barEl) barEl.style.width = '0%';
   },
 
   close() {
     this.modal.classList.add('hidden');
+    this._stopMicMeter();
     this.stopKeybindListen();
     // Revert dark mode preview if cancelled (not saved)
     if (this._savedTheme !== undefined) {

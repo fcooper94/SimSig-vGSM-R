@@ -61,6 +61,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     // Track game time for chat message timestamps
     if (data.formatted) PhoneCallsUI.gameTime = data.formatted;
+    // Feed clock seconds to AlertsFeed for session validation
+    if (data.clockSeconds != null) AlertsFeed.onClockUpdate(data.clockSeconds);
   });
 
   window.simsigAPI.phone.onCallsUpdate((calls) => {

@@ -220,8 +220,8 @@ const PhoneCallsUI = {
         } else if (this._replyReplies) {
           this.sendReply(action.replyIndex, this._replyReplies, this._replyCaller);
         }
-      } else if (action.type === 'reply' && this._outgoingCall && !this._outgoingReplySent) {
-        this._outgoingReplySent = true;
+      } else if (action.type === 'reply' && this._outgoingCall && !this._outgoingReplySent && !this._outgoingReplyProcessing) {
+        this._outgoingReplyProcessing = true;
         if (this._outgoingReplies) {
           this.sendOutgoingReply(action.replyIndex, this._outgoingReplies, this._outgoingContactName);
         }
@@ -233,7 +233,7 @@ const PhoneCallsUI = {
           return;
         }
         if (this._outgoingCall) {
-          if (this._outgoingReplies && this._outgoingReplies.length > 0 && !this._outgoingReplySent) return;
+          if (this._outgoingReplies && this._outgoingReplies.length > 0 && !this._outgoingReplySent && !this._awaitingHeadcode) return;
           this.endOutgoingCall();
         } else if (this.inCall) {
           if (this._hasReplyOptions && !this._replySent) return;
@@ -256,7 +256,7 @@ const PhoneCallsUI = {
         return;
       }
       if (this._outgoingCall) {
-        if (this._outgoingReplies && this._outgoingReplies.length > 0 && !this._outgoingReplySent) return;
+        if (this._outgoingReplies && this._outgoingReplies.length > 0 && !this._outgoingReplySent && !this._awaitingHeadcode) return;
         this.endOutgoingCall();
       } else if (this.inCall) {
         if (this._hasReplyOptions && !this._replySent) return; // must reply first
@@ -295,7 +295,7 @@ const PhoneCallsUI = {
         return;
       }
       if (this._outgoingCall) {
-        if (this._outgoingReplies && this._outgoingReplies.length > 0 && !this._outgoingReplySent) return;
+        if (this._outgoingReplies && this._outgoingReplies.length > 0 && !this._outgoingReplySent && !this._awaitingHeadcode) return;
         this.endOutgoingCall();
       } else if (this.inCall) {
         if (this._hasReplyOptions && !this._replySent) return;
@@ -1069,6 +1069,11 @@ const PhoneCallsUI = {
       message: 'Crew for 7V81 is ready and waiting for the train to arrive at East Croydon.. The crews will change over, any activities at that location will be performed including minimum dwell times, and then the train will be ready to depart.',
       replies: ['Ok, crew for 7V81 is ready and waiting for the train to arrive at East Croydon.'],
     },
+    adverse_aspect: {
+      train: '2W50', title: 'Answer call from Train 2W50 (Panel 1)',
+      message: 'Driver of 2W50 reporting an adverse change of aspect at signal 32',
+      replies: ['Driver, please continue after speaking to your control'],
+    },
     unlit_signal: {
       train: '2W89', title: 'Answer call from Train 2W89 (Panel 2 (Purley))',
       message: 'Driver of 2W89 waiting at unlit signal T151',
@@ -1250,11 +1255,11 @@ const PhoneCallsUI = {
   // Returns a promise that resolves when PTT is pressed
   waitForPTTPress() {
     return new Promise((resolve, reject) => {
-      if (this._replyClicked || this._outgoingReplySent) { reject(new Error('reply_clicked')); return; }
+      if (this._replyClicked || (this._outgoingCall && this._outgoingReplyProcessing)) { reject(new Error('reply_clicked')); return; }
       if (this._useTextInput) { reject(new Error('use_text')); return; }
       if (typeof PTTUI !== 'undefined' && PTTUI.isActive) { resolve(); return; }
       const check = () => {
-        if (this._replyClicked || this._outgoingReplySent) { reject(new Error('reply_clicked')); return; }
+        if (this._replyClicked || (this._outgoingCall && this._outgoingReplyProcessing)) { reject(new Error('reply_clicked')); return; }
         if (this._useTextInput) { reject(new Error('use_text')); return; }
         if (typeof PTTUI !== 'undefined' && PTTUI.isActive) {
           resolve();
@@ -1410,6 +1415,9 @@ const PhoneCallsUI = {
     }
     // "Driver, please continue after speaking to your control"
     if (/continue\s+after\s+speaking/i.test(raw)) {
+      if (this.isAdverseAspect) {
+        return `Hello Driver. Please continue and obey all other signals`;
+      }
       return `${hc}, understood. Continue normally unless otherwise instructed`;
     }
     // "Permission granted for 5A20 to enter"
@@ -1925,6 +1933,7 @@ const PhoneCallsUI = {
     this.isSignallerCall = false;
     this.isThirdPartyCall = false;
     this.isUnlitSignal = false;
+    this.isAdverseAspect = false;
     this._replyClicked = false;
     this._hasReplyOptions = false;
     this._replySent = false;
@@ -2044,7 +2053,8 @@ const PhoneCallsUI = {
     this.isShunterCall = /shunter/i.test(caller);
     // Third-party calls: caller is not a Driver, not a Signaller, not a Shunter
     // (e.g. token hut, ground frame, level crossing) — use third-person phrasing
-    this.isThirdPartyCall = !this.isShunterCall && !this.isSignallerCall
+    // readyAt means the message says "XXXX is ready at..." — that's a driver/shunter, not third-party
+    this.isThirdPartyCall = !this.isShunterCall && !this.isSignallerCall && !readyAt
       && !/^Driver\b/i.test(caller) && !/signaller/i.test(caller)
       && !/[0-9][A-Z][0-9]{2}/i.test(caller);
     this.startBgNoise();
@@ -2135,6 +2145,11 @@ const PhoneCallsUI = {
       this.startBgNoise();
       displayMsg = `${this.currentHeadCode} has examined the line. No obstructions found.`;
       spokenMsg = `Hello Signaller, this is driver of ${this.currentHeadCode}. I have examined the line as requested and found no obstructions`;
+    } else if (/adverse\s+change\s+of\s+aspect/i.test(driverMsg) && this.currentSignalId) {
+      // Adverse change of aspect — driver received a more restrictive signal unexpectedly
+      this.isAdverseAspect = true;
+      displayMsg = `${this.currentHeadCode} reporting adverse change of aspect at signal ${this.currentSignalId}`;
+      spokenMsg = `Hello Signaller, this is driver of ${this.currentHeadCode}. I have received an adverse change of aspect at signal ${this.currentSignalId}`;
     } else if (this.currentSignalId && /unlit\s+signal/i.test(driverMsg)) {
       // Unlit signal — signal lamp failure
       this.isUnlitSignal = true;
@@ -2342,6 +2357,7 @@ const PhoneCallsUI = {
     this.showCommsOverlay();
     this._outgoingContactName = contactName;
     this._outgoingReplySent = false;
+    this._outgoingReplyProcessing = false;
     this.notificationEl.classList.remove('flashing');
     this.notificationEl.classList.add('in-call');
     const readyText = this.notificationEl.querySelector('#notification-ready-text');
@@ -2379,24 +2395,24 @@ const PhoneCallsUI = {
       // PTT voice reply loop (same pattern as incoming calls)
       const MAX_ATTEMPTS = 3;
       for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-        if (this._outgoingReplySent || !this._outgoingCall) return;
+        if (this._outgoingReplySent || this._outgoingReplyProcessing || !this._outgoingCall) return;
         this.addMessage({ type: 'greeting', text: 'Hold PTT and speak your reply...' });
 
         let transcript = '';
         try {
           transcript = await this.recordAndTranscribe();
         } catch (e) {
-          if (this._outgoingReplySent || !this._outgoingCall) return;
+          if (this._outgoingReplySent || this._outgoingReplyProcessing || !this._outgoingCall) return;
           break;
         }
-        if (this._outgoingReplySent || !this._outgoingCall) return;
+        if (this._outgoingReplySent || this._outgoingReplyProcessing || !this._outgoingCall) return;
 
         if (transcript) {
           console.log(`[PlaceCall] Heard: "${transcript}", matching against:`, replies);
           const replyIndex = this.matchReply(transcript, replies);
           console.log(`[PlaceCall] Match result: index=${replyIndex}`);
           if (replyIndex >= 0) {
-            this._outgoingReplySent = true;
+            this._outgoingReplyProcessing = true;
             await this.sendOutgoingReply(replyIndex, replies, contactName);
             return;
           }
@@ -2410,7 +2426,7 @@ const PhoneCallsUI = {
         await this.speakAsDriver(sorry, contactName);
       }
 
-      if (this._outgoingReplySent || !this._outgoingCall) return;
+      if (this._outgoingReplySent || this._outgoingReplyProcessing || !this._outgoingCall) return;
       // After max attempts, re-show clickable reply options
       this.addMessage({ type: 'reply-options', replies });
       this.setupOutgoingReplyClickHandlers(replies, contactName);
@@ -2423,11 +2439,11 @@ const PhoneCallsUI = {
     }
 
     this._outgoingReplyHandler = (e) => {
-      if (this._outgoingReplySent) return;
+      if (this._outgoingReplySent || this._outgoingReplyProcessing) return;
 
       const chip = e.target.closest('.wait-time-choice');
       if (chip) {
-        this._outgoingReplySent = true;
+        this._outgoingReplyProcessing = true;
         const idx = parseInt(chip.dataset.index, 10);
         this.sendOutgoingReply(idx, replies, contactName);
         return;
@@ -2437,7 +2453,7 @@ const PhoneCallsUI = {
       if (li) {
         const replyIdx = parseInt(li.dataset.replyIndex, 10);
         if (replyIdx < 0) return;
-        this._outgoingReplySent = true;
+        this._outgoingReplyProcessing = true;
         this.sendOutgoingReply(replyIdx, replies, contactName);
       }
     };
@@ -2452,7 +2468,7 @@ const PhoneCallsUI = {
     const lower = replyText.toLowerCase();
     if (/block.*signal|signal.*block/i.test(replyText)) return 'Ok, no problem, I will mark the line as blocked';
     if (/unblock|remove.*block|clear.*block/i.test(replyText)) return 'Right, I will remove the block now, thanks';
-    if (/permission.*enter|enter.*section/i.test(replyText)) return 'Ok, permission granted, thank you';
+    if (/permission|request.*train/i.test(replyText)) return 'Ok, permission granted, thank you';
     if (/proceed|continue/i.test(replyText)) return 'Ok, will do, thanks';
     if (/stop|hold|wait/i.test(replyText)) return 'Ok, no problem, I will hold them';
     if (/caution/i.test(replyText)) return 'Right, understood, will proceed with caution';
@@ -2521,7 +2537,21 @@ const PhoneCallsUI = {
     return transcript.replace(/\s+/g, '').toUpperCase();
   },
 
+  // Record voice for headcode/platform/readback prompts inside sendOutgoingReply.
+  // Temporarily clears _outgoingReplyProcessing so waitForPTTPress doesn't reject,
+  // then restores it. Safe because _outgoingReplySent prevents any re-entry.
+  async _recordForReplyPrompt() {
+    this._outgoingReplyProcessing = false;
+    try { return await this.recordAndTranscribe(); }
+    finally { this._outgoingReplyProcessing = true; }
+  },
+
   async sendOutgoingReply(replyIndex, replies, contactName) {
+    // Guard: prevent double-entry (voice match + click can race)
+    if (this._outgoingReplySent) return;
+    this._outgoingReplySent = true;
+    // Keep _outgoingReplyProcessing true until voice reply loop's waitForPTTPress can see it
+    // (cleared before each internal recordAndTranscribe call via _recordForReplyPrompt)
     const replyText = replies[replyIndex] || '';
     const shortName = this.shortenCaller(contactName);
     let headCode = '';
@@ -2531,57 +2561,83 @@ const PhoneCallsUI = {
     if (hcMatch) {
       headCode = hcMatch[1].toUpperCase();
     } else if (this.replyNeedsHeadcode(replyText)) {
-      // Ask the user for the headcode via conversation
+      // Ask the user for the headcode via voice (NATO phonetics supported)
+      this._awaitingHeadcode = true;
       const askMsg = 'Ok, what is their headcode?';
       this.addMessage({ type: 'driver', caller: shortName, text: askMsg });
       await this.speakAsDriver(askMsg, contactName);
+      if (!this._outgoingCall) { this._awaitingHeadcode = false; return; }
 
-      // Wait for user to speak the headcode (or type it)
-      let gotHeadcode = false;
       this._useTextInput = false;
+      let promptShown = false;
       for (let attempt = 0; attempt < 3; attempt++) {
-        this.addMessage({ type: 'greeting', text: 'Hold PTT and say the headcode...', hasTextOption: true });
-        try {
-          const transcript = await this.recordAndTranscribe();
-          // Check if user clicked "use text" during PTT wait
-          if (this._useTextInput) {
-            this._useTextInput = false;
-            headCode = await this.promptForText('ENTER HEADCODE', 'e.g. 3E90');
-            if (headCode) {
-              headCode = headCode.toUpperCase();
-              gotHeadcode = /^[0-9][A-Z][0-9]{2}$/.test(headCode);
-            }
-            break;
-          }
-          if (transcript) {
-            headCode = this.extractHeadcode(transcript);
-            this.addMessage({ type: 'signaller', text: transcript });
-            // Validate: must be digit-letter-digit-digit (e.g. 3E90)
-            if (headCode && /^[0-9][A-Z][0-9]{2}$/.test(headCode)) {
-              gotHeadcode = true;
-              break;
-            }
-            headCode = '';
-          }
-        } catch (e) {
-          // PTT cancelled — try again
+        if (!promptShown) {
+          this.addMessage({ type: 'greeting', text: 'Hold PTT and speak the headcode (e.g. "three echo nine zero")', hasTextOption: true });
+          promptShown = true;
         }
-        if (!this._outgoingCall) return;
-        const retry = "I didn't catch that. Can you give me the headcode? It's a number, letter, then two numbers.";
-        this.addMessage({ type: 'driver', caller: shortName, text: retry });
-        await this.speakAsDriver(retry, contactName);
+        const transcript = await this._recordForReplyPrompt();
+        if (!this._outgoingCall) { this._awaitingHeadcode = false; return; }
+        if (this._useTextInput) break; // user clicked "use text"
+
+        // Empty transcript — silently wait for the next attempt
+        if (!transcript || !transcript.trim()) continue;
+
+        headCode = this.extractHeadcode(transcript);
+        if (headCode) break;
+
+        // Non-empty but couldn't extract — tell user
+        if (attempt < 2) {
+          this.addMessage({ type: 'system', text: `I didn't catch that — try again (attempt ${attempt + 2}/3)` });
+        }
       }
-      if (!gotHeadcode) headCode = '0000';
+      // Voice failed or user chose text — fall back to text input
+      if (!headCode) {
+        this._useTextInput = false;
+        headCode = await this.promptForText('ENTER HEADCODE', 'e.g. 3E90');
+        if (!this._outgoingCall) { this._awaitingHeadcode = false; return; }
+        if (headCode) headCode = headCode.toUpperCase();
+        if (!headCode || !/^[0-9][A-Z][0-9]{2}$/.test(headCode)) headCode = '0000';
+      }
+      this._awaitingHeadcode = false;
+      if (!this._outgoingCall) return;
     }
 
-    // If reply needs a platform parameter (e.g. Platform Alteration), prompt for it
+    // If reply needs a platform parameter (e.g. Platform Alteration), ask via voice first
     let param2 = '';
     if (this.replyNeedsPlatform(replyText)) {
       const askPlatform = 'And what is the new platform?';
       this.addMessage({ type: 'driver', caller: shortName, text: askPlatform });
       await this.speakAsDriver(askPlatform, contactName);
-      param2 = await this.promptForText('ENTER PLATFORM', 'e.g. 2, 3A');
       if (!this._outgoingCall) return;
+
+      this._useTextInput = false;
+      let promptShown = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (!promptShown) {
+          this.addMessage({ type: 'greeting', text: 'Hold PTT and speak the platform number (e.g. "platform 3")', hasTextOption: true });
+          promptShown = true;
+        }
+        const transcript = await this._recordForReplyPrompt();
+        if (!this._outgoingCall) return;
+        if (this._useTextInput) break; // user clicked "use text"
+
+        if (!transcript || !transcript.trim()) continue;
+
+        // Extract platform from speech — look for a number/letter combo
+        const platMatch = transcript.match(/(\d+[A-Za-z]?)/);
+        if (platMatch) { param2 = platMatch[1].toUpperCase(); break; }
+
+        if (attempt < 2) {
+          this.addMessage({ type: 'system', text: `I didn't catch that — try again (attempt ${attempt + 2}/3)` });
+        }
+      }
+
+      // Voice failed or user chose text — fall back to text input
+      if (!param2) {
+        this._useTextInput = false;
+        param2 = await this.promptForText('ENTER PLATFORM', 'e.g. 2, 3A');
+        if (!this._outgoingCall) return;
+      }
     }
 
     // Show what we're sending
@@ -2604,15 +2660,45 @@ const PhoneCallsUI = {
     let confirmation = '';
     if (result && result.response && result.response.trim()) {
       confirmation = result.response.trim();
+      console.log('[OutgoingReply] Using SimSig response:', confirmation);
     } else {
       confirmation = this.generateConfirmationFromReply(replyText);
+      console.log('[OutgoingReply] No SimSig response, using generated:', confirmation);
     }
     this.addMessage({ type: 'driver', caller: shortName, text: confirmation });
     await this.speakAsDriver(confirmation, contactName);
+    if (!this._outgoingCall) return;
 
-    // Listen for goodbye — user says "ok thanks bye" etc., TTS replies "Bye"
-    await this._listenForGoodbye(contactName);
+    // Wait for user to readback the response, then do goodbye
+    this.addMessage({ type: 'greeting', text: 'Hold PTT to readback and say goodbye...' });
+    try {
+      const readback = await this._recordForReplyPrompt();
+      if (!this._outgoingCall) return;
+      if (readback) {
+        this.addMessage({ type: 'signaller', text: readback });
+      }
+    } catch { /* PTT cancelled — continue to goodbye */ }
+    if (!this._outgoingCall) return;
 
+    // Caller says goodbye
+    const goodbyes = [
+      'Ok, speak later, bye.',
+      'Thanks, bye now.',
+      'Bye bye.',
+      'Cheers, bye.',
+      'Right, thanks, bye.',
+      'Ok, bye now.',
+      'Ok, thanks for that, bye.',
+      'Right oh, bye.',
+      'Ok, thank you, bye now.',
+      'Very good, thanks, bye.',
+    ];
+    const byeMsg = goodbyes[Math.floor(Math.random() * goodbyes.length)];
+    this.addMessage({ type: 'driver', caller: shortName, text: byeMsg });
+    await this.speakAsDriver(byeMsg, contactName);
+
+    this._outgoingReplyProcessing = false;
+    this.endOutgoingCall();
     this.stopBgNoise();
   },
 
@@ -2661,9 +2747,11 @@ const PhoneCallsUI = {
       this._updatePhonebookInCall(this._outgoingContactName, false);
     }
     this._outgoingCall = false;
+    this._awaitingHeadcode = false;
     window.simsigAPI.keys.setInCall(false);
     this._outgoingContactName = '';
     this._outgoingReplySent = false;
+    this._outgoingReplyProcessing = false;
     this._outgoingReplies = null;
     if (this._outgoingReplyHandler) {
       this.chatEl.removeEventListener('click', this._outgoingReplyHandler);
@@ -2708,6 +2796,7 @@ const PhoneCallsUI = {
     this._outgoingCall = true;
     this._outgoingContactName = 'Route Control';
     this._outgoingReplySent = false;
+    this._outgoingReplyProcessing = false;
     window.simsigAPI.keys.setInCall(true);
     this.showCommsOverlay();
     this.notificationEl.classList.remove('flashing');
@@ -2743,6 +2832,7 @@ const PhoneCallsUI = {
     // Show each failure as a separate reply option
     const replies = allFailures.map((f) => 'I am showing a ' + this._formatFailureForSpeech(f));
     this._outgoingReplySent = false;
+    this._outgoingReplyProcessing = false;
     let selectedIdx = -1;
 
     // Click handler for reply options
@@ -3027,6 +3117,7 @@ const PhoneCallsUI = {
     this._outgoingCall = false;
     this._outgoingContactName = '';
     this._outgoingReplySent = false;
+    this._outgoingReplyProcessing = false;
     this._outgoingReplies = null;
     this._dialingActive = false;
 
@@ -3149,7 +3240,7 @@ const PhoneCallsUI = {
     }
 
     this.chatEl.innerHTML = this.messages.filter((m) =>
-      m.type === 'driver' || m.type === 'reply-options' || m.type === 'loading' || m.type === 'greeting' || m.type === 'text-input'
+      m.type === 'driver' || m.type === 'signaller' || m.type === 'system' || m.type === 'reply-options' || m.type === 'loading' || m.type === 'greeting' || m.type === 'text-input'
     ).map((msg) => {
       if (msg.type === 'greeting') {
         const textLink = msg.hasTextOption ? ' <span class="use-text-link">use text</span>' : '';
@@ -3170,6 +3261,16 @@ const PhoneCallsUI = {
           <div class="chat-message-caller">${this.escapeHtml(msg.caller)}</div>
           <div class="chat-message-text">${this.escapeHtml(msg.text)}</div>
           ${msg.time ? `<div class="chat-message-time">${this.escapeHtml(msg.time)}</div>` : ''}
+        </div>`;
+      }
+      if (msg.type === 'signaller') {
+        return `<div class="chat-message chat-signaller">
+          <div class="chat-message-text">${this.escapeHtml(msg.text)}</div>
+        </div>`;
+      }
+      if (msg.type === 'system') {
+        return `<div class="chat-message chat-system">
+          <div class="chat-message-text">${this.escapeHtml(msg.text)}</div>
         </div>`;
       }
       if (msg.type === 'reply-options') {

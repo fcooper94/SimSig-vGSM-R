@@ -363,6 +363,92 @@ label input[type="range"] + span {
   background: #e0dcd4;
 }
 
+/* ── MIC LEVEL METER ──────────────────────────────────────── */
+.mic-gain-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mic-gain-group input[type="range"] {
+  width: 120px !important;
+}
+
+.mic-gain-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 15px;
+  font-weight: bold;
+  line-height: 1;
+  text-align: center;
+  cursor: pointer;
+  background: var(--bg-panel);
+  color: var(--text);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  font-family: inherit;
+}
+
+.mic-gain-btn:hover { background: #e0dcd4; }
+.mic-gain-btn:active { border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark); }
+
+.mic-meter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 8px;
+  padding: 0 4px;
+}
+
+.mic-meter-track {
+  flex: 1;
+  height: 12px;
+  background: #1a1a1a;
+  border: 2px solid;
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+  position: relative;
+  overflow: hidden;
+}
+
+.mic-meter-sweet {
+  position: absolute;
+  left: 25%;
+  width: 50%;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 128, 0, 0.3);
+  border-left: 2px solid rgba(0, 160, 0, 0.7);
+  border-right: 2px solid rgba(0, 160, 0, 0.7);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.mic-meter-fill {
+  height: 100%;
+  width: 0%;
+  background: #ffd600;
+  transition: width 60ms linear;
+  position: relative;
+  z-index: 2;
+}
+
+.mic-meter-fill.good {
+  background: #00e040;
+  box-shadow: 0 0 4px rgba(0, 224, 64, 0.6);
+}
+
+.mic-meter-fill.clip {
+  background: #cc0000;
+}
+
+.mic-meter-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  min-width: 80px;
+}
+
 /* ── DARK MODE OVERRIDES ─────────────────────────────────── */
 body.dark-mode legend {
   color: var(--accent);
@@ -422,6 +508,12 @@ body.dark-mode #tts-credit-status.status-error {
 body.dark-mode #confirm-no:hover,
 body.dark-mode #emrg-confirm-no:hover {
   background: #3a3a3a;
+}
+
+body.dark-mode .mic-gain-btn:hover { background: #3a3a3a; }
+
+body.dark-mode .mic-meter-track {
+  background: #111;
 }
 
 body.dark-mode .info-icon {

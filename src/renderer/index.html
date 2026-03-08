@@ -297,7 +297,21 @@
         <fieldset>
           <legend>Audio Devices</legend>
           <label>Input <select id="setting-audio-input"></select></label>
-          <label>Mic Volume <input type="range" id="setting-mic-volume" min="0" max="100" value="50"><span id="mic-volume-val">50%</span></label>
+          <label>Mic Volume
+            <span class="mic-gain-group">
+              <button type="button" class="mic-gain-btn" id="mic-gain-down">-</button>
+              <input type="range" id="setting-mic-volume" min="0" max="200" value="50">
+              <button type="button" class="mic-gain-btn" id="mic-gain-up">+</button>
+              <span id="mic-volume-val">50%</span>
+            </span>
+          </label>
+          <div class="mic-meter-row">
+            <div class="mic-meter-track">
+              <div class="mic-meter-sweet"></div>
+              <div class="mic-meter-fill" id="mic-meter-fill"></div>
+            </div>
+            <span class="mic-meter-label" id="mic-meter-label">Speak to test</span>
+          </div>
           <label>Output <select id="setting-audio-output"></select></label>
           <label>Output Volume <input type="range" id="setting-output-volume" min="0" max="100" value="50"><span id="output-volume-val">50%</span></label>
           <label>Ring Output <select id="setting-ring-output"></select></label>

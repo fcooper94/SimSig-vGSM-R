@@ -50,6 +50,11 @@ public class Win32Auto {
     public const int LB_SETCURSEL = 0x0186;
     public const int LB_GETTEXT = 0x0189;
     public const int LB_GETTEXTLEN = 0x018A;
+
+    // ComboBox messages
+    public const int CB_GETCOUNT    = 0x0146;
+    public const int CB_GETLBTEXT   = 0x0148;
+    public const int CB_GETLBTEXTLEN = 0x0149;
     public const int BM_CLICK = 0x00F5;
     public const int WM_GETTEXT = 0x000D;
     public const int WM_GETTEXTLENGTH = 0x000E;
@@ -71,6 +76,18 @@ public class Win32Auto {
         if (len <= 0) return "";
         StringBuilder sb = new StringBuilder(len + 1);
         SendMessage(hWnd, LB_GETTEXT, (IntPtr)index, sb);
+        return sb.ToString();
+    }
+
+    public static int GetComboCount(IntPtr hWnd) {
+        return (int)SendMessage(hWnd, CB_GETCOUNT, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    public static string GetComboText(IntPtr hWnd, int index) {
+        int len = (int)SendMessage(hWnd, CB_GETLBTEXTLEN, (IntPtr)index, IntPtr.Zero);
+        if (len <= 0) return "";
+        StringBuilder sb = new StringBuilder(len + 1);
+        SendMessage(hWnd, CB_GETLBTEXT, (IntPtr)index, sb);
         return sb.ToString();
     }
 
@@ -156,6 +173,18 @@ public class Win32Auto {
         };
         EnumChildWindows(parent, _childCb, IntPtr.Zero);
         return _foundChild;
+    }
+
+    // Find ALL child windows of a given class name
+    public static System.Collections.Generic.List<IntPtr> FindAllChildrenByClass(IntPtr parent, string className) {
+        var results = new System.Collections.Generic.List<IntPtr>();
+        EnumChildWindows(parent, (hWnd, lParam) => {
+            var sb = new StringBuilder(256);
+            GetClassName(hWnd, sb, 256);
+            if (sb.ToString() == className) results.Add(hWnd);
+            return true;
+        }, IntPtr.Zero);
+        return results;
     }
 
     // Check if a class name looks like a button
@@ -345,6 +374,12 @@ try {
         $answerHwnd = [Win32Auto]::FindTopWindowByClass("TAnswerCallForm")
 
         if ($answerHwnd -ne [IntPtr]::Zero) {
+            # Hide the answer dialog off-screen immediately
+            [Win32Auto]::HideOffScreen($answerHwnd)
+
+            # Wait for the dialog to fully populate its controls
+            Start-Sleep -Milliseconds 300
+
             # Read dialog title via GetWindowText
             $titleSb = New-Object System.Text.StringBuilder 256
             [Win32Auto]::GetWindowText($answerHwnd, $titleSb, 256) | Out-Null
@@ -356,17 +391,32 @@ try {
                 $messageText = [Win32Auto]::GetControlText($memoHwnd)
             }
 
-            # Read the reply options from the TListBox
-            $replyListHwnd = [Win32Auto]::FindChildByClass($answerHwnd, "TListBox")
-            if ($replyListHwnd -ne [IntPtr]::Zero) {
-                $replyCount = [Win32Auto]::GetCount($replyListHwnd)
-                for ($r = 0; $r -lt $replyCount; $r++) {
-                    $replyOptions += [Win32Auto]::GetText($replyListHwnd, $r)
+            # Read the reply options from the TListBox first
+            $allLists = [Win32Auto]::FindAllChildrenByClass($answerHwnd, "TListBox")
+            foreach ($hw in $allLists) {
+                $cnt = [Win32Auto]::GetCount($hw)
+                if ($cnt -gt 0) {
+                    for ($r = 0; $r -lt $cnt; $r++) {
+                        $replyOptions += [Win32Auto]::GetText($hw, $r)
+                    }
+                    break
                 }
             }
 
-            # Hide the answer dialog off-screen
-            [Win32Auto]::HideOffScreen($answerHwnd)
+            # If no listbox replies, check TComboBox controls
+            if ($replyOptions.Count -eq 0) {
+                $allCombos = [Win32Auto]::FindAllChildrenByClass($answerHwnd, "TComboBox")
+                foreach ($hw in $allCombos) {
+                    $cnt = [Win32Auto]::GetComboCount($hw)
+                    if ($cnt -gt 0) {
+                        for ($r = 0; $r -lt $cnt; $r++) {
+                            $text = [Win32Auto]::GetComboText($hw, $r)
+                            if ($text) { $replyOptions += $text }
+                        }
+                        break
+                    }
+                }
+            }
 
             break
         }
@@ -378,16 +428,17 @@ try {
         [Win32Auto]::HideOffScreen($placeCallHwnd)
     }
 
-    # Build result
-    $result = @{
-        train   = $trainName
-        title   = $dialogTitle
-        message = $messageText
-        replies = $replyOptions
+    # Build JSON manually to guarantee replies is always a JSON array
+    $escapeTrain = ($trainName -replace '\\', '\\\\' -replace '"', '\"' -replace "`n", '\n' -replace "`r", '')
+    $escapeTitle = ($dialogTitle -replace '\\', '\\\\' -replace '"', '\"' -replace "`n", '\n' -replace "`r", '')
+    $escapeMsg = ($messageText -replace '\\', '\\\\' -replace '"', '\"' -replace "`n", '\n' -replace "`r", '')
+    $repliesJson = @()
+    foreach ($r in $replyOptions) {
+        $escaped = ($r -replace '\\', '\\\\' -replace '"', '\"' -replace "`n", '\n' -replace "`r", '')
+        $repliesJson += "`"$escaped`""
     }
-
-    $json = $result | ConvertTo-Json -Compress
-    Write-Output $json
+    $repliesArr = "[" + ($repliesJson -join ",") + "]"
+    Write-Output "{`"train`":`"$escapeTrain`",`"title`":`"$escapeTitle`",`"message`":`"$escapeMsg`",`"replies`":$repliesArr}"
 } catch {
     Write-Output "{`"error`":`"$($_.Exception.Message)`"}"
 }
