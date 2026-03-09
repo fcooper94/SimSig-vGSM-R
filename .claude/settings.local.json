@@ -60,7 +60,14 @@
       "Bash(ffprobe -v quiet -show_format -show_streams \"c:/dev/SimSig-vGSM-R/sounds/ringing.wav\")",
       "Bash(ffprobe -v quiet -show_format -show_streams \"c:/Users/Admin/Downloads/untitled.wav\")",
       "Bash(where ffprobe)",
-      "Bash(where ffmpeg)"
+      "Bash(where ffmpeg)",
+      "Bash(git add src/main/ipc-handlers.js src/main/phone-reader.js src/renderer/index.html src/renderer/js/ui-alerts-feed.js src/renderer/js/ui-phone-calls.js src/renderer/js/ui-settings.js)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(git add src/renderer/css/settings.css src/renderer/index.html src/renderer/js/app.js src/renderer/js/ui-phone-calls.js)",
+      "Bash(git add package.json)",
+      "Bash(git tag v1.0.32)",
+      "Bash(git push origin main --tags)"
     ]
   }
 }
