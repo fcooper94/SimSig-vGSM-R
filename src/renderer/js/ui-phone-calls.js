@@ -993,7 +993,8 @@ const PhoneCallsUI = {
     { pattern: /pass.*unlit.*examine|unlit.*examine/, fragment: 'pass unlit signal and examine' },
     { pattern: /pass.*examine|authoris[ez].*pass.*examine|authoris[ez].*examine/, fragment: 'pass signal' },
     { pattern: /continue\s*examin/, fragment: 'continue examining' },
-    // Route query replies
+    // Route query / wrong route replies
+    { pattern: /unable.*continue|can'?t.*continue|due to.*route/, fragment: 'unable to continue' },
     { pattern: /abandon.*timetable|timetable.*abandon/, fragment: 'abandon timetable' },
     { pattern: /bypass/, fragment: 'bypass' },
     { pattern: /change.*route|route.*change/, fragment: 'wait' },
@@ -1078,6 +1079,11 @@ const PhoneCallsUI = {
       train: '3A90', title: 'Answer call from Driver (3A90)',
       message: 'After examining the line, no obstruction was found',
       replies: ['Ok, no obstruction found, continue normally', 'Continue examining the line'],
+    },
+    wrong_route: {
+      train: '5M04', title: 'Answer call from Train 5M04 (Panel 2B)',
+      message: 'Driver of 5M04 is querying the route set at signal VC662: booked via Balham',
+      replies: ['Wait 5 minutes (signal may be replaced without penalty) before phoning back', 'Abandon timetable'],
     },
     fixed_report: {
       train: 'Technician', title: 'Answer call from Technician (Panel 1C (Selhurst))',
@@ -1635,6 +1641,16 @@ const PhoneCallsUI = {
     const rawReply = replies[replyIndex];
     const skipReadback = this._isNoReadbackReply(rawReply);
 
+    // Store route query details so we can call Route Control about it later
+    if (this.isRouteQuery) {
+      this._lastRouteQuery = {
+        headcode: this.currentHeadCode,
+        signal: this.currentSignalId,
+        bookedVia: this._routeQueryVia,
+        replyRaw: rawReply,
+      };
+    }
+
     // Send reply to SimSig — PS script handles headcode entry dialogs automatically
     await window.simsigAPI.phone.replyCall(replyIndex, this.currentHeadCode);
     if (myCallId !== this._callSeq) return;
@@ -1975,6 +1991,7 @@ const PhoneCallsUI = {
     this.renderCalls();
     this.hideNotification();
     this._syncToRemote();
+    if (this._updateRcState) this._updateRcState();
 
     // Hide any lingering TAnswerCallForm dialog in SimSig
     window.simsigAPI.phone.hideAnswerDialog().catch(() => {});
@@ -2173,6 +2190,8 @@ const PhoneCallsUI = {
       // Route query — driver questioning the set route (booked via somewhere else)
       this.isRouteQuery = true;
       this._routeQueryVia = routeQuery.bookedVia;
+      // Pre-store for Route Control call (updated again in sendReply with the chosen reply)
+      this._lastRouteQuery = { headcode: this.currentHeadCode, signal: routeQuery.signal, bookedVia: routeQuery.bookedVia, replyRaw: null };
       displayMsg = `${this.currentHeadCode} querying route at signal ${routeQuery.signal}, booked via ${routeQuery.bookedVia}`;
       spokenMsg = `Hello Signaller, this is driver of ${this.currentHeadCode} at ${routeQuery.signal}. I wanted to query the set route as I am booked via ${routeQuery.bookedVia}`;
     } else if (/adverse\s+change\s+of\s+aspect/i.test(driverMsg) && this.currentSignalId) {
@@ -2788,6 +2807,7 @@ const PhoneCallsUI = {
     this.messages = [];
     this.renderChat();
     this.hideNotification(); // includes _syncToRemote()
+    if (this._updateRcState) this._updateRcState();
 
     // Resume incoming call notification if calls are waiting
     this._resumeIncoming();
@@ -2802,9 +2822,12 @@ const PhoneCallsUI = {
     }
     if (this.inCall || this._outgoingCall || this._dialingActive) return;
 
-    // Check for active failures — don't allow call if none
-    if (typeof AlertsFeed !== 'undefined' && AlertsFeed.getActiveFailures().length === 0) {
-      console.log('[RouteControl] No active failures to report');
+    const hasFailures = typeof AlertsFeed !== 'undefined' && AlertsFeed.getActiveFailures().length > 0;
+    const hasWrongRoute = !!this._lastRouteQuery;
+
+    // Check there's something to report
+    if (!hasFailures && !hasWrongRoute) {
+      console.log('[RouteControl] Nothing to report');
       return;
     }
 
@@ -2846,16 +2869,19 @@ const PhoneCallsUI = {
     await this.speakAsDriver(greeting, callsign);
     if (!this._outgoingCall) return;
 
-    // Build our failure report message
+    // Build reply options — failures + wrong route if applicable
     const panelName = this.currentPanelName || 'Panel';
     const allFailures = typeof AlertsFeed !== 'undefined' ? AlertsFeed.getActiveFailures() : [];
 
-    // Compose what we say — list all active failures
-    const failureList = allFailures.map((f) => 'a ' + this._formatFailureForSpeech(f)).join(', and ');
-    const ourMessage = `Hello ${callsign}, this is ${panelName}. I am showing ${failureList}.`;
-
     // Show each failure as a separate reply option
     const replies = allFailures.map((f) => 'I am showing a ' + this._formatFailureForSpeech(f));
+
+    // Add wrong route option if pending
+    const wrongRouteIdx = replies.length; // index of the wrong route option (if added)
+    const rq = this._lastRouteQuery;
+    if (rq) {
+      replies.push(`I have set the wrong route for ${rq.headcode} at signal ${rq.signal}. The driver is booked via ${rq.bookedVia}`);
+    }
     this._outgoingReplySent = false;
     this._outgoingReplyProcessing = false;
     let selectedIdx = -1;
@@ -2879,7 +2905,7 @@ const PhoneCallsUI = {
       if (this._outgoingReplySent || !this._outgoingCall) break;
 
       this.addMessage({ type: 'reply-options', replies });
-      this.addMessage({ type: 'greeting', text: 'Hold PTT to report failures...' });
+      this.addMessage({ type: 'greeting', text: 'Hold PTT to report to Route Control...' });
       this.renderChat();
       this._syncToRemote();
       this.chatEl.addEventListener('click', rcClickHandler);
@@ -2934,8 +2960,8 @@ const PhoneCallsUI = {
       if (!this._outgoingCall) return;
     }
 
-    // Show what we said (the selected failure)
-    this.addMessage({ type: 'signaller', text: replies[selectedIdx] || ourMessage });
+    // Show what we said
+    this.addMessage({ type: 'signaller', text: replies[selectedIdx] || replies[0] });
     this.renderChat();
     this._syncToRemote();
 
@@ -2943,50 +2969,207 @@ const PhoneCallsUI = {
     await new Promise((r) => setTimeout(r, 500));
     if (!this._outgoingCall) return;
 
-    // Route Control responds only about the selected failure
-    const selectedFailure = allFailures[selectedIdx] || allFailures[0];
-    const isAlreadyReported = typeof AlertsFeed !== 'undefined' &&
-      AlertsFeed._activeFailures[selectedIdx] && AlertsFeed._activeFailures[selectedIdx].reported;
+    const isWrongRoute = rq && selectedIdx === wrongRouteIdx;
 
-    let response;
-    if (isAlreadyReported) {
-      response = `Hi ${panelName}. Yes, we are already aware of that issue. No update yet. The MOM will call you as soon as they have an update.`;
-    } else {
-      const ack = 'a ' + this._formatFailureForSpeech(selectedFailure);
-      response = `Hi ${panelName}. Understood you are showing ${ack}. We will arrange some S&T guys to investigate. Also, we are going to send a MOM down incase a line block is required. They will call you with an update.`;
-    }
-
-    // Mark only the selected failure as reported
-    if (typeof AlertsFeed !== 'undefined' && AlertsFeed._activeFailures[selectedIdx]) {
-      AlertsFeed._activeFailures[selectedIdx].reported = true;
-      AlertsFeed._reportedFailures.add(selectedFailure);
-    }
-
-    this.addMessage({ type: 'driver', caller: callsign, text: response });
-    this._syncToRemote();
-    await this.speakAsDriver(response, callsign);
-    if (!this._outgoingCall) return;
-
-    // Wait for user to acknowledge (PTT or click)
-    this.addMessage({ type: 'greeting', text: 'Hold PTT to acknowledge...' });
-    this.renderChat();
-    this._syncToRemote();
-
-    try {
-      const ackTranscript = await this.recordAndTranscribe();
-      if (!this._outgoingCall) return;
-      if (ackTranscript) {
-        this.addMessage({ type: 'signaller', text: ackTranscript });
+    if (isWrongRoute) {
+      // --- Wrong route flow ---
+      const abandon = Math.random() < 0.5;
+      let rcAdvice;
+      if (abandon) {
+        rcAdvice = `Hello Signaller, please advise the driver of ${rq.headcode} that they are to abandon their timetable`;
       } else {
+        rcAdvice = `Hello Signaller, please advise the driver of ${rq.headcode} that they are to continue with the remainder of their timetable if possible`;
+      }
+
+      this.addMessage({ type: 'driver', caller: callsign, text: rcAdvice });
+      this._syncToRemote();
+      await this.speakAsDriver(rcAdvice, callsign);
+      if (!this._outgoingCall) return;
+
+      if (abandon) {
+        // Abandon — straightforward readback
+        const readback = `Understood, I will advise ${rq.headcode} that they are to abandon their timetable`;
+
+        this.addMessage({ type: 'greeting', text: 'Hold PTT to acknowledge...' });
+        this.renderChat();
+        this._syncToRemote();
+
+        try {
+          const ackTranscript = await this.recordAndTranscribe();
+          if (!this._outgoingCall) return;
+          this.addMessage({ type: 'signaller', text: ackTranscript || readback });
+        } catch {
+          if (!this._outgoingCall) return;
+          this.addMessage({ type: 'signaller', text: readback });
+        }
+        this.renderChat();
+        this._syncToRemote();
+        if (!this._outgoingCall) return;
+      } else {
+        // Continue — offer two reply options: accept or challenge
+        const acceptReply = `Understood, I will advise ${rq.headcode} that they are to continue with the remainder of their timetable`;
+        const challengeReply = `Due to the route set, they are unable to continue with their timetable`;
+        const rqReplies = [acceptReply, challengeReply];
+
+        this.addMessage({ type: 'reply-options', replies: rqReplies });
+        this.addMessage({ type: 'greeting', text: 'Hold PTT to reply...' });
+        this.renderChat();
+        this._syncToRemote();
+
+        // Click + voice selection
+        let rqSelectedIdx = -1;
+        this._outgoingReplySent = false;
+        this._outgoingReplyProcessing = false;
+
+        const rqClickHandler = (e) => {
+          if (this._outgoingReplySent) return;
+          const li = e.target.closest('.reply-options-list li');
+          if (li) {
+            rqSelectedIdx = parseInt(li.dataset.replyIndex, 10);
+            if (isNaN(rqSelectedIdx)) rqSelectedIdx = 0;
+            this._outgoingReplySent = true;
+            this._outgoingReplyProcessing = true;
+            this.chatEl.removeEventListener('click', rqClickHandler);
+          }
+        };
+
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (this._outgoingReplySent || !this._outgoingCall) break;
+          this.chatEl.addEventListener('click', rqClickHandler);
+
+          let transcript = '';
+          try {
+            transcript = await this.recordAndTranscribe();
+          } catch (e) {
+            if (this._outgoingReplySent || !this._outgoingCall) break;
+            continue;
+          }
+          if (this._outgoingReplySent || !this._outgoingCall) break;
+
+          if (transcript) {
+            const matchIdx = this.matchReply(transcript, rqReplies);
+            if (matchIdx >= 0) {
+              rqSelectedIdx = matchIdx;
+              this._outgoingReplySent = true;
+              break;
+            }
+          }
+        }
+        this.chatEl.removeEventListener('click', rqClickHandler);
+        this._outgoingReplyProcessing = false;
+        if (!this._outgoingCall) return;
+
+        // Fallback to click if not matched
+        if (rqSelectedIdx < 0) {
+          this.addMessage({ type: 'reply-options', replies: rqReplies });
+          this.renderChat();
+          this._syncToRemote();
+          rqSelectedIdx = await new Promise((resolve) => {
+            const fallback = (e) => {
+              const li = e.target.closest('.reply-options-list li');
+              if (li) {
+                this.chatEl.removeEventListener('click', fallback);
+                const idx = parseInt(li.dataset.replyIndex, 10);
+                resolve(isNaN(idx) ? 0 : idx);
+              }
+            };
+            this.chatEl.addEventListener('click', fallback);
+          });
+          if (!this._outgoingCall) return;
+        }
+
+        // Show what we said
+        this.addMessage({ type: 'signaller', text: rqReplies[rqSelectedIdx] });
+        this.renderChat();
+        this._syncToRemote();
+
+        if (rqSelectedIdx === 1) {
+          // Challenged — RC changes to abandon
+          await new Promise((r) => setTimeout(r, 500));
+          if (!this._outgoingCall) return;
+
+          const revised = `Ok, in that case, advise ${rq.headcode} to abandon timetable`;
+          this.addMessage({ type: 'driver', caller: callsign, text: revised });
+          this._syncToRemote();
+          await this.speakAsDriver(revised, callsign);
+          if (!this._outgoingCall) return;
+
+          // Readback the revised instruction
+          const revisedReadback = `Understood, I will advise ${rq.headcode} that they are to abandon their timetable`;
+          this.addMessage({ type: 'greeting', text: 'Hold PTT to acknowledge...' });
+          this.renderChat();
+          this._syncToRemote();
+
+          try {
+            const ackTranscript = await this.recordAndTranscribe();
+            if (!this._outgoingCall) return;
+            this.addMessage({ type: 'signaller', text: ackTranscript || revisedReadback });
+          } catch {
+            if (!this._outgoingCall) return;
+            this.addMessage({ type: 'signaller', text: revisedReadback });
+          }
+          this.renderChat();
+          this._syncToRemote();
+          if (!this._outgoingCall) return;
+        }
+      }
+
+      // Route Control confirms and says goodbye
+      await new Promise((r) => setTimeout(r, 300));
+      if (!this._outgoingCall) return;
+
+      const rcBye = "That's correct, bye";
+      this.addMessage({ type: 'driver', caller: callsign, text: rcBye });
+      this._syncToRemote();
+      await this.speakAsDriver(rcBye, callsign);
+
+      this._lastRouteQuery = null;
+      this.addMessage({ type: 'signaller', text: 'Signaller Out' });
+      this.stopBgNoise();
+      this.endOutgoingCall();
+      return;
+    } else {
+      // --- Failure report flow ---
+      const selectedFailure = allFailures[selectedIdx] || allFailures[0];
+      const isAlreadyReported = typeof AlertsFeed !== 'undefined' &&
+        AlertsFeed._activeFailures[selectedIdx] && AlertsFeed._activeFailures[selectedIdx].reported;
+
+      let response;
+      if (isAlreadyReported) {
+        response = `Hi ${panelName}. Yes, we are already aware of that issue. No update yet. The MOM will call you as soon as they have an update.`;
+      } else {
+        const ack = 'a ' + this._formatFailureForSpeech(selectedFailure);
+        response = `Hi ${panelName}. Understood you are showing ${ack}. We will arrange some S&T guys to investigate. Also, we are going to send a MOM down incase a line block is required. They will call you with an update.`;
+      }
+
+      // Mark only the selected failure as reported
+      if (typeof AlertsFeed !== 'undefined' && AlertsFeed._activeFailures[selectedIdx]) {
+        AlertsFeed._activeFailures[selectedIdx].reported = true;
+        AlertsFeed._reportedFailures.add(selectedFailure);
+      }
+
+      this.addMessage({ type: 'driver', caller: callsign, text: response });
+      this._syncToRemote();
+      await this.speakAsDriver(response, callsign);
+      if (!this._outgoingCall) return;
+
+      // Wait for user to acknowledge (PTT or click)
+      this.addMessage({ type: 'greeting', text: 'Hold PTT to acknowledge...' });
+      this.renderChat();
+      this._syncToRemote();
+
+      try {
+        const ackTranscript = await this.recordAndTranscribe();
+        if (!this._outgoingCall) return;
+        this.addMessage({ type: 'signaller', text: ackTranscript || 'Ok, that\'s understood' });
+      } catch {
+        if (!this._outgoingCall) return;
         this.addMessage({ type: 'signaller', text: 'Ok, that\'s understood' });
       }
-    } catch {
+      this.renderChat();
+      this._syncToRemote();
       if (!this._outgoingCall) return;
-      this.addMessage({ type: 'signaller', text: 'Ok, that\'s understood' });
     }
-    this.renderChat();
-    this._syncToRemote();
-    if (!this._outgoingCall) return;
 
     // Route Control says goodbye and we hang up
     const goodbyes = [
@@ -3309,6 +3492,25 @@ const PhoneCallsUI = {
         const sig = this.currentSignalId || '';
         const sigRef = sig ? ` signal ${sig}` : '';
 
+        // Route query — show 2 custom options, both send the wait reply
+        if (this.isRouteQuery) {
+          const waitIdx = replies.findIndex((r) => /wait\s+\d+\s*min/i.test(r));
+          const wm = waitIdx >= 0 ? replies[waitIdx].match(/wait\s+(\d+)\s*min/i) : null;
+          const mins = wm ? wm[1] : '5';
+          const idx = waitIdx >= 0 ? waitIdx : 0;
+          const via = this.escapeHtml(this._routeQueryVia || 'your booked location');
+          const items = [
+            { html: `Hello driver of ${this.escapeHtml(hc)} at ${this.escapeHtml(sig)}. Please wait at ${this.escapeHtml(sig)} for ${mins} minutes while I speak with Route Control.`, replyIndex: idx },
+            { html: `Hello driver of ${this.escapeHtml(hc)} at ${this.escapeHtml(sig)}. Please wait at ${this.escapeHtml(sig)} for ${mins} minutes. I will reset the route so you are able to pass via ${via}.`, replyIndex: idx },
+          ];
+          const optionsHtml = items.map((item) => `<li data-reply-index="${item.replyIndex}">${item.html}</li>`).join('');
+          return `<div class="chat-message chat-reply-options">
+            <div class="chat-message-label">YOUR REPLY OPTIONS</div>
+            <ol class="reply-options-list">${optionsHtml}</ol>
+            ${msg.time ? `<div class="chat-message-time">${this.escapeHtml(msg.time)}</div>` : ''}
+          </div>`;
+        }
+
         // Group wait options into one line, keep others separate
         const waitIndices = [];
         const waitMins = [];
@@ -3338,8 +3540,6 @@ const PhoneCallsUI = {
             items.push({ html: `Understood, they can expect to wait ${timeParts} minutes further. Phone me back if it is longer than that.`, replyIndex: -1 });
           } else if (this.isThirdPartyCall) {
             items.push({ html: `Ok, tell the driver to remain at${this.escapeHtml(sigRef)} and wait ${timeParts} minutes. Get them to phone back if the signal hasn't cleared.`, replyIndex: -1 });
-          } else if (this.isRouteQuery) {
-            items.push({ html: `Hello driver of ${this.escapeHtml(hc)} standing at${this.escapeHtml(sigRef)} signal. Please remain at ${this.escapeHtml(sig)} and wait ${timeParts} minutes. The route will be set so you can pass via ${this.escapeHtml(this._routeQueryVia || 'your booked location')}.`, replyIndex: -1 });
           } else {
             const waitWho = this.isShunterCall ? 'Shunter' : 'Driver';
             items.push({ html: `${waitWho}, Correct. Remain at${this.escapeHtml(sigRef)} and wait ${timeParts} minutes before phoning back.`, replyIndex: -1 });

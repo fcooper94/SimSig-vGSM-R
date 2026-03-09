@@ -285,6 +285,8 @@ label input[type="range"] + span {
   border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
   padding: 24px 32px;
   min-width: 340px;
+  max-height: 85vh;
+  overflow-y: auto;
   text-align: center;
   color: var(--text);
 }

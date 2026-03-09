@@ -264,11 +264,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         const rcRow = phonebookList.querySelector('.pb-route-control');
         if (!rcRow) return;
         const hasFailures = typeof AlertsFeed !== 'undefined' && AlertsFeed.getActiveFailures().length > 0;
-        rcRow.classList.toggle('disabled', !hasFailures);
-        rcRow.title = hasFailures ? '' : 'No failures are active';
+        const hasWrongRoute = !!PhoneCallsUI._lastRouteQuery;
+        rcRow.classList.toggle('disabled', !hasFailures && !hasWrongRoute);
+        rcRow.title = (hasFailures || hasWrongRoute) ? '' : 'Nothing to report';
       };
       updateRcState();
       AlertsFeed._onRenderCallback = updateRcState;
+      PhoneCallsUI._updateRcState = updateRcState;
     }
   }
 
@@ -304,8 +306,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (entry.isRouteControl) {
       const hasFailures = typeof AlertsFeed !== 'undefined' && AlertsFeed.getActiveFailures().length > 0;
-      if (!hasFailures) {
-        phonebookStatus.textContent = 'No failures are active';
+      const hasWrongRoute = !!PhoneCallsUI._lastRouteQuery;
+      if (!hasFailures && !hasWrongRoute) {
+        phonebookStatus.textContent = 'Nothing to report';
         return;
       }
       PhoneCallsUI.dialRouteControl();
