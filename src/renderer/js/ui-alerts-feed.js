@@ -13,6 +13,7 @@ const AlertsFeed = {
   _onRenderCallback: null, // Called after render to update external UI (e.g. Route Control button)
   _selectedHc: null, // Currently selected headcode (for detail panel)
   _stateRestored: false, // Prevents duplicate restoreState calls
+  _clockValidated: false, // Whether clock-based timetable check has run
   _lastClockSeconds: 0, // Last known game clock seconds
 
   init() {
@@ -484,17 +485,6 @@ const AlertsFeed = {
     return panel ? 'alertsFeed_' + panel : '';
   },
 
-  _getSessionId() {
-    // sessionStorage is cleared each time the Electron app starts,
-    // so we use it to generate a unique ID per app launch.
-    let id = sessionStorage.getItem('alertsFeed_sessionId');
-    if (!id) {
-      id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      sessionStorage.setItem('alertsFeed_sessionId', id);
-    }
-    return id;
-  },
-
   _saveState() {
     const key = this._getStorageKey();
     if (!key) return;
@@ -509,7 +499,7 @@ const AlertsFeed = {
         failureSeen: [...this._failureSeen],
         reportedFailures: [...this._reportedFailures],
         waitedPairs: [...this._waitedPairs],
-        sessionId: this._getSessionId(),
+        clockSeconds: this._lastClockSeconds,
       };
       localStorage.setItem(key, JSON.stringify(state));
     } catch (e) { /* ignore */ }
@@ -524,14 +514,6 @@ const AlertsFeed = {
       const raw = localStorage.getItem(key);
       if (!raw) return;
       const state = JSON.parse(raw);
-      // Only restore if the state was saved in THIS app session.
-      // sessionStorage resets on each app launch, so a different session
-      // (different sim, different timetable, app restart) won't match.
-      if (state.sessionId !== this._getSessionId()) {
-        console.log('[AlertsFeed] Stale session data — clearing stored state for', key);
-        localStorage.removeItem(key);
-        return;
-      }
       if (state.signals && state.signals.length > 0) {
         for (const s of state.signals) {
           this._activeRedSignals.set(s.hc, {
@@ -555,6 +537,29 @@ const AlertsFeed = {
 
   onClockUpdate(clockSeconds) {
     this._lastClockSeconds = clockSeconds;
+    // On first clock update after restore, check if this is a different timetable
+    if (!this._clockValidated && this._stateRestored) {
+      this._clockValidated = true;
+      const key = this._getStorageKey();
+      if (!key) return;
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        // If saved clock is more than 30 minutes ahead of current, it's a new timetable
+        if (saved.clockSeconds && saved.clockSeconds - clockSeconds > 1800) {
+          console.log('[AlertsFeed] New timetable detected (saved clock %d > current %d), clearing state', saved.clockSeconds, clockSeconds);
+          localStorage.removeItem(key);
+          this._activeRedSignals.clear();
+          this._activeFailures = [];
+          this._failureSeen.clear();
+          this._reportedFailures.clear();
+          this._waitedPairs.clear();
+          this.render();
+          this.renderWaited();
+        }
+      } catch (e) { /* ignore */ }
+    }
   },
 
   _esc(s) {

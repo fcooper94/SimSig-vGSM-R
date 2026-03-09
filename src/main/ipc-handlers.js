@@ -257,7 +257,9 @@ function registerIpcHandlers() {
   registerHandler(channels.HANGUP_SET_KEYBIND, (_event, code) => {
     globalPtt.setHangUpKeybind(code);
   });
+  let mainInCall = false;
   registerHandler(channels.PHONE_IN_CALL, (_event, state) => {
+    mainInCall = state;
     globalPtt.setInCall(state);
   });
 
@@ -377,6 +379,14 @@ function registerIpcHandlers() {
           sendToMainWindow(channels.MESSAGE_LOG_LINES, lines);
         },
       );
+      // Keep our window above SimSig without being always-on-top globally
+      phoneReader.onKeepAbove = () => {
+        if (mainInCall || autoWaitRunning) return; // don't fight with PS1 scripts during calls
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win && !win.isFocused() && !win.isMinimized()) {
+          win.moveTop();
+        }
+      };
       phoneReader.startPolling(2000);
 
       // Ensure Telephone Calls dialog is open so PhoneReader can poll
@@ -443,7 +453,6 @@ function registerIpcHandlers() {
         // Re-raise our window and grab keyboard focus after PowerShell touched SimSig
         const win = BrowserWindow.getAllWindows()[0];
         if (win) {
-          win.setAlwaysOnTop(true, 'floating');
           win.moveTop();
           win.focus();
         }
@@ -488,7 +497,6 @@ function registerIpcHandlers() {
         // Re-raise our window and grab keyboard focus after PowerShell touched SimSig
         const win = BrowserWindow.getAllWindows()[0];
         if (win) {
-          win.setAlwaysOnTop(true, 'floating');
           win.moveTop();
           win.focus();
         }
@@ -638,7 +646,6 @@ function registerIpcHandlers() {
       execFile('powershell', args, { timeout: 30000 }, (err, stdout, stderr) => {
         const win = BrowserWindow.getAllWindows()[0];
         if (win) {
-          win.setAlwaysOnTop(true, 'floating');
           win.moveTop();
           win.focus();
         }

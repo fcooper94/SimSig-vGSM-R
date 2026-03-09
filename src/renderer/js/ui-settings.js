@@ -24,6 +24,12 @@ const SettingsUI = {
     document.getElementById('setting-output-volume').addEventListener('input', (e) => {
       document.getElementById('output-volume-val').textContent = e.target.value + '%';
     });
+    document.getElementById('setting-ring-volume').addEventListener('input', (e) => {
+      document.getElementById('ring-volume-val').textContent = e.target.value + '%';
+      if (typeof PhoneCallsUI !== 'undefined' && PhoneCallsUI.ringAudio) {
+        PhoneCallsUI.ringAudio.volume = parseInt(e.target.value, 10) / 100;
+      }
+    });
 
     // Mic gain +/- buttons
     document.getElementById('mic-gain-down').addEventListener('click', () => {
@@ -127,6 +133,9 @@ const SettingsUI = {
     document.getElementById('mic-volume-val').textContent = micVol + '%';
     document.getElementById('setting-output-volume').value = outVol;
     document.getElementById('output-volume-val').textContent = outVol + '%';
+    const ringVol = settings.audio?.ringVolume ?? 50;
+    document.getElementById('setting-ring-volume').value = ringVol;
+    document.getElementById('ring-volume-val').textContent = ringVol + '%';
 
     // TTS provider
     const providerSelect = document.getElementById('setting-tts-provider');
@@ -161,8 +170,13 @@ const SettingsUI = {
 
     const micVolume = parseInt(document.getElementById('setting-mic-volume').value, 10);
     const outputVolume = parseInt(document.getElementById('setting-output-volume').value, 10);
+    const ringVolume = parseInt(document.getElementById('setting-ring-volume').value, 10);
     await window.simsigAPI.settings.set('audio.micVolume', micVolume);
     await window.simsigAPI.settings.set('audio.outputVolume', outputVolume);
+    await window.simsigAPI.settings.set('audio.ringVolume', ringVolume);
+    if (typeof PhoneCallsUI !== 'undefined' && PhoneCallsUI.ringAudio) {
+      PhoneCallsUI.ringAudio.volume = ringVolume / 100;
+    }
 
     const keybind = document.getElementById('setting-ptt-keybind').value;
     await window.simsigAPI.settings.set('ptt.keybind', keybind);

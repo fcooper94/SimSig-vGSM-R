@@ -162,7 +162,7 @@ const PhoneCallsUI = {
 
     // Ringing audio — play full file, 1s gap, repeat
     this.ringAudio = new Audio('../../sounds/ringing.wav');
-    this.ringAudio.volume = 1;
+    this.ringAudio.volume = 0.5; // default, overridden by saved setting below
     this._ringLooping = false;
     this._ringTimer = null;
     this.ringAudio.addEventListener('ended', () => {
@@ -178,6 +178,9 @@ const PhoneCallsUI = {
     window.simsigAPI.settings.getAll().then((s) => {
       if (s.audio?.ringDeviceId && s.audio.ringDeviceId !== 'default') {
         this.setRingDevice(s.audio.ringDeviceId);
+      }
+      if (s.audio?.ringVolume != null) {
+        this.ringAudio.volume = s.audio.ringVolume / 100;
       }
     });
 
@@ -958,6 +961,14 @@ const PhoneCallsUI = {
     return { headcode: match[1], location: match[2].trim(), reason: match[3].trim(), departTime: match[4] || null };
   },
 
+  // Parse route query messages — driver querying the route set at a signal
+  // "Driver of 5M04 is querying the route set at signal VC662: booked via Balham"
+  parseRouteQueryMessage(msg) {
+    const match = msg.match(/querying the route set at signal\s+([A-Z0-9]+):\s*booked via\s+(.+)/i);
+    if (!match) return null;
+    return { signal: match[1], bookedVia: match[2].trim() };
+  },
+
   // Parse technician "fixed" reports — signal/points/track section failure fixed
   // "Signal failure in the Interlocking ST (Selhurst) area fixed."
   // "Points failure at East Croydon fixed."
@@ -982,6 +993,10 @@ const PhoneCallsUI = {
     { pattern: /pass.*unlit.*examine|unlit.*examine/, fragment: 'pass unlit signal and examine' },
     { pattern: /pass.*examine|authoris[ez].*pass.*examine|authoris[ez].*examine/, fragment: 'pass signal' },
     { pattern: /continue\s*examin/, fragment: 'continue examining' },
+    // Route query replies
+    { pattern: /abandon.*timetable|timetable.*abandon/, fragment: 'abandon timetable' },
+    { pattern: /bypass/, fragment: 'bypass' },
+    { pattern: /change.*route|route.*change/, fragment: 'wait' },
     { pattern: /(?:15|fifteen|one[\s-]*five|1[\s-]*5)\s*min/, fragment: '15 minute' },
     { pattern: /(?<!\d)(?:0?2|two|to)\s*min/, fragment: '2 minute' },
     { pattern: /(?<!\d)(?:0?5|five)\s*min/, fragment: '5 minute' },
@@ -1355,10 +1370,10 @@ const PhoneCallsUI = {
       return `Thanks Driver, understood you are delayed due to ${reason}`;
     }
     if (/yes.*signal\s+will\s+be\s+replaced/i.test(raw)) {
-      return 'Thank you driver. you can expect a change of aspect';
+      return 'Thank you driver, you can expect a change of aspect';
     }
     if (/no.*signal\s+will\s+not\s+be\s+replaced/i.test(raw)) {
-      return 'Thank you driver.';
+      return 'Thank you driver';
     }
     // "Ok, no obstruction found" — acknowledge examine line result
     if (/ok.*no\s*obstruction/i.test(raw)) {
@@ -1366,11 +1381,11 @@ const PhoneCallsUI = {
     }
     // Unlit signal — pass in unlit state + examine line
     if (/pass.*unlit.*signal.*examine|ask.*pass.*unlit.*examine/i.test(raw)) {
-      return `Driver of ${hc}, this is${panelRef}. We have a signal lamp failure here at${sigRef}. I am authorising you to pass${sigRef} in its unlit state. Proceed at caution to the next signal and examine the line. Report any obstructions.`;
+      return `Driver of ${hc}, this is${panelRef}. We have a signal lamp failure here at${sigRef}. I am authorising you to pass${sigRef} in its unlit state. Proceed at caution to the next signal and examine the line. Report any obstructions`;
     }
     // Unlit signal — pass in unlit state only
     if (/authoris[ez].*pass.*unlit|pass.*unlit.*signal/i.test(raw)) {
-      return `Driver of ${hc}, this is${panelRef}. We have a signal lamp failure here at${sigRef}. I am authorising you to pass${sigRef} in its unlit state. Proceed at caution to the next signal.`;
+      return `Driver of ${hc}, this is${panelRef}. We have a signal lamp failure here at${sigRef}. I am authorising you to pass${sigRef} in its unlit state. Proceed at caution to the next signal`;
     }
     // Pass signal at danger AND continue examining the line
     if (/pass.*signal.*at\s*stop.*examine|pass.*signal.*danger.*examine|authoris[ez].*pass.*examine|ask.*pass.*examine/i.test(raw)) {
@@ -1378,7 +1393,7 @@ const PhoneCallsUI = {
     }
     // Pass signal at danger only
     if (/authoris[ez].*pass.*signal|ask.*pass.*signal|pass.*signal.*at\s*stop/i.test(raw)) {
-      return `Driver of ${hc}, this is${panelRef}. I am authorising you to pass${sigRef} at danger. Proceed at caution to the next signal and be prepared to stop short of any obstruction.`;
+      return `Driver of ${hc}, this is${panelRef}. I am authorising you to pass${sigRef} at danger. Proceed at caution to the next signal and be prepared to stop short of any obstruction`;
     }
     // Continue examining the line (no pass at danger)
     if (/continue\s*examin/i.test(raw)) {
@@ -1388,10 +1403,24 @@ const PhoneCallsUI = {
     if (/ask.*examine|examine\s*the\s*line/i.test(raw)) {
       return `${hc}, I need you to examine the line between${sigRef} and the next signal. Proceed at caution and report any obstructions`;
     }
+    // Route query replies — wrong route, driver booked via somewhere else
+    if (this.isRouteQuery) {
+      const rqWait = raw.match(/wait\s+(\d+)\s*min/i);
+      if (rqWait) {
+        return `Hello driver of ${hc} standing at${sigRef} signal. Please remain at ${sig} and wait ${rqWait[1]} minutes. The route will be set so you can pass via ${this._routeQueryVia || 'your booked location'}`;
+      }
+      if (/abandon\s*timetable/i.test(raw)) {
+        return `Hello driver of ${hc} standing at${sigRef} signal. I am advised by route control that you are to abandon your timetable`;
+      }
+      const bypassMatch = raw.match(/bypass\s+(.+?)\s+and\s+then\s+keep\s+to\s+timetable/i);
+      if (bypassMatch) {
+        return `Hello driver of ${hc} standing at${sigRef} signal. I am advised by route control that you are to bypass ${bypassMatch[1]} and continue with the remainder of your timetable`;
+      }
+    }
     // Wait N minutes
     const waitMatch = raw.match(/wait\s+(\d+)\s*min/i);
     if (waitMatch) {
-      return `${hc}, correct. Remain at${sigRef}. Standby for ${waitMatch[1]} minutes before phoning back`;
+      return `Hello ${hc}, standing at${sigRef}, showing red. Please wait ${waitMatch[1]} minutes`;
     }
     // "Driver, please continue after speaking to your control"
     if (/continue\s+after\s+speaking/i.test(raw)) {
@@ -1414,13 +1443,13 @@ const PhoneCallsUI = {
     // "Please hold 4022 back" — hold train until booked time
     const holdBackMatch = raw.match(/hold\s+(\w+)\s+back/i);
     if (holdBackMatch) {
-      return `Can you hold ${holdBackMatch[1]} back until their booked time, thanks`;
+      return `Can you hold ${holdBackMatch[1]} back until their booked time`;
     }
     // "Please call back in N minutes"
     const callBackMatch = raw.match(/call\s*back\s+in\s+(\d+)\s*min/i);
     if (callBackMatch) {
       if (this.isShunterCall) return `Hello Shunter, call back in ${callBackMatch[1]} minutes`;
-      return `Driver, Please call back in ${callBackMatch[1]} minutes`;
+      return `Driver, please call back in ${callBackMatch[1]} minutes`;
     }
     // Simple "Ok" reply (e.g. ready-at-location acknowledgement)
     if (/^\s*ok\s*$/i.test(raw)) {
@@ -1524,6 +1553,20 @@ const PhoneCallsUI = {
     if (/ask.*examine|examine\s*the\s*line/i.test(lower)) {
       return `Examine the line from${sigRef} to the next signal, proceed at caution and report${trainRef}`;
     }
+    // Route query readbacks
+    if (this.isRouteQuery) {
+      const rqWait = lower.match(/wait\s+(\d+)\s*min/);
+      if (rqWait) {
+        return `Understood, I shall wait ${rqWait[1]} minutes${trainRef}`;
+      }
+      if (/abandon.*timetable/i.test(lower)) {
+        return `Understood, I shall abandon the timetable${trainRef}`;
+      }
+      if (/bypass\s+(.+?)\s+and\s+continue/i.test(lower)) {
+        const bp = lower.match(/bypass\s+(.+?)\s+and\s+continue/i);
+        return `Understood, I shall bypass ${bp[1]} and continue with the remainder of the timetable${trainRef}`;
+      }
+    }
     // Wait N minutes — no formal readback required, just acknowledge
     const waitMatch = lower.match(/wait\s+(\d+)\s*min/);
     if (waitMatch) {
@@ -1599,11 +1642,12 @@ const PhoneCallsUI = {
     this.messages = this.messages.filter((m) => m.type !== 'loading');
 
     if (skipReadback) {
-      // No readback needed — driver just says goodbye and hangs up
-      const goodbye = 'Ok, thanks. Bye.';
+      // No readback needed — driver acknowledges, then we sign off
+      const goodbye = 'Ok, thanks.';
       this.addMessage({ type: 'driver', caller: this.shortenCaller(caller), text: goodbye });
       await this.speakAsDriver(goodbye, caller);
       if (myCallId !== this._callSeq) return;
+      this.addMessage({ type: 'signaller', text: 'Signaller Out' });
       this._hangUpLocked = false;
       this.hangUp();
       return;
@@ -1650,11 +1694,12 @@ const PhoneCallsUI = {
     const okText = this.isSignallerCall ? 'Ok, Thanks. I will take a look now' : 'Ok, Thanks';
     this.addMessage({ type: 'signaller', text: okText });
     this.renderChat();
-    // Caller replies then call ends
-    const goodbye = this.isSignallerCall ? 'Ok, Thanks. Bye' : 'Ok, Bye';
-    this.addMessage({ type: 'driver', caller: this.shortenCaller(caller), text: goodbye });
-    await this.speakAsDriver(goodbye, caller);
+    // Caller acknowledges, then we sign off
+    const ack = this.isSignallerCall ? 'Ok, Thanks' : 'Ok';
+    this.addMessage({ type: 'driver', caller: this.shortenCaller(caller), text: ack });
+    await this.speakAsDriver(ack, caller);
     if (myCallId !== this._callSeq) return;
+    this.addMessage({ type: 'signaller', text: 'Signaller Out' });
     this._hangUpLocked = false;
     this.hangUp();
   },
@@ -1774,32 +1819,28 @@ const PhoneCallsUI = {
     this._hangUpLocked = false; // allow hangup from this point
 
     while (this.inCall && callId === this._callSeq) {
-      this.addMessage({ type: 'greeting', text: 'Hold PTT to say goodbye...' });
+      this.addMessage({ type: 'greeting', text: 'Hold PTT to sign off...' });
 
       try {
         const transcript = await this.recordAndTranscribe();
         if (!this.inCall || callId !== this._callSeq) return;
         if (transcript) {
-          // At the goodbye stage, any speech is treated as goodbye
-          // (user has already sent their reply — they're just ending the call)
+          // User spoke — show "Signaller Out" as the signaller's sign-off
+          this.addMessage({ type: 'signaller', text: 'Signaller Out' });
+          // Caller acknowledges and hangs up
           const voiceKey = this._activeCallVoiceKey || this._activeCallTrain || '';
           const goodbyes = this.isSignallerCall ? [
             'Ok, Thanks. Bye.',
             'Right, thanks for letting me know. Bye.',
             'Ok, cheers. Bye.',
             'Thanks. Bye.',
-            'Ok, thanks for that. Bye bye.',
           ] : [
-            'Right, cheers mate, bye.',
+            'Right, cheers, bye.',
             'Ta, bye now.',
-            'Sound, cheers, bye bye.',
+            'Cheers, bye bye.',
             'Nice one, ta, bye.',
-            'Alright mate, cheers, bye.',
-            'Lovely, ta, see ya.',
+            'Alright, cheers, bye.',
             'Right oh, cheers, bye.',
-            'Sweet, ta mate, bye bye.',
-            'Alright, cheers ears, bye.',
-            'Sorted, ta, bye now.',
           ];
           const reply = goodbyes[Math.floor(Math.random() * goodbyes.length)];
           this.addMessage({ type: 'driver', caller: this.shortenCaller(voiceKey), text: reply });
@@ -1914,6 +1955,8 @@ const PhoneCallsUI = {
     this.isThirdPartyCall = false;
     this.isUnlitSignal = false;
     this.isAdverseAspect = false;
+    this.isRouteQuery = false;
+    this._routeQueryVia = null;
     this._replyClicked = false;
     this._hasReplyOptions = false;
     this._replySent = false;
@@ -2026,6 +2069,7 @@ const PhoneCallsUI = {
     const delay = !csd && !readyAt && !earlyRun && !sigAdvisory ? this.parseDelayMessage(driverMsg) : null;
     const crewWaiting = !csd && !readyAt && !earlyRun && !sigAdvisory && !delay ? this.parseCrewWaitingMessage(driverMsg) : null;
     const fixedReport = this.parseFixedReport(driverMsg);
+    const routeQuery = this.parseRouteQueryMessage(driverMsg);
 
     // Start background noise for the duration of the call
     // Signaller → office ambience, shunter/CSD/yard → yard noise, train → cab noise
@@ -2125,6 +2169,12 @@ const PhoneCallsUI = {
       this.startBgNoise();
       displayMsg = `${this.currentHeadCode} has examined the line. No obstructions found.`;
       spokenMsg = `Hello Signaller, this is driver of ${this.currentHeadCode}. I have examined the line as requested and found no obstructions`;
+    } else if (routeQuery) {
+      // Route query — driver questioning the set route (booked via somewhere else)
+      this.isRouteQuery = true;
+      this._routeQueryVia = routeQuery.bookedVia;
+      displayMsg = `${this.currentHeadCode} querying route at signal ${routeQuery.signal}, booked via ${routeQuery.bookedVia}`;
+      spokenMsg = `Hello Signaller, this is driver of ${this.currentHeadCode} at ${routeQuery.signal}. I wanted to query the set route as I am booked via ${routeQuery.bookedVia}`;
     } else if (/adverse\s+change\s+of\s+aspect/i.test(driverMsg) && this.currentSignalId) {
       // Adverse change of aspect — driver received a more restrictive signal unexpectedly
       this.isAdverseAspect = true;
@@ -2649,8 +2699,8 @@ const PhoneCallsUI = {
     await this.speakAsDriver(confirmation, contactName);
     if (!this._outgoingCall) return;
 
-    // Wait for user to readback the response, then do goodbye
-    this.addMessage({ type: 'greeting', text: 'Hold PTT to readback and say goodbye...' });
+    // Wait for user to readback the response, then sign off
+    this.addMessage({ type: 'greeting', text: 'Hold PTT to readback and sign off...' });
     try {
       const readback = await this._recordForReplyPrompt();
       if (!this._outgoingCall) return;
@@ -2684,25 +2734,20 @@ const PhoneCallsUI = {
 
   async _listenForGoodbye(contactName) {
     while (this._outgoingCall) {
-      this.addMessage({ type: 'greeting', text: 'Hold PTT to say goodbye...' });
+      this.addMessage({ type: 'greeting', text: 'Hold PTT to sign off...' });
 
       try {
         const transcript = await this.recordAndTranscribe();
         if (!this._outgoingCall) return;
         if (transcript) {
-          // At the goodbye stage, any speech ends the call
-          this.addMessage({ type: 'signaller', text: transcript });
+          this.addMessage({ type: 'signaller', text: 'Signaller Out' });
           const goodbyes = [
             'Ok, speak later, bye.',
             'Thanks, bye now.',
-            'Bye bye.',
             'Cheers, bye.',
             'Right, thanks, bye.',
             'Ok, bye now.',
-            'Ok, thanks for that, bye.',
             'Right oh, bye.',
-            'Ok, thank you, bye now.',
-            'Very good, thanks, bye.',
           ];
           const reply = goodbyes[Math.floor(Math.random() * goodbyes.length)];
           this.addMessage({ type: 'driver', text: reply });
@@ -2823,6 +2868,7 @@ const PhoneCallsUI = {
         selectedIdx = parseInt(li.dataset.replyIndex, 10);
         if (isNaN(selectedIdx)) selectedIdx = 0;
         this._outgoingReplySent = true;
+        this._outgoingReplyProcessing = true; // break waitForPTTPress
         this.chatEl.removeEventListener('click', rcClickHandler);
       }
     };
@@ -2866,6 +2912,7 @@ const PhoneCallsUI = {
       }
     }
     this.chatEl.removeEventListener('click', rcClickHandler);
+    this._outgoingReplyProcessing = false;
     if (!this._outgoingCall) return;
 
     // If not matched via voice or click, fallback to clickable options
@@ -2931,11 +2978,11 @@ const PhoneCallsUI = {
       if (ackTranscript) {
         this.addMessage({ type: 'signaller', text: ackTranscript });
       } else {
-        this.addMessage({ type: 'signaller', text: 'Ok, that\'s understood. Bye now.' });
+        this.addMessage({ type: 'signaller', text: 'Ok, that\'s understood' });
       }
     } catch {
       if (!this._outgoingCall) return;
-      this.addMessage({ type: 'signaller', text: 'Ok, that\'s understood. Bye now.' });
+      this.addMessage({ type: 'signaller', text: 'Ok, that\'s understood' });
     }
     this.renderChat();
     this._syncToRemote();
@@ -2954,6 +3001,7 @@ const PhoneCallsUI = {
     this._syncToRemote();
     await this.speakAsDriver(bye, callsign);
 
+    this.addMessage({ type: 'signaller', text: 'Signaller Out' });
     this.stopBgNoise();
     this.endOutgoingCall();
   },
@@ -3290,6 +3338,8 @@ const PhoneCallsUI = {
             items.push({ html: `Understood, they can expect to wait ${timeParts} minutes further. Phone me back if it is longer than that.`, replyIndex: -1 });
           } else if (this.isThirdPartyCall) {
             items.push({ html: `Ok, tell the driver to remain at${this.escapeHtml(sigRef)} and wait ${timeParts} minutes. Get them to phone back if the signal hasn't cleared.`, replyIndex: -1 });
+          } else if (this.isRouteQuery) {
+            items.push({ html: `Hello driver of ${this.escapeHtml(hc)} standing at${this.escapeHtml(sigRef)} signal. Please remain at ${this.escapeHtml(sig)} and wait ${timeParts} minutes. The route will be set so you can pass via ${this.escapeHtml(this._routeQueryVia || 'your booked location')}.`, replyIndex: -1 });
           } else {
             const waitWho = this.isShunterCall ? 'Shunter' : 'Driver';
             items.push({ html: `${waitWho}, Correct. Remain at${this.escapeHtml(sigRef)} and wait ${timeParts} minutes before phoning back.`, replyIndex: -1 });

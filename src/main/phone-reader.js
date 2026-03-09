@@ -227,6 +227,9 @@ class PhoneReader {
         }
         this.lastAnswerDialogOpen = dialogOpen;
 
+        // Keep our window above SimSig (but not above other apps)
+        if (data.simsigFound && this.onKeepAbove) this.onKeepAbove();
+
         // Detect pause state from clock background color
         if (data.paused !== undefined && data.paused !== this.lastPaused) {
           this.lastPaused = data.paused;
