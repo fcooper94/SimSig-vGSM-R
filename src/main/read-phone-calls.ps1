@@ -239,6 +239,8 @@ try {
             for ($i = 0; $i -lt $count; $i++) {
                 $text = [SimSigListBox]::GetText($listBoxHwnd, $i)
                 if ($text) {
+                    # Skip calls that have been transferred to another panel
+                    if ($text -match "Transferred") { continue }
                     $calls += @{ train = $text; status = "Unanswered" }
                 }
             }

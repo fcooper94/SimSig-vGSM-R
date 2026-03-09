@@ -131,6 +131,37 @@ label input[type="range"] + span {
   animation: pulse 1s infinite;
 }
 
+.host-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  width: 260px;
+}
+.host-row input {
+  flex: 1;
+  width: auto !important;
+  min-width: 0;
+}
+#detect-host-btn {
+  background: var(--bg-panel);
+  color: var(--text);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#detect-host-btn:hover { background: #e0dcd4; }
+#detect-host-btn:active {
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+}
+#detect-host-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .modal-actions {
   display: flex;
   gap: 10px;
@@ -470,6 +501,9 @@ body.dark-mode label select:focus {
 }
 
 body.dark-mode .rebind-btn:hover {
+  background: #3a3a3a;
+}
+body.dark-mode #detect-host-btn:hover {
   background: #3a3a3a;
 }
 

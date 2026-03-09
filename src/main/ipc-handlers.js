@@ -2,7 +2,7 @@ const { ipcMain, BrowserWindow, app } = require('electron');
 const channels = require('../shared/ipc-channels');
 const settings = require('./settings');
 const { updateClock, updateClockTime, getClockState, formatTime } = require('./clock');
-const { execFile } = require('child_process');
+const { execFile, exec } = require('child_process');
 const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 const StompConnectionManager = require('./stomp-client');
 const PhoneReader = require('./phone-reader');
@@ -18,6 +18,7 @@ const READ_PLACE_CALL_SCRIPT = require('path').join(SCRIPTS_DIR, 'read-place-cal
 const REPLY_PLACE_CALL_SCRIPT = require('path').join(SCRIPTS_DIR, 'reply-place-call.ps1');
 const HANGUP_PLACE_CALL_SCRIPT = require('path').join(SCRIPTS_DIR, 'hangup-place-call.ps1');
 const HIDE_ANSWER_SCRIPT = require('path').join(SCRIPTS_DIR, 'hide-answer-dialog.ps1');
+const DETECT_GATEWAY_SCRIPT = require('path').join(SCRIPTS_DIR, 'detect-gateway-host.ps1');
 
 const globalPtt = require('./global-ptt');
 
@@ -363,8 +364,16 @@ function registerIpcHandlers() {
           settings.set('signaller.panelName', simName);
         },
         () => {
-          console.log('[IPC] SimSig closed — quitting app');
-          app.quit();
+          console.log('[IPC] SimSig closed — forcing disconnect');
+          if (phoneReader) {
+            phoneReader.stopPolling();
+            phoneReader = null;
+          }
+          if (stompManager) {
+            stompManager.disconnect().catch(() => {});
+            stompManager = null;
+          }
+          sendToAllWindows(channels.CONNECTION_STATUS, 'disconnected');
         },
         (paused) => {
           sendToMainWindow(channels.CLOCK_UPDATE, { paused, clockSeconds: 0, interval: 500 });
@@ -424,6 +433,43 @@ function registerIpcHandlers() {
     }
     // Ensure all clients get disconnected status and clear their calls
     sendToAllWindows(channels.CONNECTION_STATUS, 'disconnected');
+  });
+
+  // Detect gateway host via SimSig menu
+  registerHandler(channels.DETECT_GATEWAY_HOST, () => {
+    return new Promise((resolve) => {
+      console.log('[DetectGateway] Running detect-gateway-host.ps1...');
+      execFile('powershell', [
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', DETECT_GATEWAY_SCRIPT,
+      ], { timeout: 10000 }, (err, stdout, stderr) => {
+        if (stderr) console.error('[DetectGateway] stderr:', stderr.trim());
+        if (stdout) console.log('[DetectGateway] stdout:', (stdout || '').trim());
+        if (err) {
+          console.error('[DetectGateway] Error:', err.message);
+          resolve({ error: err.message });
+          return;
+        }
+        try {
+          const result = JSON.parse((stdout || '').trim());
+          console.log('[DetectGateway] Result:', JSON.stringify(result));
+          resolve(result);
+        } catch (e) {
+          console.error('[DetectGateway] Parse error, raw output:', stdout);
+          resolve({ error: 'Failed to parse detection result' });
+        }
+      });
+    });
+  });
+
+  // Check if SimSig is running (all sims use SimSigLoader.exe)
+  registerHandler(channels.SIM_IS_RUNNING, () => {
+    return new Promise((resolve) => {
+      execFile('tasklist', ['/FI', 'IMAGENAME eq SimSigLoader.exe', '/NH', '/FO', 'CSV'],
+        { timeout: 3000 }, (_err, stdout) => {
+          resolve(!!stdout && stdout.includes('SimSigLoader.exe'));
+        });
+    });
   });
 
   // Commands

@@ -286,7 +286,12 @@
         </fieldset>
         <fieldset>
           <legend>Gateway Connection</legend>
-          <label>Host <input type="text" id="setting-host"></label>
+          <label>Host
+            <span class="host-row">
+              <input type="text" id="setting-host">
+              <button type="button" id="detect-host-btn" title="Auto-detect from SimSig">Detect</button>
+            </span>
+          </label>
           <label>Port <input type="number" id="setting-port"></label>
         </fieldset>
         <fieldset>

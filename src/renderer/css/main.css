@@ -161,6 +161,12 @@ body {
   color: var(--text);
 }
 
+#no-gateway-hint {
+  font-size: 10px;
+  color: #c45500;
+  border-color: transparent;
+}
+
 /* Header status icons (envelope, OK) */
 .header-status-icons {
   display: flex;

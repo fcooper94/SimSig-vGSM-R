@@ -55,6 +55,9 @@ const SettingsUI = {
       apiKeyTimer = setTimeout(() => this.checkElevenLabsCredits(), 500);
     });
 
+    // Detect gateway host button
+    document.getElementById('detect-host-btn').addEventListener('click', () => this.detectGatewayHost());
+
     // Close on overlay click
     this.modal.addEventListener('click', (e) => {
       if (e.target === this.modal) this.close();
@@ -65,9 +68,11 @@ const SettingsUI = {
     const settings = await window.simsigAPI.settings.getAll();
     this._savedTheme = settings.theme || 'light';
     this.populate(settings);
-    window.simsigAPI.app.getVersion().then((v) => {
-      document.getElementById('settings-version').textContent = 'Version - v' + v;
-    });
+    if (window.simsigAPI.app && window.simsigAPI.app.getVersion) {
+      window.simsigAPI.app.getVersion().then((v) => {
+        document.getElementById('settings-version').textContent = 'Version - v' + v;
+      });
+    }
     await this.enumerateAudioDevices();
     // Hide browser overlay text while settings is open so it's not in the way
     const browserOverlay = document.getElementById('browser-overlay');
@@ -120,7 +125,7 @@ const SettingsUI = {
   },
 
   populate(settings) {
-    document.getElementById('setting-host').value = settings.gateway?.host || 'localhost';
+    document.getElementById('setting-host').value = 'localhost';
     document.getElementById('setting-port').value = settings.gateway?.port || 51515;
     document.getElementById('setting-username').value = settings.credentials?.username || '';
     document.getElementById('setting-password').value = settings.credentials?.password || '';
@@ -348,6 +353,33 @@ const SettingsUI = {
       status.className = 'status-ok';
       status.textContent = `${result.remaining.toLocaleString()} / ${result.total.toLocaleString()} characters remaining`;
     }
+  },
+
+  async detectGatewayHost() {
+    const btn = document.getElementById('detect-host-btn');
+    const hostInput = document.getElementById('setting-host');
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Detecting...';
+
+    try {
+      const result = await window.simsigAPI.settings.detectGatewayHost();
+      if (result.error) {
+        btn.textContent = 'Failed';
+        console.warn('[Settings] Gateway detection error:', result.error);
+      } else if (result.host) {
+        hostInput.value = result.host;
+        btn.textContent = result.type === 'server' ? 'Localhost' : result.host;
+      }
+    } catch (err) {
+      btn.textContent = 'Error';
+      console.error('[Settings] Gateway detection failed:', err);
+    }
+
+    setTimeout(() => {
+      btn.textContent = origText;
+      btn.disabled = false;
+    }, 2000);
   },
 
   stopKeybindListen() {

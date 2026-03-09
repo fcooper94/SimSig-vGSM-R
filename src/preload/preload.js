@@ -54,6 +54,8 @@ const channels = {
   WEB_STOP: 'web:stop',
   FAILURE_DISMISSED: 'sim:failure-dismissed',
   MESSAGE_LOG_LINES: 'sim:message-log-lines',
+  DETECT_GATEWAY_HOST: 'settings:detect-gateway-host',
+  SIM_IS_RUNNING: 'sim:is-running',
 };
 
 contextBridge.exposeInMainWorld('simsigAPI', {
@@ -61,6 +63,7 @@ contextBridge.exposeInMainWorld('simsigAPI', {
     get: (key) => ipcRenderer.invoke(channels.SETTINGS_GET, key),
     set: (key, value) => ipcRenderer.invoke(channels.SETTINGS_SET, key, value),
     getAll: () => ipcRenderer.invoke(channels.SETTINGS_GET_ALL),
+    detectGatewayHost: () => ipcRenderer.invoke(channels.DETECT_GATEWAY_HOST),
   },
 
   connection: {
@@ -113,6 +116,7 @@ contextBridge.exposeInMainWorld('simsigAPI', {
       ipcRenderer.on(channels.MESSAGE_LOG_LINES, listener);
       return () => ipcRenderer.removeListener(channels.MESSAGE_LOG_LINES, listener);
     },
+    isRunning: () => ipcRenderer.invoke(channels.SIM_IS_RUNNING),
   },
 
   phone: {

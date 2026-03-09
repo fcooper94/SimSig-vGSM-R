@@ -3,6 +3,7 @@ const ConnectionUI = {
   indicator: null,
   statusText: null,
   connectBtn: null,
+  _simCheckTimer: null,
 
   init() {
     this.indicator = document.getElementById('status-indicator');
@@ -22,6 +23,10 @@ const ConnectionUI = {
         if (initOverlay) initOverlay.classList.remove('hidden');
       }
     });
+
+    // Poll SimSig running state to enable/disable Connect button
+    this._checkSimSigRunning();
+    this._simCheckTimer = setInterval(() => this._checkSimSigRunning(), 5000);
 
     const fullscreenBtn = document.getElementById('fullscreen-btn');
     if (fullscreenBtn) {
@@ -83,10 +88,19 @@ const ConnectionUI = {
       this.statusText.textContent += `: ${status.error}`;
     }
 
-    // Tooltip for no-gateway explaining what's unavailable
-    this.statusText.title = statusStr === 'no-gateway'
-      ? 'Train position data requires the Information Gateway'
-      : '';
+    // Show hint next to No Gateway status text
+    let hint = document.getElementById('no-gateway-hint');
+    if (statusStr === 'no-gateway') {
+      if (!hint) {
+        hint = document.createElement('span');
+        hint.id = 'no-gateway-hint';
+        hint.textContent = '— Start Gateway or press Detect in Settings';
+        this.statusText.parentNode.insertBefore(hint, this.statusText.nextSibling);
+      }
+      hint.style.display = '';
+    } else if (hint) {
+      hint.style.display = 'none';
+    }
 
     // No-gateway keeps Disconnect available (PhoneReader is still running)
     this.connectBtn.textContent = (this.isConnected || statusStr === 'no-gateway') ? 'Disconnect' : 'Connect';
@@ -109,5 +123,19 @@ const ConnectionUI = {
     if (trainsContent) trainsContent.classList.toggle('hidden', noGateway);
     if (noTrainsMsg) noTrainsMsg.classList.toggle('hidden', noGateway);
     if (feedContent) feedContent.classList.toggle('hidden', noGateway);
+  },
+
+  async _checkSimSigRunning() {
+    // Only check when disconnected — while connected, PhoneReader handles detection
+    if (this.isConnected || this.indicator.className === 'connecting') return;
+    try {
+      const running = await window.simsigAPI.sim.isRunning();
+      this.connectBtn.disabled = !running;
+      if (!running && this.indicator.className === 'disconnected') {
+        this.statusText.textContent = 'SimSig not running';
+      }
+    } catch {
+      // Ignore errors in polling
+    }
   },
 };

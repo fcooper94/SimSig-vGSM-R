@@ -195,7 +195,10 @@ class PhoneReader {
           console.log('[PhoneReader] Raw poll data - clockColor:', data.clockColor, 'paused:', data.paused);
           this._colorLogged = true;
         }
-        const calls = data.calls || [];
+        // Filter out calls transferred to other panels
+        const calls = (data.calls || []).filter(
+          (c) => !c.train || !c.train.toLowerCase().includes('transferred')
+        );
         const callsJson = JSON.stringify(calls);
 
         // Only notify renderer when calls actually change

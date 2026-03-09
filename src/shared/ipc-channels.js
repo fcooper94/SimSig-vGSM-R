@@ -77,6 +77,10 @@ module.exports = {
   WEB_START: 'web:start',
   WEB_STOP: 'web:stop',
 
+  // Detection
+  DETECT_GATEWAY_HOST: 'settings:detect-gateway-host',
+  SIM_IS_RUNNING: 'sim:is-running',
+
   // Setup wizard
   SETUP_COMPLETE: 'setup:complete',
 };

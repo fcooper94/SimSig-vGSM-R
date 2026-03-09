@@ -28,6 +28,7 @@ function createWindow() {
   });
 
   mainWindow.setMenu(null);
+  mainWindow.setAlwaysOnTop(true, 'floating');
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 
   mainWindow.once('ready-to-show', () => {
