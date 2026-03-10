@@ -67,7 +67,9 @@
       "Bash(git add src/renderer/css/settings.css src/renderer/index.html src/renderer/js/app.js src/renderer/js/ui-phone-calls.js)",
       "Bash(git add package.json)",
       "Bash(git tag v1.0.32)",
-      "Bash(git push origin main --tags)"
+      "Bash(git push origin main --tags)",
+      "Bash(gh secret set DISCORD_WEBHOOK_URL_RELEASES_2 --body \"https://discord.com/api/webhooks/1480718328891834472/O6bAEeRZyul54FgS4XAlta4zLkHI4iQ_iEbLUyRW_yM_sAdWi2kXHHp9GFOrYPQjbVTT\" --repo fcooper94/SimSig-vGSM-R)",
+      "Bash(git add .github/workflows/discord-notify-release.yml)"
     ]
   }
 }
