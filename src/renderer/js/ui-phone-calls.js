@@ -38,7 +38,7 @@ const PhoneCallsUI = {
       commsCloseBtn.addEventListener('click', () => {
         ConnectionUI.showConfirm('Force Close', 'Force close this call? This will end the call in SimSig.', () => {
           this._callSeq++;
-          this.hangUp();
+          this.hangUp({ forceClose: true });
         });
       });
     }
@@ -1990,7 +1990,7 @@ const PhoneCallsUI = {
     await this.waitForPTTRelease();
   },
 
-  hangUp() {
+  hangUp({ forceClose = false } = {}) {
     // Stop any TTS immediately
     this.stopTTS();
 
@@ -2031,8 +2031,13 @@ const PhoneCallsUI = {
     this._syncToRemote();
     if (this._updateRcState) this._updateRcState();
 
-    // Hide any lingering TAnswerCallForm dialog in SimSig
-    window.simsigAPI.phone.hideAnswerDialog().catch(() => {});
+    // Dismiss TAnswerCallForm in SimSig — force-close uses a safe script
+    // that won't consume queued calls; normal hangup uses the full script
+    if (forceClose) {
+      window.simsigAPI.phone.forceCloseCall().catch(() => {});
+    } else {
+      window.simsigAPI.phone.hideAnswerDialog().catch(() => {});
+    }
     // If there are waiting calls, show the next one and start ringing
     if (this.calls.length > 0) {
       const nextCall = this.calls[this.calls.length - 1];

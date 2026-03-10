@@ -1,7 +1,7 @@
 :root {
-  --bg-primary: #d4d0c8;
-  --bg-secondary: #d4d0c8;
-  --bg-panel: #d4d0c8;
+  --bg-primary: #c0c0c0;
+  --bg-secondary: #c0c0c0;
+  --bg-panel: #c0c0c0;
   --bg-input: #ffffff;
   --accent: #000080;
   --accent-dim: #000060;
@@ -13,12 +13,12 @@
   --error: #cc0000;
   --border: #808080;
   --border-light: #c0c0c0;
-  --tab-bg: #d4d0c8;
-  --toolbar-bg: #d4d0c8;
+  --tab-bg: #c0c0c0;
+  --toolbar-bg: #c0c0c0;
   --bevel-light: #ffffff;
   --bevel-dark: #404040;
   --bevel-mid: #808080;
-  --grid-bg: #ece9d8;
+  --grid-bg: #ffffff;
 }
 
 body.dark-mode {
@@ -107,7 +107,7 @@ body {
 }
 
 .window-controls button:hover {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 .window-controls button:active {
@@ -201,7 +201,7 @@ body {
 }
 
 #connect-btn:hover, #fullscreen-btn:hover, #compact-toggle-btn:hover, #settings-btn:hover, #msglog-btn:hover {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 #connect-btn:active, #fullscreen-btn:active, #compact-toggle-btn:active, #settings-btn:active, #msglog-btn:active {
@@ -304,6 +304,15 @@ body {
 #alerts-feed {
   flex: 1;
   overflow-y: auto;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent,
+      transparent 33px,
+      #c0c0c0 33px,
+      #c0c0c0 34px
+    );
+  background-color: var(--grid-bg);
 }
 
 #alerts-table {
@@ -401,7 +410,7 @@ body {
 }
 
 .alert-action-btn:hover {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 .alert-action-btn:active {
@@ -428,27 +437,25 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 2px solid;
-  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
-  background: var(--grid-bg);
 }
 
 /* ── WAITED TABLE (right panel) ─────────────────────────── */
 #waited-header {
-  display: flex;
-  align-items: center;
-  padding: 4px 10px;
-  font-size: 13px;
-  font-weight: bold;
-  color: var(--text);
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
+  display: none;
 }
 
 #waited-feed {
   flex: 1;
   overflow-y: auto;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent,
+      transparent 33px,
+      #c0c0c0 33px,
+      #c0c0c0 34px
+    );
+  background-color: var(--grid-bg);
 }
 
 #waited-table {
@@ -637,7 +644,7 @@ body {
 }
 
 .toolbar-btn:hover:not(:disabled) {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 .toolbar-btn.emrg {
@@ -906,8 +913,47 @@ button {
 }
 
 /* ── CSS-DRAWN SECTION ICONS ───────────────────────────────── */
-/* Envelope with arrows (outgoing/calls) */
+/* Incoming calls icon — 3 lines + down arrow */
 .icon-envelope-arrows {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 22px;
+  height: 30px;
+  position: relative;
+}
+
+/* Three horizontal lines */
+.icon-envelope-arrows::before {
+  content: '';
+  display: block;
+  width: 16px;
+  height: 14px;
+  border-top: 3px solid #000000;
+  border-bottom: 3px solid #000000;
+  background: linear-gradient(
+    to bottom,
+    transparent 4px,
+    #000000 4px,
+    #000000 7px,
+    transparent 7px
+  );
+}
+
+/* Down arrow */
+.icon-envelope-arrows::after {
+  content: '';
+  display: block;
+  width: 0;
+  height: 0;
+  margin-top: 5px;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 10px solid #404040;
+}
+
+/* Plain envelope (waited trains) */
+.icon-envelope {
   display: block;
   width: 18px;
   height: 14px;
@@ -917,7 +963,7 @@ button {
   background: var(--bg-panel);
 }
 
-.icon-envelope-arrows::before {
+.icon-envelope::before {
   content: '';
   position: absolute;
   top: -2px;
@@ -929,18 +975,7 @@ button {
   border-top: 8px solid #404040;
 }
 
-.icon-envelope-arrows::after {
-  content: '\2194';
-  position: absolute;
-  bottom: -6px;
-  right: -6px;
-  font-size: 10px;
-  color: #404040;
-  font-weight: bold;
-  line-height: 1;
-}
-
-/* Envelope with X (messages) */
+/* Envelope with X (messages) — now plain envelope */
 .icon-envelope-x {
   display: block;
   width: 18px;
@@ -963,15 +998,28 @@ button {
   border-top: 8px solid #404040;
 }
 
-.icon-envelope-x::after {
-  content: '\2716';
-  position: absolute;
-  bottom: -6px;
-  right: -6px;
-  font-size: 9px;
-  color: #cc0000;
-  font-weight: bold;
-  line-height: 1;
+/* Dark mode: white icons */
+body.dark-mode .icon-envelope-arrows::before {
+  border-top-color: #ffffff;
+  border-bottom-color: #ffffff;
+  background: linear-gradient(
+    to bottom,
+    transparent 4px,
+    #ffffff 4px,
+    #ffffff 7px,
+    transparent 7px
+  );
+}
+body.dark-mode .icon-envelope-arrows::after {
+  border-top-color: #ffffff;
+}
+body.dark-mode .icon-envelope,
+body.dark-mode .icon-envelope-x {
+  border-color: #ffffff;
+}
+body.dark-mode .icon-envelope::before,
+body.dark-mode .icon-envelope-x::before {
+  border-top-color: #ffffff;
 }
 
 /* ── SCROLLBARS ────────────────────────────────────────────── */
@@ -991,7 +1039,7 @@ button {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 ::-webkit-scrollbar-button {
@@ -1295,7 +1343,7 @@ body.compact-mode #compact-bar {
 }
 
 .compact-emrg-confirm-no:hover {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 .compact-emrg-action {
@@ -1332,7 +1380,7 @@ body.compact-mode #compact-bar {
 }
 
 .compact-emrg-cancel:hover {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 .compact-btn {
@@ -1352,7 +1400,7 @@ body.compact-mode #compact-bar {
 }
 
 .compact-btn:hover {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 .compact-btn:active {

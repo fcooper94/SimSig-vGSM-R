@@ -37,6 +37,7 @@ module.exports = {
   PHONE_PLACE_CALL_REPLY: 'phone:place-call-reply',
   PHONE_PLACE_CALL_HANGUP: 'phone:place-call-hangup',
   PHONE_HIDE_ANSWER: 'phone:hide-answer',
+  PHONE_FORCE_CLOSE_CALL: 'phone:force-close-call',
   PHONE_DRIVER_HUNG_UP: 'phone:driver-hung-up',
   PHONE_SILENCE_RING: 'phone:silence-ring',
   PHONE_CALL_ANSWERED: 'phone:call-answered',

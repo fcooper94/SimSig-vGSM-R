@@ -25,16 +25,7 @@
 }
 
 #phone-calls-header {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 4px 10px;
-  font-size: 13px;
-  font-weight: bold;
-  color: var(--text);
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
+  display: none;
 }
 
 #phone-calls-count {
@@ -83,9 +74,7 @@
 }
 
 #calls-table thead {
-  background: var(--bg-panel);
-  position: sticky;
-  top: 0;
+  display: none;
 }
 
 #calls-table th {
@@ -148,7 +137,7 @@
 }
 
 #calls-table .call-answer-btn:hover {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 #calls-table .call-answer-btn:active {
@@ -280,7 +269,7 @@
 
 /* ── CHAT MESSAGES ─────────────────────────────────────────── */
 .chat-message {
-  background: #ffffff;
+  background: #f0f0f0;
   border-left: 4px solid var(--success);
   padding: 5px 10px;
   max-width: 90%;
@@ -290,7 +279,7 @@
 
 .chat-greeting {
   border-left-color: #ff8800;
-  background: #fff8f0;
+  background: #f5ede0;
   align-self: flex-end;
 }
 
@@ -316,12 +305,12 @@
   align-self: flex-end;
   border-left: none;
   border-right: 4px solid #0066cc;
-  background: #e8f0fe;
+  background: #dce8f5;
 }
 
 .chat-error {
   border-left-color: var(--error);
-  background: #fff0f0;
+  background: #f5e0e0;
 }
 
 .chat-error .chat-message-text {
@@ -604,7 +593,7 @@
 }
 
 #feed-clear:hover {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 #feed-log {
@@ -939,7 +928,7 @@
 }
 
 .pb-action-btn:hover:not(:disabled) {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 .pb-action-btn:active:not(:disabled) {
@@ -1107,7 +1096,7 @@ body.dark-mode .alert-wait-btn:hover {
 }
 
 body.dark-mode #incoming-notification.in-call {
-  background: #b8860b;
+  background: #e6a817;
 }
 
 body.dark-mode .compact-notification.in-call {
@@ -1120,7 +1109,7 @@ body.dark-mode .compact-notification.in-call {
 }
 
 body.dark-mode #incoming-notification.flashing {
-  animation: flash-notification-dark 0.8s infinite;
+  animation: flash-notification 0.8s infinite;
 }
 
 body.dark-mode .compact-notification.flashing {

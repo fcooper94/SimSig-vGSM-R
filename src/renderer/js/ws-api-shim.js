@@ -248,6 +248,7 @@
       placeCallReply: (replyIndex, headCode, param2, contactName) => invoke('phone:place-call-reply', replyIndex, headCode, param2, contactName),
       placeCallHangup: () => invoke('phone:place-call-hangup'),
       hideAnswerDialog: () => invoke('phone:hide-answer'),
+      forceCloseCall: () => invoke('phone:force-close-call'),
       autoWait: (headcode, signal) => invoke('phone:auto-wait', headcode, signal),
       clearAutoWait: (headcode) => invoke('phone:clear-auto-wait', headcode),
       silenceRing: () => invoke('phone:silence-ring'),

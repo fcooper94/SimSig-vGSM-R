@@ -18,6 +18,7 @@ const READ_PLACE_CALL_SCRIPT = require('path').join(SCRIPTS_DIR, 'read-place-cal
 const REPLY_PLACE_CALL_SCRIPT = require('path').join(SCRIPTS_DIR, 'reply-place-call.ps1');
 const HANGUP_PLACE_CALL_SCRIPT = require('path').join(SCRIPTS_DIR, 'hangup-place-call.ps1');
 const HIDE_ANSWER_SCRIPT = require('path').join(SCRIPTS_DIR, 'hide-answer-dialog.ps1');
+const FORCE_CLOSE_CALL_SCRIPT = require('path').join(SCRIPTS_DIR, 'force-close-call.ps1');
 const DETECT_GATEWAY_SCRIPT = require('path').join(SCRIPTS_DIR, 'detect-gateway-host.ps1');
 
 const globalPtt = require('./global-ptt');
@@ -773,6 +774,24 @@ function registerIpcHandlers() {
     return new Promise((resolve) => {
       execFile('powershell', args, { timeout: 5000 }, (err, stdout, stderr) => {
         if (stderr) console.error('[HideAnswer] stderr:', stderr.trim());
+        if (err) {
+          resolve({ error: err.message });
+          return;
+        }
+        resolve({ success: true });
+      });
+    });
+  });
+
+  // Force-close the active call without clicking "Answer call" (preserves queued calls)
+  registerHandler(channels.PHONE_FORCE_CLOSE_CALL, () => {
+    const args = [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', FORCE_CLOSE_CALL_SCRIPT,
+    ];
+    return new Promise((resolve) => {
+      execFile('powershell', args, { timeout: 5000 }, (err, stdout, stderr) => {
+        if (stderr) console.error('[ForceCloseCall] stderr:', stderr.trim());
         if (err) {
           resolve({ error: err.message });
           return;

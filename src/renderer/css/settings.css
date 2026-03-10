@@ -117,7 +117,7 @@ label input[type="range"] + span {
 }
 
 .rebind-btn:hover {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 .rebind-btn:active {
@@ -153,7 +153,7 @@ label input[type="range"] + span {
   cursor: pointer;
   white-space: nowrap;
 }
-#detect-host-btn:hover { background: #e0dcd4; }
+#detect-host-btn:hover { background: #d0d0d0; }
 #detect-host-btn:active {
   border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
 }
@@ -180,7 +180,7 @@ label input[type="range"] + span {
 }
 
 .modal-actions button:hover {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 .modal-actions button:active {
@@ -369,7 +369,7 @@ label input[type="range"] + span {
 }
 
 #emrg-confirm-no:hover {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 /* Generic confirm modal */
@@ -393,7 +393,7 @@ label input[type="range"] + span {
 }
 
 #confirm-no:hover {
-  background: #e0dcd4;
+  background: #d0d0d0;
 }
 
 /* ── MIC LEVEL METER ──────────────────────────────────────── */
@@ -423,7 +423,7 @@ label input[type="range"] + span {
   font-family: inherit;
 }
 
-.mic-gain-btn:hover { background: #e0dcd4; }
+.mic-gain-btn:hover { background: #d0d0d0; }
 .mic-gain-btn:active { border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark); }
 
 .mic-meter-row {
