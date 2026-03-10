@@ -32,6 +32,16 @@ const PhoneCallsUI = {
         }
       });
     }
+    // Force-close button (top-right X) with confirmation
+    const commsCloseBtn = document.getElementById('comms-close-btn');
+    if (commsCloseBtn) {
+      commsCloseBtn.addEventListener('click', () => {
+        ConnectionUI.showConfirm('Force Close', 'Force close this call? This will end the call in SimSig.', () => {
+          this._callSeq++;
+          this.hangUp();
+        });
+      });
+    }
     this.notificationEl = document.getElementById('incoming-notification');
     this.notificationTrainEl = document.getElementById('notification-train');
     this.notificationAnswerBtn = document.getElementById('notification-answer-btn');
@@ -979,15 +989,24 @@ const PhoneCallsUI = {
     return { type: match[1], location: match[2].replace(/\s*\([^)]*\)\s*$/, '').trim() };
   },
 
+  // Parse "ready to depart" messages — driver resolved difficulties, now ready
+  // "Ok, 2B10 is ready to depart"
+  parseReadyToDepart(msg) {
+    const match = msg.match(/(\w+)\s+is\s+ready\s+to\s+depart/i);
+    if (!match) return null;
+    return { headcode: match[1] };
+  },
+
   // Keyword patterns for matching user speech to SimSig reply options
   // Order matters — more specific patterns first
   REPLY_MATCHERS: [
     // Crew waiting reply
     { pattern: /thank.*update|update.*driver/, fragment: 'crew for' },
-    // Delay call replies
+    // Delay call replies (raw SimSig: "Ok, Driver, the signal will be replaced" / "OK, the signal will not be replaced")
     { pattern: /understood.*delayed|delayed.*understood/, fragment: 'delayed' },
-    { pattern: /yes.*(?:change|aspect|replaced)/, fragment: 'yes' },
-    { pattern: /no.*(?:change|aspect|replaced)/, fragment: 'no' },
+    { pattern: /change.*aspect|expect.*change|aspect|replace|yes/, fragment: 'will be replaced', reject: 'will not be replaced' },
+    { pattern: /thank.*driver|no\s*change|won'?t\s*change/, fragment: 'will not be replaced' },
+    { pattern: /no.*(?:change|aspect|replaced)/, fragment: 'not be replaced' },
     { pattern: /no\s*obstruction|continue\s*normally/, fragment: 'no obstruction' },
     // Unlit signal — pass + examine (must be before generic pass+examine)
     { pattern: /pass.*unlit.*examine|unlit.*examine/, fragment: 'pass unlit signal and examine' },
@@ -1018,6 +1037,7 @@ const PhoneCallsUI = {
     { pattern: /hold.*back|hold.*booked/, fragment: 'hold' },
     { pattern: /take\s*a\s*look|look\s*now|look\s*at\s*it/, fragment: 'ok' },
     { pattern: /\bok\b|thanks|thank\s*you|cheers/, fragment: 'ok' },
+    { pattern: /\bok\b|thanks|thank\s*you|cheers/, fragment: 'will not be replaced' },
   ],
 
   // "danger" and "stop" are interchangeable in SimSig signalling terminology
@@ -1090,6 +1110,11 @@ const PhoneCallsUI = {
       message: 'Signal failure in the Interlocking ST (Selhurst) area fixed.',
       replies: ['Ok, signal failure in the Interlocking ST (Selhurst) area fixed.'],
     },
+    ready_to_depart: {
+      train: '2B10', title: 'Answer call from Driver (2B10)',
+      message: 'Ok, 2B10 is ready to depart',
+      replies: ['Ok, 2B10 is ready to depart'],
+    },
   },
 
   simulateCall(type) {
@@ -1115,7 +1140,10 @@ const PhoneCallsUI = {
           if (matcher.fragment.includes(pair[1])) fragments.push(matcher.fragment.replace(pair[1], pair[0]));
         }
         for (const frag of fragments) {
-          const idx = replies.findIndex((r) => r.toLowerCase().includes(frag));
+          const idx = replies.findIndex((r) => {
+            const rLower = r.toLowerCase();
+            return rLower.includes(frag) && (!matcher.reject || !rLower.includes(matcher.reject));
+          });
           if (idx >= 0) return idx;
         }
       }
@@ -1365,6 +1393,11 @@ const PhoneCallsUI = {
       return raw.replace(/\bat stop\b/gi, 'at danger');
     }
 
+    // Ready to depart reply — driver resolved difficulties
+    if (/ok.*is\s+ready\s+to\s+depart/i.test(raw)) {
+      return `Hello ${hc}, I understand you are now ready to depart. Thanks, Signaller out`;
+    }
+
     // Crew waiting reply
     if (/ok.*crew for.*ready and waiting/i.test(raw)) {
       return 'Thank you for the update driver';
@@ -1604,6 +1637,10 @@ const PhoneCallsUI = {
     if (/permission\s+granted/i.test(lower) || /has\s+permission\s+to\s+enter/i.test(lower)) {
       if (this.isShunterCall) return `Ok, I shall instruct ${hc} that they have permission to enter`;
       return `Permission granted, ${hc} can enter`;
+    }
+    // Ready to depart — driver says goodbye and ends call
+    if (/ready\s+to\s+depart/i.test(lower)) {
+      return `Ready to depart, thanks Signaller. Goodbye`;
     }
     // Simple "Ok Thanks" acknowledgement (ready-at-location etc.)
     if (/ok\s*thanks/i.test(lower)) {
@@ -1971,6 +2008,7 @@ const PhoneCallsUI = {
     this.isThirdPartyCall = false;
     this.isUnlitSignal = false;
     this.isAdverseAspect = false;
+    this.isReadyToDepart = false;
     this.isRouteQuery = false;
     this._routeQueryVia = null;
     this._replyClicked = false;
@@ -2004,7 +2042,8 @@ const PhoneCallsUI = {
   },
 
   async answerCall(index) {
-    if (this.inCall) return; // prevent double-answer race condition
+    // Lock out new calls while comms overlay is open (inCall OR stale overlay)
+    if (this.inCall || (this.commsOverlay && !this.commsOverlay.classList.contains('hidden'))) return;
     this.inCall = true;
     this._hangUpLocked = true; // lock hangup until call flow is ready
     const callId = ++this._callSeq; // unique ID to detect stale async continuations
@@ -2054,6 +2093,7 @@ const PhoneCallsUI = {
       // Call no longer exists — remove it from local list and reset state
       this.inCall = false;
       window.simsigAPI.keys.setInCall(false);
+      this.hideCommsOverlay();
       this.calls = this.calls.filter((c, i) => i !== index);
       this.renderCalls();
       if (this.calls.length > 0) {
@@ -2087,6 +2127,7 @@ const PhoneCallsUI = {
     const crewWaiting = !csd && !readyAt && !earlyRun && !sigAdvisory && !delay ? this.parseCrewWaitingMessage(driverMsg) : null;
     const fixedReport = this.parseFixedReport(driverMsg);
     const routeQuery = this.parseRouteQueryMessage(driverMsg);
+    const readyToDepart = this.parseReadyToDepart(driverMsg);
 
     // Start background noise for the duration of the call
     // Signaller → office ambience, shunter/CSD/yard → yard noise, train → cab noise
@@ -2204,11 +2245,13 @@ const PhoneCallsUI = {
       this.isUnlitSignal = true;
       displayMsg = `${this.currentHeadCode} waiting at unlit signal ${this.currentSignalId}`;
       spokenMsg = `Hello Signaller, this is driver of ${this.currentHeadCode}. I have come to a stop at signal ${this.currentSignalId} as it is showing no aspect`;
-    } else if (this.currentSignalId) {
-      // Red signal / waiting at signal scenario
-      displayMsg = `${this.currentHeadCode} waiting at red signal ${this.currentSignalId}`;
-      spokenMsg = `Hello Signaller, this is driver of ${this.currentHeadCode}. I am at signal ${this.currentSignalId} displaying red`;
+    } else if (readyToDepart) {
+      // Driver resolved difficulties and is now ready to depart
+      this.isReadyToDepart = true;
+      spokenMsg = `Hello Signaller, this is driver of ${readyToDepart.headcode}. The issue has been resolved and we are now ready to depart`;
+      displayMsg = spokenMsg;
     } else if (driverMsg) {
+      // No specific pattern matched — show raw SimSig message
       displayMsg = driverMsg;
       spokenMsg = `Hello, ${panelName} Signaller${position ? ', ' + position : ''}, this is ${driverMsg}`;
     } else {
@@ -3134,12 +3177,18 @@ const PhoneCallsUI = {
       const isAlreadyReported = typeof AlertsFeed !== 'undefined' &&
         AlertsFeed._activeFailures[selectedIdx] && AlertsFeed._activeFailures[selectedIdx].reported;
 
+      // Check if we've already reported other failures this session
+      const prevReportedCount = typeof AlertsFeed !== 'undefined' && AlertsFeed._reportedFailures
+        ? AlertsFeed._reportedFailures.size : 0;
+      const badDayPrefix = (!isAlreadyReported && prevReportedCount > 0)
+        ? `Hi ${panelName}, it really isn't your day today! ` : '';
+
       let response;
       if (isAlreadyReported) {
         response = `Hi ${panelName}. Yes, we are already aware of that issue. No update yet. The MOM will call you as soon as they have an update.`;
       } else {
         const ack = 'a ' + this._formatFailureForSpeech(selectedFailure);
-        response = `Hi ${panelName}. Understood you are showing ${ack}. We will arrange some S&T guys to investigate. Also, we are going to send a MOM down incase a line block is required. They will call you with an update.`;
+        response = `${badDayPrefix || `Hi ${panelName}. `}Understood you are showing ${ack}. We will arrange some S&T guys to investigate. Also, we are going to send a MOM down incase a line block is required. They will call you with an update.`;
       }
 
       // Mark only the selected failure as reported

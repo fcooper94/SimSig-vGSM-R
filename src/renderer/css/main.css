@@ -709,6 +709,20 @@ body {
   opacity: 1;
 }
 
+#comms-close-btn {
+  font-size: 18px;
+  cursor: pointer;
+  opacity: 0.5;
+  user-select: none;
+  margin-left: 8px;
+  line-height: 1;
+}
+
+#comms-close-btn:hover {
+  opacity: 1;
+  color: #c00;
+}
+
 #comms-zoom-popup {
   position: absolute;
   top: 100%;
