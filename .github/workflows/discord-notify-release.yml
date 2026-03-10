@@ -8,7 +8,28 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
-      - name: Post release to Discord
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changelog from commit
+        id: changelog
+        run: |
+          # Get the commit message for the tag (skip first line which is "Release vX.X.X")
+          TAG="${{ github.event.release.tag_name }}"
+          CHANGES="$(git log --format=%B -n 1 "$TAG" | tail -n +2 | sed '/^$/d' | sed '/^Co-Authored-By:/d')"
+          if [ -z "$CHANGES" ]; then
+            # Fallback: get previous tag and diff
+            PREV_TAG="$(git tag --sort=-v:refname | grep -v "^${TAG}$" | head -1)"
+            if [ -n "$PREV_TAG" ]; then
+              CHANGES="$(git log --format='%s' "${PREV_TAG}..${TAG}^" | head -20)"
+            fi
+          fi
+          # Write to file to preserve newlines
+          printf "%s" "$CHANGES" > /tmp/changes.txt
+
+      - name: Post release to Discord (channel 1)
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL_RELEASES }}
           REPO: ${{ github.repository }}
@@ -18,22 +39,23 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           if [ -z "$DISCORD_WEBHOOK_URL" ]; then
-            echo "Missing DISCORD_WEBHOOK_URL_RELEASES secret"
-            exit 1
+            echo "Missing DISCORD_WEBHOOK_URL_RELEASES secret — skipping"
+            exit 0
           fi
 
-          # Map GitHub usernames to display names
           case "$ACTOR" in
             fcooper94) AUTHOR="Fraser Cooper" ;;
             *) AUTHOR="$ACTOR" ;;
           esac
 
           TITLE="${RELEASE_NAME:-${TAG}}"
+          CHANGES="$(cat /tmp/changes.txt)"
 
-          # Escape quotes/newlines for JSON
+          # Escape for JSON
           ESC_TITLE="$(printf "%s" "$TITLE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read())[1:-1])')"
+          ESC_CHANGES="$(printf "%s" "$CHANGES" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read())[1:-1])')"
 
-          cat > payload.json <<EOF
+          cat > payload.json <<EOFPAYLOAD
           {
             "username": "vGSM-R Control",
             "content": "@everyone",
@@ -41,6 +63,7 @@ jobs:
               {
                 "title": "New Release: ${ESC_TITLE}",
                 "url": "${RELEASE_URL}",
+                "description": "${ESC_CHANGES}",
                 "fields": [
                   { "name": "Version", "value": "${TAG}", "inline": true },
                   { "name": "Published by", "value": "${AUTHOR}", "inline": true }
@@ -48,7 +71,54 @@ jobs:
               }
             ]
           }
-          EOF
+          EOFPAYLOAD
+
+          curl -sS -H "Content-Type: application/json" \
+            -d @payload.json \
+            "$DISCORD_WEBHOOK_URL"
+
+      - name: Post release to Discord (channel 2)
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL_RELEASES_2 }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "Missing DISCORD_WEBHOOK_URL_RELEASES_2 secret — skipping"
+            exit 0
+          fi
+
+          case "$ACTOR" in
+            fcooper94) AUTHOR="Fraser Cooper" ;;
+            *) AUTHOR="$ACTOR" ;;
+          esac
+
+          TITLE="${RELEASE_NAME:-${TAG}}"
+          CHANGES="$(cat /tmp/changes.txt)"
+
+          ESC_TITLE="$(printf "%s" "$TITLE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read())[1:-1])')"
+          ESC_CHANGES="$(printf "%s" "$CHANGES" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read())[1:-1])')"
+
+          cat > payload.json <<EOFPAYLOAD
+          {
+            "username": "vGSM-R Control",
+            "content": "@everyone",
+            "embeds": [
+              {
+                "title": "New Release: ${ESC_TITLE}",
+                "url": "${RELEASE_URL}",
+                "description": "${ESC_CHANGES}",
+                "fields": [
+                  { "name": "Version", "value": "${TAG}", "inline": true },
+                  { "name": "Published by", "value": "${AUTHOR}", "inline": true }
+                ]
+              }
+            ]
+          }
+          EOFPAYLOAD
 
           curl -sS -H "Content-Type: application/json" \
             -d @payload.json \
