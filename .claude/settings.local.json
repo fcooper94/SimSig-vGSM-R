@@ -77,8 +77,11 @@
       "Bash(findstr LISTENING)",
       "Bash(findstr -v \"127.0.0.1\\\\|::1\")",
       "Bash(git add src/main/detect-gateway-host.ps1 src/main/ipc-handlers.js src/main/main.js src/main/phone-reader.js src/main/read-phone-calls.ps1 src/preload/preload.js src/renderer/css/main.css src/renderer/css/settings.css src/renderer/index.html src/renderer/js/ui-connection.js src/renderer/js/ui-settings.js src/shared/ipc-channels.js package.json src/main/restore-log.txt)",
-      "Bash(gh secret set DISCORD_WEBHOOK_URL_RELEASES_2 --body \"https://discord.com/api/webhooks/1480718328891834472/O6bAEeRZyul54FgS4XAlta4zLkHI4iQ_iEbLUyRW_yM_sAdWi2kXHHp9GFOrYPQjbVTT\" --repo fcooper94/SimSig-vGSM-R)",
-      "Bash(git add .github/workflows/discord-notify-release.yml)"
+      "Bash(gh secret set:*)",
+      "Bash(git add .github/workflows/discord-notify-release.yml)",
+      "Bash(grep -n \"answer-phone-call\\\\|TAnswerCallForm\" \"c:/dev/SimSig-vGSM-R/src/main\"/*.ps1)",
+      "Bash(pip show git-filter-repo)",
+      "Bash(git add .claude/settings.local.json)"
     ]
   }
 }
