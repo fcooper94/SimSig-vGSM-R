@@ -76,7 +76,9 @@
       "Bash(powershell -NoProfile -Command \"Get-Process -Id 1632 | Select-Object Name,Id,Path | Format-List\")",
       "Bash(findstr LISTENING)",
       "Bash(findstr -v \"127.0.0.1\\\\|::1\")",
-      "Bash(git add src/main/detect-gateway-host.ps1 src/main/ipc-handlers.js src/main/main.js src/main/phone-reader.js src/main/read-phone-calls.ps1 src/preload/preload.js src/renderer/css/main.css src/renderer/css/settings.css src/renderer/index.html src/renderer/js/ui-connection.js src/renderer/js/ui-settings.js src/shared/ipc-channels.js package.json src/main/restore-log.txt)"
+      "Bash(git add src/main/detect-gateway-host.ps1 src/main/ipc-handlers.js src/main/main.js src/main/phone-reader.js src/main/read-phone-calls.ps1 src/preload/preload.js src/renderer/css/main.css src/renderer/css/settings.css src/renderer/index.html src/renderer/js/ui-connection.js src/renderer/js/ui-settings.js src/shared/ipc-channels.js package.json src/main/restore-log.txt)",
+      "Bash(gh secret set DISCORD_WEBHOOK_URL_RELEASES_2 --body \"***REDACTED***\" --repo fcooper94/SimSig-vGSM-R)",
+      "Bash(git add .github/workflows/discord-notify-release.yml)"
     ]
   }
 }
