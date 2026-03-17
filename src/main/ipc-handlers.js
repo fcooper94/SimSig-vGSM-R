@@ -42,6 +42,10 @@ let lastSimName = null;
 let lastInitReady = false;
 let lastChatState = null;
 
+// Rolling buffer of recent message log lines for WAIT cross-check
+const recentLogBuffer = []; // { text: string, ts: number (Date.now()) }
+const RECENT_LOG_BUFFER_MAX = 300;
+
 // Auto-wait state — managed in main process so interception happens at the source
 const pendingAutoWaits = new Map(); // headcode (uppercase) → signal string
 const suppressedAutoWaits = new Set(); // headcodes currently being auto-answered
@@ -438,6 +442,14 @@ function registerIpcHandlers() {
         (lines) => {
           parseWorkstationLines(lines);
           sendToMainWindow(channels.MESSAGE_LOG_LINES, lines);
+          // Buffer for WAIT cross-check
+          const ts = Date.now();
+          for (const line of lines) {
+            if (line.trim()) recentLogBuffer.push({ text: line.trim(), ts });
+          }
+          if (recentLogBuffer.length > RECENT_LOG_BUFFER_MAX) {
+            recentLogBuffer.splice(0, recentLogBuffer.length - RECENT_LOG_BUFFER_MAX);
+          }
         },
       );
       // Keep our window above SimSig without being always-on-top globally
@@ -671,6 +683,19 @@ function registerIpcHandlers() {
     suppressedAutoWaits.delete(hc);
     console.log(`[AutoWait] Cleared for ${hc} — train moved to new signal`);
     return { ok: true };
+  });
+
+  // Return recent log lines for a headcode received after a given wall-clock timestamp.
+  // Used by the renderer to cross-check if a train has moved since the red signal alert.
+  registerHandler(channels.PHONE_GET_RECENT_LOG, (_event, headcode, sinceTs) => {
+    const hc = (headcode || '').toUpperCase();
+    const since = sinceTs || 0;
+    // Match any line containing the headcode as a word (catches STEP, LOCATION, direct entries)
+    const hcPattern = new RegExp(`\\b${hc}\\b`, 'i');
+    const lines = recentLogBuffer
+      .filter((e) => e.ts > since && hcPattern.test(e.text))
+      .map((e) => e.text);
+    return { lines };
   });
 
   // Phone Book — read contacts

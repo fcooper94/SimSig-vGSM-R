@@ -251,6 +251,7 @@
       forceCloseCall: () => invoke('phone:force-close-call'),
       autoWait: (headcode, signal) => invoke('phone:auto-wait', headcode, signal),
       clearAutoWait: (headcode) => invoke('phone:clear-auto-wait', headcode),
+      getRecentLog: async () => ({ lines: [] }),
       silenceRing: () => invoke('phone:silence-ring'),
       onSilenceRing: (cb) => on('phone:silence-ring', cb),
       notifyCallAnswered: (train) => invoke('phone:call-answered', train),

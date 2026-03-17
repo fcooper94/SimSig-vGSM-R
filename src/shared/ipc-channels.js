@@ -43,6 +43,7 @@ module.exports = {
   PHONE_CALL_ANSWERED: 'phone:call-answered',
   PHONE_AUTO_WAIT: 'phone:auto-wait',
   PHONE_CLEAR_AUTO_WAIT: 'phone:clear-auto-wait',
+  PHONE_GET_RECENT_LOG: 'phone:get-recent-log',
 
   // TTS
   TTS_GET_VOICES: 'tts:get-voices',

@@ -145,14 +145,14 @@ const AlertsFeed = {
         continue;
       }
 
-      const hcMatch = text.match(/^([0-9][A-Za-z]\d{2})\s/);
-      if (hcMatch) {
-        const hc = hcMatch[1].toUpperCase();
-        const entry = this._activeRedSignals.get(hc);
+      // Detect movement: headcode at start of line, or in a STEP/LOCATION entry
+      const moveHc = this._extractMovementHeadcode(text);
+      if (moveHc) {
+        const entry = this._activeRedSignals.get(moveHc);
         // Only remove un-waited trains; waited trains persist until manually removed
         if (entry && !entry.waited) {
-          if (this._selectedHc === hc) this._selectedHc = null;
-          this._activeRedSignals.delete(hc);
+          if (this._selectedHc === moveHc) this._selectedHc = null;
+          this._activeRedSignals.delete(moveHc);
           changed = true;
         }
       }
@@ -217,12 +217,33 @@ const AlertsFeed = {
     }
   },
 
-  _handleWait(headcode, signal) {
+  async _handleWait(headcode, signal) {
+    // Cross-check the message log: warn if the train has moved since the alert was raised
+    const entry = this._activeRedSignals.get(headcode);
+    if (entry && window.simsigAPI && window.simsigAPI.phone.getRecentLog) {
+      try {
+        const result = await window.simsigAPI.phone.getRecentLog(headcode, entry.addedAt);
+        const movementLines = (result.lines || []).filter((line) => {
+          const tsMatch = line.match(/^\d{1,2}:\d{2}(?::\d{2})?\s+(.+)$/);
+          const body = tsMatch ? tsMatch[1] : line;
+          if (/waiting at red signal/i.test(body)) return false;
+          return this._extractMovementHeadcode(body) === headcode;
+        });
+        if (movementLines.length > 0) {
+          const preview = movementLines[movementLines.length - 1];
+          // eslint-disable-next-line no-alert
+          const proceed = confirm(`${headcode} may have already moved:\n"${preview}"\n\nStill send WAIT?`);
+          if (!proceed) return;
+        }
+      } catch (e) {
+        console.warn('[AlertsFeed] getRecentLog failed:', e);
+      }
+    }
+
     const key = headcode + '|' + signal;
     const alreadySent = this._waitedPairs.has(key);
     this._waitedPairs.add(key);
 
-    const entry = this._activeRedSignals.get(headcode);
     if (entry) {
       entry.waited = true;
       entry.waitedAt = Date.now();
@@ -560,6 +581,19 @@ const AlertsFeed = {
         }
       } catch (e) { /* ignore */ }
     }
+  },
+
+  // Extract headcode if a log line body represents train movement.
+  // Handles: "2C09 something", "STEP 2C09 : 246 -> 250", "LOCATION 2C09 at S246"
+  _extractMovementHeadcode(text) {
+    const HC = /[0-9][A-Za-z]\d{2}/;
+    // Direct: headcode at start
+    let m = text.match(new RegExp(`^(${HC.source})\\s`));
+    if (m) return m[1].toUpperCase();
+    // STEP or LOCATION prefix
+    m = text.match(new RegExp(`^(?:STEP|LOCATION)\\s+(${HC.source})\\b`, 'i'));
+    if (m) return m[1].toUpperCase();
+    return null;
   },
 
   _esc(s) {
