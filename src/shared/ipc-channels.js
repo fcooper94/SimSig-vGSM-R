@@ -84,4 +84,18 @@ module.exports = {
 
   // Setup wizard
   SETUP_COMPLETE: 'setup:complete',
+
+  // Player-to-player calls
+  PLAYER_PEERS_UPDATE: 'player:peers-update',
+  PLAYER_DIAL: 'player:dial',
+  PLAYER_ANSWER: 'player:answer',
+  PLAYER_REJECT: 'player:reject',
+  PLAYER_HANGUP: 'player:hangup',
+  PLAYER_CANCEL_DIAL: 'player:cancel-dial',
+  PLAYER_INCOMING_CALL: 'player:incoming-call',
+  PLAYER_CALL_ANSWERED: 'player:call-answered',
+  PLAYER_CALL_ENDED: 'player:call-ended',
+  PLAYER_SEND_AUDIO: 'player:send-audio',
+  PLAYER_AUDIO_RECEIVED: 'player:audio-received',
+  PLAYER_CALL_REJECTED: 'player:call-rejected',
 };

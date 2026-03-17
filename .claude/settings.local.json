@@ -81,7 +81,16 @@
       "Bash(git add .github/workflows/discord-notify-release.yml)",
       "Bash(grep -n \"answer-phone-call\\\\|TAnswerCallForm\" \"c:/dev/SimSig-vGSM-R/src/main\"/*.ps1)",
       "Bash(pip show git-filter-repo)",
-      "Bash(git add .claude/settings.local.json)"
+      "Bash(git add .claude/settings.local.json)",
+      "Bash(grep -i \"comment\\\\|//\")",
+      "Bash(node -c src/main/peer-discovery.js)",
+      "Bash(node -c src/main/player-call-server.js)",
+      "Bash(node -c src/main/ipc-handlers.js)",
+      "Bash(node -c src/shared/ipc-channels.js)",
+      "Bash(node -c src/preload/preload.js)",
+      "Bash(node -c src/renderer/js/app.js)",
+      "Bash(node -c src/renderer/js/ui-phone-calls.js)",
+      "Bash(node -c src/renderer/js/ws-api-shim.js)"
     ]
   }
 }

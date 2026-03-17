@@ -296,6 +296,21 @@
       },
     },
 
+    player: {
+      onPeersUpdate: (cb) => on('player:peers-update', cb),
+      dial: () => Promise.resolve({ error: 'Not available in browser mode' }),
+      answer: () => Promise.resolve(),
+      reject: () => Promise.resolve(),
+      hangUp: () => Promise.resolve(),
+      cancelDial: () => Promise.resolve(),
+      sendAudio: () => Promise.resolve(),
+      onIncomingCall: (cb) => on('player:incoming-call', cb),
+      onCallAnswered: (cb) => on('player:call-answered', cb),
+      onCallEnded: (cb) => on('player:call-ended', cb),
+      onAudioReceived: (cb) => on('player:audio-received', cb),
+      onCallRejected: (cb) => on('player:call-rejected', cb),
+    },
+
     // No web server control from browser clients
   };
 

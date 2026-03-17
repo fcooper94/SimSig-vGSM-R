@@ -27,7 +27,7 @@ const PhoneCallsUI = {
     // Click on backdrop (outside panel) closes comms if not in an active call
     if (this.commsOverlay) {
       this.commsOverlay.addEventListener('click', (e) => {
-        if (e.target === this.commsOverlay && !this.inCall && !this._outgoingCall && !this._dialingActive) {
+        if (e.target === this.commsOverlay && !this.inCall && !this._outgoingCall && !this._dialingActive && !this._playerCall) {
           this.hideCommsOverlay();
         }
       });
@@ -285,6 +285,11 @@ const PhoneCallsUI = {
     window.simsigAPI.keys.onAnswerCall(() => {
       if (typeof SettingsUI !== 'undefined' && SettingsUI.isListeningForKeybind) return;
       if (typeof SettingsUI !== 'undefined' && !SettingsUI.modal.classList.contains('hidden')) return;
+      // Answer incoming player call
+      if (this._playerAnswerHandler && !this.inCall && !this._outgoingCall && !this._playerCall) {
+        this._playerAnswerHandler();
+        return;
+      }
       if (!this.inCall && !this._outgoingCall && this.calls.length > 0 && !this._dialingActive) {
         this.answerCall(this.calls.length - 1);
       }
@@ -294,6 +299,17 @@ const PhoneCallsUI = {
     window.simsigAPI.keys.onHangUp(() => {
       if (typeof SettingsUI !== 'undefined' && SettingsUI.isListeningForKeybind) return;
       if (typeof SettingsUI !== 'undefined' && !SettingsUI.modal.classList.contains('hidden')) return;
+      // Hang up player call
+      if (this._playerCall) {
+        this.hangUpPlayerCall();
+        return;
+      }
+      if (this._playerDialing) {
+        window.simsigAPI.player.cancelDial();
+        this._playerDialing = false;
+        this.stopDialing();
+        return;
+      }
       if (this._dialingActive) {
         this.stopDialing();
         window.simsigAPI.phone.placeCallHangup();
@@ -3386,6 +3402,17 @@ const PhoneCallsUI = {
     this._outgoingReplies = null;
     this._dialingActive = false;
 
+    // Clear player call state
+    if (this._playerCall || this._playerDialing) {
+      this._stopPlayerRecording();
+      if (this._playerPttListener) { this._playerPttListener(); this._playerPttListener = null; }
+      if (this._playerAudioCtx) { this._playerAudioCtx.close().catch(() => {}); this._playerAudioCtx = null; }
+    }
+    this._playerCall = false;
+    this._playerDialing = false;
+    this._playerCallPanel = '';
+    this._playerAnswerHandler = null;
+
     // Remove delegated click handlers
     if (this._replyDelegateHandler) {
       this.chatEl.removeEventListener('click', this._replyDelegateHandler);
@@ -3649,5 +3676,323 @@ const PhoneCallsUI = {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  },
+
+  // ── Player-to-Player Calls ──────────────────────────────────────────
+
+  _playerCall: false,        // true when in a player call
+  _playerCallPanel: '',      // peer's panel name
+  _playerDialing: false,     // true while dialing a player
+  _playerAudioCtx: null,     // AudioContext for playback
+  _playerRecording: false,   // true while PTT is held during a player call
+  _playerRecordStream: null,
+  _playerRecordProcessor: null,
+  _playerRecordSource: null,
+
+  // Called when user dials a player from the Global phonebook
+  async dialPlayer(peer) {
+    if (this._playerCall || this._playerDialing || this.inCall || this._outgoingCall) return;
+    this._playerDialing = true;
+    this._playerCallPanel = peer.panel;
+
+    // Show dialing notification (reuses existing UI)
+    this.showDialingNotification(peer.panel);
+
+    // Set up notification answer button as cancel
+    const cancelHandler = () => {
+      if (this._playerDialing) {
+        window.simsigAPI.player.cancelDial();
+        this._playerDialing = false;
+        this.stopDialing();
+      }
+    };
+    if (this.notificationAnswerBtn) {
+      this.notificationAnswerBtn.onclick = cancelHandler;
+    }
+
+    // Actually dial via main process
+    const result = await window.simsigAPI.player.dial(peer.id, peer.host, peer.port);
+    if (this.notificationAnswerBtn) this.notificationAnswerBtn.onclick = null;
+
+    if (!this._playerDialing) return; // cancelled
+    this._playerDialing = false;
+
+    if (result.error) {
+      this.stopDialing();
+      // Show brief error
+      this.messages = [{ type: 'system', text: result.error }];
+      this.showCommsOverlay();
+      this.renderChat();
+      setTimeout(() => {
+        if (!this._playerCall) this.hideCommsOverlay();
+        this.messages = [];
+        this.renderChat();
+      }, 3000);
+      return;
+    }
+
+    // Call connected
+    this._startPlayerCall(peer.panel);
+  },
+
+  // Called when we receive an incoming player call
+  handleIncomingPlayerCall(peerPanel) {
+    if (this.inCall || this._outgoingCall || this._playerCall || this._playerDialing || this._dialingActive) {
+      // Busy — auto-reject happens in main process
+      return;
+    }
+    this._playerCallPanel = peerPanel;
+
+    // Show incoming call notification
+    this.stopRinging();
+    if (this.notificationEl) {
+      this.notificationEl.classList.remove('in-call');
+      this.notificationEl.classList.add('flashing');
+      const readyText = this.notificationEl.querySelector('#notification-ready-text');
+      if (readyText) readyText.style.display = 'none';
+      this._setTrainText(peerPanel);
+      if (this.notificationAnswerBtn) {
+        this.notificationAnswerBtn.textContent = '[Answer]';
+        this.notificationAnswerBtn.style.display = 'block';
+      }
+      const icon = this.notificationEl.querySelector('#notification-icon');
+      if (icon) icon.style.display = 'block';
+    }
+
+    // Start ringing sound
+    this.startRinging();
+
+    // Answer button handler
+    const answerHandler = () => {
+      this.stopRinging();
+      window.simsigAPI.player.answer();
+      this._startPlayerCall(peerPanel);
+    };
+
+    if (this.notificationAnswerBtn) {
+      this.notificationAnswerBtn.onclick = answerHandler;
+    }
+
+    // Also wire up the keybind answer
+    this._playerAnswerHandler = answerHandler;
+
+    // Set up reject on silence btn or after timeout
+    // (auto-reject handled in main process after 30s)
+  },
+
+  handlePlayerCallAnswered() {
+    // Outgoing call was accepted — _startPlayerCall already called from dialPlayer
+  },
+
+  handlePlayerCallEnded() {
+    this._endPlayerCall('Peer hung up');
+  },
+
+  handlePlayerCallRejected(reason) {
+    this._playerDialing = false;
+    this.stopDialing();
+    this.messages = [{ type: 'system', text: reason || 'Call rejected' }];
+    this.showCommsOverlay();
+    this.renderChat();
+    setTimeout(() => {
+      if (!this._playerCall) this.hideCommsOverlay();
+      this.messages = [];
+      this.renderChat();
+    }, 3000);
+  },
+
+  handlePlayerAudioReceived(pcmArray) {
+    if (!this._playerCall) return;
+    this._playPlayerAudio(new Float32Array(pcmArray));
+  },
+
+  _startPlayerCall(peerPanel) {
+    this._playerCall = true;
+    this._playerCallPanel = peerPanel;
+    window.simsigAPI.keys.setInCall(true);
+
+    // Update notification to "in call"
+    this.stopRinging();
+    if (this.notificationEl) {
+      this.notificationEl.classList.remove('flashing');
+      this.notificationEl.classList.add('in-call');
+      this._setTrainText(peerPanel);
+      if (this.notificationAnswerBtn) {
+        this.notificationAnswerBtn.textContent = '[Hang Up]';
+        this.notificationAnswerBtn.style.display = 'block';
+        this.notificationAnswerBtn.onclick = () => this.hangUpPlayerCall();
+      }
+    }
+
+    // Update radio display
+    const radioDisplay = document.getElementById('radio-display');
+    const line1 = document.getElementById('display-line-1');
+    const line2 = document.getElementById('display-line-2');
+    if (radioDisplay) radioDisplay.classList.add('in-call');
+    if (line1) line1.textContent = 'Player Call';
+    if (line2) line2.textContent = peerPanel;
+
+    // Show comms overlay with connected message
+    this.messages = [
+      { type: 'system', text: `Connected to ${peerPanel}` },
+      { type: 'system', text: 'Hold PTT to speak' },
+    ];
+    this.showCommsOverlay();
+    this.renderChat();
+
+    // Start background noise (radio static)
+    this.bgCallerType = 'signaller';
+    this.startBgNoise();
+
+    // Set up PTT audio streaming
+    this._setupPlayerPTT();
+  },
+
+  _setupPlayerPTT() {
+    // Listen for PTT state changes to start/stop audio capture + streaming
+    this._playerPttListener = window.simsigAPI.ptt.onStateChange((active) => {
+      if (!this._playerCall) return;
+      if (active) {
+        this._startPlayerRecording();
+      } else {
+        this._stopPlayerRecording();
+      }
+    });
+  },
+
+  async _startPlayerRecording() {
+    if (this._playerRecording) return;
+    this._playerRecording = true;
+
+    // Add visual indicator
+    this.messages.push({ type: 'system', text: 'Transmitting...' });
+    this.renderChat();
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1, sampleRate: 16000 },
+      });
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+      processor.onaudioprocess = (event) => {
+        if (!this._playerRecording || !this._playerCall) return;
+        const data = event.inputBuffer.getChannelData(0);
+        // Send audio to peer via main process
+        window.simsigAPI.player.sendAudio(Array.from(data));
+      };
+
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+
+      this._playerRecordStream = stream;
+      this._playerRecordSource = source;
+      this._playerRecordProcessor = processor;
+      this._playerRecordCtx = audioContext;
+    } catch (err) {
+      console.error('[PlayerCall] Mic error:', err);
+      this._playerRecording = false;
+    }
+  },
+
+  _stopPlayerRecording() {
+    if (!this._playerRecording) return;
+    this._playerRecording = false;
+
+    // Remove "Transmitting..." message
+    this.messages = this.messages.filter(m => !(m.type === 'system' && m.text === 'Transmitting...'));
+    this.renderChat();
+
+    if (this._playerRecordProcessor) {
+      this._playerRecordProcessor.disconnect();
+      this._playerRecordProcessor = null;
+    }
+    if (this._playerRecordSource) {
+      this._playerRecordSource.disconnect();
+      this._playerRecordSource = null;
+    }
+    if (this._playerRecordStream) {
+      this._playerRecordStream.getTracks().forEach(t => t.stop());
+      this._playerRecordStream = null;
+    }
+    if (this._playerRecordCtx) {
+      this._playerRecordCtx.close().catch(() => {});
+      this._playerRecordCtx = null;
+    }
+  },
+
+  _playPlayerAudio(pcmFloat32) {
+    try {
+      if (!this._playerAudioCtx) {
+        this._playerAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      }
+      const ctx = this._playerAudioCtx;
+      const buffer = ctx.createBuffer(1, pcmFloat32.length, 16000);
+      buffer.getChannelData(0).set(pcmFloat32);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      // Queue playback at the end of the current audio to avoid overlaps
+      const startTime = Math.max(ctx.currentTime, this._playerPlaybackTime || ctx.currentTime);
+      source.start(startTime);
+      this._playerPlaybackTime = startTime + buffer.duration;
+    } catch (err) {
+      console.error('[PlayerCall] Audio playback error:', err);
+    }
+  },
+
+  hangUpPlayerCall() {
+    window.simsigAPI.player.hangUp();
+    this._endPlayerCall('Call ended');
+  },
+
+  _endPlayerCall(reason) {
+    if (!this._playerCall && !this._playerDialing) return;
+    this._stopPlayerRecording();
+    this.stopBgNoise();
+    this.stopRinging();
+
+    this._playerCall = false;
+    this._playerDialing = false;
+    window.simsigAPI.keys.setInCall(false);
+
+    // Clean up PTT listener
+    if (this._playerPttListener) {
+      this._playerPttListener();
+      this._playerPttListener = null;
+    }
+    if (this._playerAnswerHandler) {
+      this._playerAnswerHandler = null;
+    }
+
+    // Close audio context
+    if (this._playerAudioCtx) {
+      this._playerAudioCtx.close().catch(() => {});
+      this._playerAudioCtx = null;
+      this._playerPlaybackTime = 0;
+    }
+
+    // Brief end message
+    this.messages = [{ type: 'system', text: reason || 'Call ended' }];
+    this.renderChat();
+    this.hideNotification();
+
+    // Reset radio display
+    const radioDisplay = document.getElementById('radio-display');
+    const line1 = document.getElementById('display-line-1');
+    const line2 = document.getElementById('display-line-2');
+    if (radioDisplay) radioDisplay.classList.remove('in-call');
+    if (line1) line1.textContent = 'GSM-R';
+    if (line2) line2.textContent = 'Ready';
+
+    setTimeout(() => {
+      if (!this._playerCall && !this.inCall && !this._outgoingCall) {
+        this.hideCommsOverlay();
+        this.messages = [];
+        this.renderChat();
+      }
+      this._resumeIncoming();
+    }, 2000);
   },
 };

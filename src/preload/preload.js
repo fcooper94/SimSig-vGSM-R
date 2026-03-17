@@ -57,6 +57,18 @@ const channels = {
   MESSAGE_LOG_LINES: 'sim:message-log-lines',
   DETECT_GATEWAY_HOST: 'settings:detect-gateway-host',
   SIM_IS_RUNNING: 'sim:is-running',
+  PLAYER_PEERS_UPDATE: 'player:peers-update',
+  PLAYER_DIAL: 'player:dial',
+  PLAYER_ANSWER: 'player:answer',
+  PLAYER_REJECT: 'player:reject',
+  PLAYER_HANGUP: 'player:hangup',
+  PLAYER_CANCEL_DIAL: 'player:cancel-dial',
+  PLAYER_INCOMING_CALL: 'player:incoming-call',
+  PLAYER_CALL_ANSWERED: 'player:call-answered',
+  PLAYER_CALL_ENDED: 'player:call-ended',
+  PLAYER_SEND_AUDIO: 'player:send-audio',
+  PLAYER_AUDIO_RECEIVED: 'player:audio-received',
+  PLAYER_CALL_REJECTED: 'player:call-rejected',
 };
 
 contextBridge.exposeInMainWorld('simsigAPI', {
@@ -226,6 +238,45 @@ contextBridge.exposeInMainWorld('simsigAPI', {
   web: {
     start: (port) => ipcRenderer.invoke(channels.WEB_START, port),
     stop: () => ipcRenderer.invoke(channels.WEB_STOP),
+  },
+
+  player: {
+    onPeersUpdate: (callback) => {
+      const listener = (_event, peers) => callback(peers);
+      ipcRenderer.on(channels.PLAYER_PEERS_UPDATE, listener);
+      return () => ipcRenderer.removeListener(channels.PLAYER_PEERS_UPDATE, listener);
+    },
+    dial: (peerId, host, port) => ipcRenderer.invoke(channels.PLAYER_DIAL, peerId, host, port),
+    answer: () => ipcRenderer.invoke(channels.PLAYER_ANSWER),
+    reject: (reason) => ipcRenderer.invoke(channels.PLAYER_REJECT, reason),
+    hangUp: () => ipcRenderer.invoke(channels.PLAYER_HANGUP),
+    cancelDial: () => ipcRenderer.invoke(channels.PLAYER_CANCEL_DIAL),
+    sendAudio: (pcmData) => ipcRenderer.invoke(channels.PLAYER_SEND_AUDIO, pcmData),
+    onIncomingCall: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on(channels.PLAYER_INCOMING_CALL, listener);
+      return () => ipcRenderer.removeListener(channels.PLAYER_INCOMING_CALL, listener);
+    },
+    onCallAnswered: (callback) => {
+      const listener = () => callback();
+      ipcRenderer.on(channels.PLAYER_CALL_ANSWERED, listener);
+      return () => ipcRenderer.removeListener(channels.PLAYER_CALL_ANSWERED, listener);
+    },
+    onCallEnded: (callback) => {
+      const listener = () => callback();
+      ipcRenderer.on(channels.PLAYER_CALL_ENDED, listener);
+      return () => ipcRenderer.removeListener(channels.PLAYER_CALL_ENDED, listener);
+    },
+    onAudioReceived: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on(channels.PLAYER_AUDIO_RECEIVED, listener);
+      return () => ipcRenderer.removeListener(channels.PLAYER_AUDIO_RECEIVED, listener);
+    },
+    onCallRejected: (callback) => {
+      const listener = (_event, reason) => callback(reason);
+      ipcRenderer.on(channels.PLAYER_CALL_REJECTED, listener);
+      return () => ipcRenderer.removeListener(channels.PLAYER_CALL_REJECTED, listener);
+    },
   },
 
   app: {

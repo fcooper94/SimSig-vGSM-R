@@ -44,6 +44,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('paused-overlay').classList.add('hidden');
       // Clear phonebook cache and hide overlay
       phonebookContacts = [];
+      _globalPeers = [];
       phonebookList.innerHTML = '';
       phonebookStatus.textContent = '';
       phonebookOverlay.classList.add('hidden');
@@ -95,6 +96,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   // SimSig message log — feed relevant lines into alerts feed
   window.simsigAPI.sim.onMessageLog((lines) => {
     AlertsFeed.addMessageLogLines(lines);
+  });
+
+  // Player peer discovery updates
+  window.simsigAPI.player.onPeersUpdate((peers) => {
+    _globalPeers = peers;
+    if (_phonebookTab === 'global' && !phonebookOverlay.classList.contains('hidden')) {
+      _renderPhonebook();
+    }
+  });
+
+  // Player call events
+  window.simsigAPI.player.onIncomingCall((data) => {
+    PhoneCallsUI.handleIncomingPlayerCall(data.panel);
+  });
+  window.simsigAPI.player.onCallAnswered(() => {
+    PhoneCallsUI.handlePlayerCallAnswered();
+  });
+  window.simsigAPI.player.onCallEnded(() => {
+    PhoneCallsUI.handlePlayerCallEnded();
+  });
+  window.simsigAPI.player.onAudioReceived((pcmArray) => {
+    PhoneCallsUI.handlePlayerAudioReceived(pcmArray);
+  });
+  window.simsigAPI.player.onCallRejected((reason) => {
+    PhoneCallsUI.handlePlayerCallRejected(reason);
   });
 
   // Auto-populate panel name and subtitle from SimSig window title
@@ -182,6 +208,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let phonebookContacts = [];
   let _selectedPhonebookIndex = -1;
   let _phonebookTab = 'local'; // 'local' or 'global'
+  let _globalPeers = []; // discovered player peers
 
   // Generate a deterministic fake GSM-R number from a contact name
   function _gsmrNumber(name) {
@@ -200,7 +227,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     _selectedPhonebookIndex = -1;
 
     if (_phonebookTab === 'global') {
-      phonebookCount.textContent = '0 items in global phone book.';
+      if (_globalPeers.length === 0) {
+        phonebookCount.textContent = 'No other players detected on this network.';
+        return;
+      }
+      phonebookCount.textContent = `${_globalPeers.length} player${_globalPeers.length !== 1 ? 's' : ''} online.`;
+
+      _globalPeers.forEach((peer, idx) => {
+        const tr = document.createElement('tr');
+        tr.className = 'pb-row pb-player';
+        const tdName = document.createElement('td');
+        tdName.className = 'pb-cell-name';
+        tdName.textContent = peer.panel || 'Unknown Panel';
+        tr.appendChild(tdName);
+        const tdNum = document.createElement('td');
+        tdNum.className = 'pb-cell-number';
+        tdNum.textContent = peer.host;
+        tr.appendChild(tdNum);
+        tr.addEventListener('click', () => {
+          _selectedPhonebookIndex = idx;
+          phonebookList.querySelectorAll('.pb-row').forEach((r, i) => {
+            r.classList.toggle('pb-selected', i === idx);
+          });
+        });
+        phonebookList.appendChild(tr);
+      });
       return;
     }
 
@@ -291,18 +342,28 @@ document.addEventListener('DOMContentLoaded', async () => {
       phonebookStatus.textContent = 'Select a contact first';
       return;
     }
-    const entries = _getPhonebookEntries();
-    const entry = entries[_selectedPhonebookIndex];
-    if (!entry) return;
 
     if (!ConnectionUI.isConnected) {
       phonebookStatus.textContent = 'Cannot dial while disconnected';
       return;
     }
-    if (PhoneCallsUI.inCall || PhoneCallsUI._outgoingCall || PhoneCallsUI._dialingActive) {
+    if (PhoneCallsUI.inCall || PhoneCallsUI._outgoingCall || PhoneCallsUI._dialingActive || PhoneCallsUI._playerCall) {
       phonebookStatus.textContent = 'Cannot dial while in a call';
       return;
     }
+
+    // Global tab — dial a player peer
+    if (_phonebookTab === 'global') {
+      const peer = _globalPeers[_selectedPhonebookIndex];
+      if (!peer) return;
+      phonebookOverlay.classList.add('hidden');
+      PhoneCallsUI.dialPlayer(peer);
+      return;
+    }
+
+    const entries = _getPhonebookEntries();
+    const entry = entries[_selectedPhonebookIndex];
+    if (!entry) return;
 
     if (entry.isRouteControl) {
       const hasFailures = typeof AlertsFeed !== 'undefined' && AlertsFeed.getActiveFailures().length > 0;

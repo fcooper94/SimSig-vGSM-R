@@ -6,6 +6,8 @@ const { execFile, exec } = require('child_process');
 const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 const StompConnectionManager = require('./stomp-client');
 const PhoneReader = require('./phone-reader');
+const PeerDiscovery = require('./peer-discovery');
+const PlayerCallServer = require('./player-call-server');
 
 const SCRIPTS_DIR = __dirname.replace('app.asar', 'app.asar.unpacked');
 const ANSWER_SCRIPT = require('path').join(SCRIPTS_DIR, 'answer-phone-call.ps1');
@@ -28,6 +30,9 @@ let stompManager = null;
 let phoneReader = null;
 let ttsVoicesCache = null;
 let elevenLabsVoicesCache = null;
+let peerDiscovery = null;
+let playerCallServer = null;
+const PLAYER_CALL_PORT = 51521;
 
 // Tracked state for syncing new WebSocket clients
 let lastConnectionStatus = null;
@@ -363,6 +368,8 @@ function registerIpcHandlers() {
         (simName) => {
           sendToMainWindow(channels.SIM_NAME, simName);
           settings.set('signaller.panelName', simName);
+          if (peerDiscovery) peerDiscovery.updatePanel(simName);
+          if (playerCallServer) playerCallServer.updatePanel(simName);
         },
         () => {
           console.log('[IPC] SimSig closed — forcing disconnect');
@@ -417,6 +424,34 @@ function registerIpcHandlers() {
       if (ttsProvider === 'edge') {
         prefetchVoices().catch(() => {});
       }
+
+      // Start player-to-player call server and peer discovery
+      if (playerCallServer) playerCallServer.stop();
+      playerCallServer = new PlayerCallServer();
+      playerCallServer.onIncomingCall = (peerPanel) => {
+        sendToMainWindow(channels.PLAYER_INCOMING_CALL, { panel: peerPanel });
+      };
+      playerCallServer.onCallAnswered = () => {
+        sendToMainWindow(channels.PLAYER_CALL_ANSWERED);
+      };
+      playerCallServer.onCallEnded = () => {
+        sendToMainWindow(channels.PLAYER_CALL_ENDED);
+      };
+      playerCallServer.onAudioReceived = (pcmFloat32) => {
+        // Send as regular array for IPC structured clone
+        sendToMainWindow(channels.PLAYER_AUDIO_RECEIVED, Array.from(pcmFloat32));
+      };
+      playerCallServer.onCallRejected = (reason) => {
+        sendToMainWindow(channels.PLAYER_CALL_REJECTED, reason);
+      };
+      playerCallServer.start(PLAYER_CALL_PORT, config.signaller?.panelName || '');
+
+      if (peerDiscovery) peerDiscovery.stop();
+      peerDiscovery = new PeerDiscovery();
+      peerDiscovery.onPeersChanged = (peers) => {
+        sendToMainWindow(channels.PLAYER_PEERS_UPDATE, peers);
+      };
+      peerDiscovery.start(config.signaller?.panelName || '', PLAYER_CALL_PORT, config.gateway.host, config.gateway.port);
     } catch (err) {
       console.error('[Gateway] Connection failed:', err);
       sendToMainWindow(channels.CONNECTION_STATUS, { status: 'no-gateway', error: err.message });
@@ -424,6 +459,8 @@ function registerIpcHandlers() {
   });
 
   registerHandler(channels.CONNECTION_DISCONNECT, async () => {
+    if (peerDiscovery) { peerDiscovery.stop(); peerDiscovery = null; }
+    if (playerCallServer) { playerCallServer.stop(); playerCallServer = null; }
     if (phoneReader) {
       phoneReader.stopPolling();
       phoneReader = null;
@@ -1385,6 +1422,38 @@ function registerIpcHandlers() {
         }
       });
     });
+  });
+
+  // ── Player-to-player calls ─────────────────────────────────────────
+  registerHandler(channels.PLAYER_DIAL, async (_event, peerId, host, port) => {
+    if (!playerCallServer) return { error: 'Not connected' };
+    return playerCallServer.dialPeer(host, port, peerId);
+  });
+
+  registerHandler(channels.PLAYER_ANSWER, () => {
+    if (!playerCallServer) return;
+    playerCallServer.answerCall();
+  });
+
+  registerHandler(channels.PLAYER_REJECT, (_event, reason) => {
+    if (!playerCallServer) return;
+    playerCallServer.rejectCall(reason);
+  });
+
+  registerHandler(channels.PLAYER_HANGUP, () => {
+    if (!playerCallServer) return;
+    playerCallServer.hangUp();
+  });
+
+  registerHandler(channels.PLAYER_CANCEL_DIAL, () => {
+    if (!playerCallServer) return;
+    playerCallServer.cancelDial();
+  });
+
+  registerHandler(channels.PLAYER_SEND_AUDIO, (_event, pcmArray) => {
+    if (!playerCallServer || !playerCallServer.isInCall()) return;
+    const float32 = new Float32Array(pcmArray);
+    playerCallServer.sendAudio(float32);
   });
 }
 

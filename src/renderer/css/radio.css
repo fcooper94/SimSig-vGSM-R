@@ -866,6 +866,15 @@
   color: #000080;
 }
 
+#phonebook-table tr.pb-player td:first-child {
+  color: #0055aa;
+  font-weight: bold;
+}
+
+#phonebook-table tr.pb-selected.pb-player td:first-child {
+  color: #ffffff;
+}
+
 /* Bottom bar: tabs + count */
 #phonebook-bottom {
   display: flex;
