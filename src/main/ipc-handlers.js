@@ -251,15 +251,6 @@ function parseWorkstationLines(lines) {
     }
   }
 
-  // Enable transfer filtering on the phone reader when other players have panels
-  if (workstationPanels && phoneReader) {
-    const otherPlayers = Object.values(workstationPanels).filter(i => i !== ourInitials);
-    if (otherPlayers.length > 0) {
-      phoneReader.transferFilter = 'Transferred';
-      console.log(`[Workstation] Transfer filter enabled (other players: ${otherPlayers.join(', ')})`);
-    }
-  }
-
   // If we didn't match any transfer, we're the host — we own unclaimed panels
   if (!foundOurPanel && workstationPanels && ourInitials) {
     const allPanels = Object.keys(workstationPanels);

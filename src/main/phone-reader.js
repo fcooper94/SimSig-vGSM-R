@@ -182,16 +182,12 @@ class PhoneReader {
     if (this.polling || this._locked) return; // skip if previous poll still running or locked
     this.polling = true;
 
-    const args = [
+    execFile('powershell', [
       '-NoProfile',
       '-NonInteractive',
       '-ExecutionPolicy', 'Bypass',
       '-File', SCRIPT_PATH,
-    ];
-    if (this.transferFilter) {
-      args.push('-TransferFilter', this.transferFilter);
-    }
-    execFile('powershell', args, { timeout: 5000 }, (err, stdout, stderr) => {
+    ], { timeout: 5000 }, (err, stdout, stderr) => {
       this.polling = false;
 
       if (err) {
@@ -209,10 +205,7 @@ class PhoneReader {
           console.log('[PhoneReader] Raw poll data - clockColor:', data.clockColor, 'paused:', data.paused);
           this._colorLogged = true;
         }
-        // Filter out calls transferred to other panels
-        const calls = (data.calls || []).filter(
-          (c) => !c.train || !c.train.toLowerCase().includes('transferred')
-        );
+        const calls = data.calls || [];
         const callsJson = JSON.stringify(calls);
 
         // Only notify renderer when calls actually change
