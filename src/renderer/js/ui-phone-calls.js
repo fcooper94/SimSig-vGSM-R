@@ -1012,10 +1012,11 @@ const PhoneCallsUI = {
 
   // Parse "ready to depart" messages — driver resolved difficulties, now ready
   // "Ok, 2B10 is ready to depart"
+  // "2S09 has resolved its difficulties and is now ready to depart from Clapham Junction (Windsor)"
   parseReadyToDepart(msg) {
-    const match = msg.match(/(\w+)\s+is\s+ready\s+to\s+depart/i);
+    const match = msg.match(/(\w+).*?\bis\s+(?:now\s+)?ready\s+to\s+depart(?:\s+from\s+(.+?))?(?:\s*[,.]|$)/i);
     if (!match) return null;
-    return { headcode: match[1] };
+    return { headcode: match[1], location: match[2] ? match[2].trim() : null };
   },
 
   // Keyword patterns for matching user speech to SimSig reply options
@@ -2231,9 +2232,14 @@ const PhoneCallsUI = {
       displayMsg = spokenMsg;
     } else if (delay) {
       this._delayReason = delay.reason;
-      const timePart = delay.departTime ? `, expected to depart about ${delay.departTime}` : '';
       const delayHc = this.currentHeadCode || delay.headcode;
-      spokenMsg = `Hello Signaller, this is ${delayHc} at ${delay.location}. We are delayed due to ${delay.reason}${timePart}`;
+      // Convert "driver needing X" → "I need X" for natural first-person speech
+      const driverNeeding = delay.reason.match(/^driver\s+needing\s+(.+)/i);
+      const fpReason = driverNeeding ? `I need ${driverNeeding[1]}` : delay.reason;
+      const isPersonal = /^I need/i.test(fpReason);
+      const quickPart = isPersonal ? ' I will be as quick as I can.' : '';
+      const timePart = delay.departTime ? ` We should be ready to depart at ${delay.departTime}` : '';
+      spokenMsg = `Hello Signaller, this is driver of ${delayHc} at ${delay.location}. We are going to be delayed as ${fpReason}.${quickPart}${timePart}`;
       displayMsg = spokenMsg;
     } else if (crewWaiting) {
       this.bgCallerType = 'station';
@@ -2279,7 +2285,8 @@ const PhoneCallsUI = {
       // Driver resolved difficulties and is now ready to depart
       this.isReadyToDepart = true;
       const rdHc = this.currentHeadCode || readyToDepart.headcode;
-      spokenMsg = `Hello Signaller, this is driver of ${rdHc}. The issue has been resolved and we are now ready to depart`;
+      const rdLoc = readyToDepart.location ? ` from ${readyToDepart.location}` : '';
+      spokenMsg = `Hello Signaller, this is driver of ${rdHc}. We have resolved our issue and are now ready to depart${rdLoc}`;
       displayMsg = spokenMsg;
     } else if (driverMsg) {
       // No specific pattern matched — show raw SimSig message

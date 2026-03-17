@@ -109,8 +109,9 @@ public class Win32Suppress {
     public static bool IsFailureDialog(string text) {
         string lower = text.ToLower();
         return lower.Contains("failure") || lower.Contains("trts")
-            || lower.Contains("track circuit") || lower.Contains("points fail")
-            || lower.Contains("signal fail") || lower.Contains("lamp fail");
+            || lower.Contains("track circuit") || lower.Contains("track section")
+            || lower.Contains("points fail") || lower.Contains("signal fail")
+            || lower.Contains("lamp fail");
     }
 
     // Find all visible failure dialogs and dismiss them
@@ -118,16 +119,11 @@ public class Win32Suppress {
         var dismissed = new List<string>();
         var dialogs = new List<IntPtr>();
 
-        // Collect all candidate dialogs first
+        // Collect all visible top-level windows — rely on IsFailureDialog + OK button
+        // as the real filter rather than restricting by class name
         EnumWindows((hWnd, lParam) => {
             if (!IsWindowVisible(hWnd)) return true;
-            var sb = new StringBuilder(256);
-            GetClassName(hWnd, sb, 256);
-            string cls = sb.ToString();
-            // SimSig uses TMessageForm for alerts; also check #32770 (standard dialog)
-            if (cls == "TMessageForm" || cls == "#32770") {
-                dialogs.Add(hWnd);
-            }
+            dialogs.Add(hWnd);
             return true;
         }, IntPtr.Zero);
 
