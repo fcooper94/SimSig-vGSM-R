@@ -2202,7 +2202,8 @@ const PhoneCallsUI = {
           this.stopBgNoise();
           this.startBgNoise();
         }
-        let msg = `Hello, this is the Shunter in ${readyAt.location}. Train ${readyAt.headcode} is ready`;
+        const raHc = this.currentHeadCode || readyAt.headcode;
+        let msg = `Hello, this is the Shunter in ${readyAt.location}. Train ${raHc} is ready`;
         if (readyAt.nextStop) {
           msg += `. Next stop is ${readyAt.nextStop}`;
           if (readyAt.platform) msg += ` Platform ${readyAt.platform}`;
@@ -2210,8 +2211,9 @@ const PhoneCallsUI = {
         spokenMsg = msg;
         displayMsg = msg;
       } else {
-        displayMsg = `Driver of ${readyAt.headcode}. I am waiting to enter at ${readyAt.location}.`;
-        spokenMsg = `Hello ${panelName} Signaller. This is driver of ${readyAt.headcode}. I am waiting to enter at ${readyAt.location}`;
+        const raHc = this.currentHeadCode || readyAt.headcode;
+        displayMsg = `Driver of ${raHc}. I am waiting to enter at ${readyAt.location}.`;
+        spokenMsg = `Hello ${panelName} Signaller. This is driver of ${raHc}. I am waiting to enter at ${readyAt.location}`;
       }
     } else if (earlyRun) {
       this.isSignallerCall = true;
@@ -2226,13 +2228,15 @@ const PhoneCallsUI = {
     } else if (delay) {
       this._delayReason = delay.reason;
       const timePart = delay.departTime ? `, expected to depart about ${delay.departTime}` : '';
-      spokenMsg = `Hello Signaller, this is ${delay.headcode} at ${delay.location}. We are delayed due to ${delay.reason}${timePart}`;
+      const delayHc = this.currentHeadCode || delay.headcode;
+      spokenMsg = `Hello Signaller, this is ${delayHc} at ${delay.location}. We are delayed due to ${delay.reason}${timePart}`;
       displayMsg = spokenMsg;
     } else if (crewWaiting) {
       this.bgCallerType = 'station';
       this.stopBgNoise();
       this.startBgNoise();
-      spokenMsg = `Hello Signaller, this is the driver of ${crewWaiting.headcode}. I am waiting at ${crewWaiting.location} station for the train to arrive. As soon as the train is here, my crew and I will complete all our required activities and be ready to depart as soon as possible`;
+      const cwHc = this.currentHeadCode || crewWaiting.headcode;
+      spokenMsg = `Hello Signaller, this is the driver of ${cwHc}. I am waiting at ${crewWaiting.location} station for the train to arrive. As soon as the train is here, my crew and I will complete all our required activities and be ready to depart as soon as possible`;
       displayMsg = spokenMsg;
     } else if (fixedReport) {
       // Technician reporting a failure fixed — use trackside background
@@ -2270,7 +2274,8 @@ const PhoneCallsUI = {
     } else if (readyToDepart) {
       // Driver resolved difficulties and is now ready to depart
       this.isReadyToDepart = true;
-      spokenMsg = `Hello Signaller, this is driver of ${readyToDepart.headcode}. The issue has been resolved and we are now ready to depart`;
+      const rdHc = this.currentHeadCode || readyToDepart.headcode;
+      spokenMsg = `Hello Signaller, this is driver of ${rdHc}. The issue has been resolved and we are now ready to depart`;
       displayMsg = spokenMsg;
     } else if (driverMsg) {
       // No specific pattern matched — show raw SimSig message
@@ -3962,6 +3967,9 @@ const PhoneCallsUI = {
     this._playerCall = false;
     this._playerDialing = false;
     window.simsigAPI.keys.setInCall(false);
+
+    // Clean up notification button handler
+    if (this.notificationAnswerBtn) this.notificationAnswerBtn.onclick = null;
 
     // Clean up PTT listener
     if (this._playerPttListener) {

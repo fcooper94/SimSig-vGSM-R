@@ -156,6 +156,7 @@ class PlayerCallServer {
   // Cancel an outgoing dial attempt
   cancelDial() {
     if (this.outgoingWs) {
+      try { this.outgoingWs.send(JSON.stringify({ type: 'call-end' })); } catch {}
       try { this.outgoingWs.close(); } catch {}
       this.outgoingWs = null;
     }
