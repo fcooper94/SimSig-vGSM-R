@@ -228,17 +228,7 @@ try {
     # The caller (PhoneReader) handles opening it once via a separate script.
 
     # Read calls from listbox if telephone window is open
-    $panelName = ""
     if ($teleHwnd -ne [IntPtr]::Zero) {
-        # Read the telephone window title — may contain the panel/workstation name
-        $teleSb = New-Object System.Text.StringBuilder 256
-        [SimSigListBox]::GetWindowText($teleHwnd, $teleSb, 256) | Out-Null
-        $teleTitle = $teleSb.ToString()
-        if ($teleTitle -and $teleTitle -ne "Telephone Calls") {
-            $panelName = $teleTitle -replace "^Telephone Calls\s*[-–—]\s*", ""
-            $panelName = $panelName.Trim()
-        }
-
         # Keep the telephone window hidden off-screen
         [SimSigListBox]::HideOffScreen($teleHwnd)
 
@@ -278,7 +268,7 @@ try {
         $clockColor = [SimSigListBox]::ReadClockColor([SimSigListBox]::simsigHwnd)
     }
 
-    $result = @{ calls = $calls; simName = $simName; simsigFound = $simsigFound; clockColor = $clockColor; answerDialogOpen = $answerDialogOpen; panelName = $panelName }
+    $result = @{ calls = $calls; simName = $simName; simsigFound = $simsigFound; clockColor = $clockColor; answerDialogOpen = $answerDialogOpen }
     # Only report pause state when clock color is definitively red or green
     # When SimSig is covered by another window, pixel reading is unreliable
     if ($clockColor -eq "red") {
