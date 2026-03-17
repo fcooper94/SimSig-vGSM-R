@@ -29,6 +29,53 @@
   let hostClosed = false;
   let readOnly = false;
 
+  // Relay player state
+  const ourPlayerId = `browser-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+  let ourPanelName = '';
+  let relayCallPartnerId = null;
+  let pendingRelayDialResolve = null;
+
+  function _sendSignal(targetId, payload) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'player-signal', targetId, payload }));
+  }
+
+  function _fireListeners(channel, data) {
+    const cbs = listeners[channel];
+    if (cbs) for (const cb of cbs) try { cb(data); } catch (e) { console.error('[WS-Shim] Listener error:', e); }
+  }
+
+  function _handleRelaySignal(data) {
+    const { from, fromPanel, payload } = data || {};
+    if (!payload) return;
+    if (payload.type === 'call-request') {
+      relayCallPartnerId = from;
+      _fireListeners('player:incoming-call', { panel: fromPanel, id: from });
+    } else if (payload.type === 'call-accepted') {
+      relayCallPartnerId = from;
+      if (pendingRelayDialResolve) {
+        const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
+        r({ connected: true, peerPanel: fromPanel });
+      }
+      _fireListeners('player:call-answered');
+    } else if (payload.type === 'call-rejected') {
+      if (pendingRelayDialResolve) {
+        const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
+        relayCallPartnerId = null;
+        r({ error: payload.reason || 'Rejected' });
+      }
+      relayCallPartnerId = null;
+      _fireListeners('player:call-rejected', payload.reason);
+    } else if (payload.type === 'call-end') {
+      if (pendingRelayDialResolve) {
+        const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
+        r({ error: 'Peer hung up' });
+      }
+      relayCallPartnerId = null;
+      _fireListeners('player:call-ended');
+    }
+  }
+
   function showStatusOverlay(title, subtitle) {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;pointer-events:all;';
@@ -102,10 +149,15 @@
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${proto}//${location.host}`);
+    ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
       connected = true;
       console.log('[WS-Shim] Connected to server');
+      // Re-register player presence if we already know our panel
+      if (ourPanelName) {
+        ws.send(JSON.stringify({ type: 'player-register', id: ourPlayerId, panel: ourPanelName }));
+      }
     };
 
     ws.onclose = (event) => {
@@ -123,6 +175,13 @@
     ws.onerror = () => {}; // onclose will handle reconnect
 
     ws.onmessage = (event) => {
+      // Binary = relay audio
+      if (event.data instanceof ArrayBuffer) {
+        const float32 = new Float32Array(event.data);
+        _fireListeners('player:audio-received', float32);
+        return;
+      }
+
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
 
@@ -145,6 +204,12 @@
         const { resolve } = pending[msg.id];
         delete pending[msg.id];
         resolve(msg.result);
+        return;
+      }
+
+      // Player-to-player call signals (relay)
+      if (msg.type === 'event' && msg.channel === 'player:signal') {
+        _handleRelaySignal(msg.data);
         return;
       }
 
@@ -299,12 +364,56 @@
 
     player: {
       onPeersUpdate: (cb) => on('player:peers-update', cb),
-      dial: () => Promise.resolve({ error: 'Not available in browser mode' }),
-      answer: () => Promise.resolve(),
-      reject: () => Promise.resolve(),
-      hangUp: () => Promise.resolve(),
-      cancelDial: () => Promise.resolve(),
-      sendAudio: () => Promise.resolve(),
+
+      dial: (peerId) => new Promise((resolve) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) { resolve({ error: 'Not connected' }); return; }
+        _sendSignal(peerId, { type: 'call-request', panel: ourPanelName });
+        relayCallPartnerId = peerId;
+        pendingRelayDialResolve = resolve;
+        setTimeout(() => {
+          if (pendingRelayDialResolve === resolve) {
+            pendingRelayDialResolve = null; relayCallPartnerId = null;
+            resolve({ error: 'No answer (timeout)' });
+          }
+        }, 30000);
+      }),
+
+      answer: () => {
+        if (relayCallPartnerId) _sendSignal(relayCallPartnerId, { type: 'call-accepted', panel: ourPanelName });
+        return Promise.resolve();
+      },
+
+      reject: (reason) => {
+        if (relayCallPartnerId) {
+          _sendSignal(relayCallPartnerId, { type: 'call-rejected', reason: reason || 'Busy' });
+          relayCallPartnerId = null;
+        }
+        return Promise.resolve();
+      },
+
+      hangUp: () => {
+        if (relayCallPartnerId) {
+          _sendSignal(relayCallPartnerId, { type: 'call-end' });
+          relayCallPartnerId = null;
+        }
+        return Promise.resolve();
+      },
+
+      cancelDial: () => {
+        if (relayCallPartnerId) {
+          _sendSignal(relayCallPartnerId, { type: 'call-end' });
+          if (pendingRelayDialResolve) { pendingRelayDialResolve({ error: 'Cancelled' }); pendingRelayDialResolve = null; }
+          relayCallPartnerId = null;
+        }
+        return Promise.resolve();
+      },
+
+      sendAudio: (float32Array) => {
+        if (relayCallPartnerId && ws?.readyState === WebSocket.OPEN) {
+          ws.send(float32Array.buffer instanceof ArrayBuffer ? float32Array.buffer : float32Array);
+        }
+      },
+
       onIncomingCall: (cb) => on('player:incoming-call', cb),
       onCallAnswered: (cb) => on('player:call-answered', cb),
       onCallEnded: (cb) => on('player:call-ended', cb),
@@ -314,6 +423,14 @@
 
     // No web server control from browser clients
   };
+
+  // Register player presence when panel name is known
+  on('workstation:our-panel', (panel) => {
+    ourPanelName = panel;
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'player-register', id: ourPlayerId, panel: ourPanelName }));
+    }
+  });
 
   // Connect immediately — events arriving before listeners are buffered and replayed
   connect();

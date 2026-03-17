@@ -32,6 +32,14 @@ let handlerMap = null;
 let primaryClient = null; // first connection gets full control
 let getInitialStateFn = null;
 
+// ── Relay player registry (for internet player-to-player calls) ────────────
+const relayPlayers = new Map();  // ws → { id, panel }
+const relayById = new Map();     // id → ws
+const activePairs = new Map();   // playerId → callPartnerId (both directions stored)
+let hostRelayInfo = null;        // { id, panel }
+let onRelayPlayersChanged = null;
+let onHostRelayEvent = null;
+
 function start(port, handlers, getInitialState) {
   if (server) return;
   handlerMap = handlers;
@@ -99,11 +107,46 @@ function start(port, handlers, getInitialState) {
       }
     }
 
-    ws.on('message', async (raw) => {
+    ws.on('message', async (raw, isBinary) => {
+      // Binary = relay audio frame — forward to call partner
+      if (isBinary) {
+        const sender = relayPlayers.get(ws);
+        if (sender?.id && activePairs.has(sender.id)) {
+          const partnerId = activePairs.get(sender.id);
+          if (partnerId === hostRelayInfo?.id) {
+            if (onHostRelayEvent) onHostRelayEvent({ type: 'audio', buffer: raw });
+          } else {
+            const partnerWs = relayById.get(partnerId);
+            if (partnerWs?.readyState === 1) partnerWs.send(raw);
+          }
+        }
+        return;
+      }
+
       let msg;
       try {
         msg = JSON.parse(raw.toString());
       } catch {
+        return;
+      }
+
+      // Player presence registration
+      if (msg.type === 'player-register') {
+        const prev = relayPlayers.get(ws);
+        if (prev?.id) relayById.delete(prev.id);
+        const info = { id: msg.id, panel: msg.panel };
+        relayPlayers.set(ws, info);
+        relayById.set(msg.id, ws);
+        console.log(`[WebServer] Player registered: "${msg.panel}" (${msg.id})`);
+        _broadcastRelayPlayers();
+        return;
+      }
+
+      // Player-to-player call signal
+      if (msg.type === 'player-signal') {
+        const sender = relayPlayers.get(ws);
+        if (!sender?.id) return;
+        _routeSignal(sender.id, sender.panel, msg.targetId, msg.payload);
         return;
       }
 
@@ -125,6 +168,18 @@ function start(port, handlers, getInitialState) {
     });
 
     ws.on('close', () => {
+      // Clean up relay state
+      const player = relayPlayers.get(ws);
+      if (player?.id) {
+        if (activePairs.has(player.id)) {
+          _routeSignal(player.id, player.panel, activePairs.get(player.id), { type: 'call-end' });
+          _clearRelayPair(player.id);
+        }
+        relayById.delete(player.id);
+        relayPlayers.delete(ws);
+        _broadcastRelayPlayers();
+      }
+
       if (ws === primaryClient) {
         primaryClient = null;
         console.log('[WebServer] Primary browser client disconnected');
@@ -139,7 +194,98 @@ function start(port, handlers, getInitialState) {
   });
 }
 
+// ── Relay helpers ──────────────────────────────────────────────────────────
+
+function _routeSignal(fromId, fromPanel, targetId, payload) {
+  if (!targetId) return;
+  if (targetId === hostRelayInfo?.id) {
+    if (onHostRelayEvent) onHostRelayEvent({ type: 'signal', from: fromId, fromPanel, payload });
+  } else {
+    const targetWs = relayById.get(targetId);
+    if (targetWs?.readyState === 1) {
+      targetWs.send(JSON.stringify({ type: 'event', channel: 'player:signal',
+        data: { from: fromId, fromPanel, payload } }));
+    }
+  }
+  // Manage active call pair state
+  if (payload.type === 'call-accepted') {
+    activePairs.set(fromId, targetId);
+    activePairs.set(targetId, fromId);
+  } else if (payload.type === 'call-end' || payload.type === 'call-rejected') {
+    _clearRelayPair(fromId);
+  }
+}
+
+function _clearRelayPair(id) {
+  const partner = activePairs.get(id);
+  if (partner !== undefined) activePairs.delete(partner);
+  activePairs.delete(id);
+}
+
+function _broadcastRelayPlayers() {
+  const players = getRelayPlayers();
+  const msg = JSON.stringify({ type: 'event', channel: 'player:peers-update', data: players });
+  if (wss) {
+    for (const client of wss.clients) {
+      if (client.readyState === 1) client.send(msg);
+    }
+  }
+  if (onRelayPlayersChanged) onRelayPlayersChanged(players);
+}
+
+// ── Public relay API ───────────────────────────────────────────────────────
+
+function registerHostPlayer(id, panel) {
+  hostRelayInfo = { id, panel };
+  _broadcastRelayPlayers();
+}
+
+function getRelayPlayers() {
+  const players = [];
+  if (hostRelayInfo) players.push({ id: hostRelayInfo.id, panel: hostRelayInfo.panel, relay: true });
+  for (const [, p] of relayPlayers) {
+    if (p.id && p.panel) players.push({ id: p.id, panel: p.panel, relay: true });
+  }
+  return players;
+}
+
+function hostSendSignal(targetId, payload) {
+  const targetWs = relayById.get(targetId);
+  if (targetWs?.readyState === 1) {
+    targetWs.send(JSON.stringify({ type: 'event', channel: 'player:signal',
+      data: { from: hostRelayInfo?.id, fromPanel: hostRelayInfo?.panel, payload } }));
+    return true;
+  }
+  return false;
+}
+
+function hostSendRelayAudio(buffer) {
+  if (!hostRelayInfo?.id) return;
+  const partnerId = activePairs.get(hostRelayInfo.id);
+  if (!partnerId) return;
+  const partnerWs = relayById.get(partnerId);
+  if (partnerWs?.readyState === 1) partnerWs.send(buffer);
+}
+
+function setRelayActivePair(id1, id2) {
+  activePairs.set(id1, id2);
+  activePairs.set(id2, id1);
+}
+
+function clearHostRelayPair() {
+  if (hostRelayInfo?.id) _clearRelayPair(hostRelayInfo.id);
+}
+
+function setOnRelayPlayersChanged(fn) { onRelayPlayersChanged = fn; }
+function setOnHostRelayEvent(fn) { onHostRelayEvent = fn; }
+
+// ── Stop / Broadcast ───────────────────────────────────────────────────────
+
 function stop() {
+  relayPlayers.clear();
+  relayById.clear();
+  activePairs.clear();
+  hostRelayInfo = null;
   if (wss) {
     // Close all clients with code 4000 = host shutting down
     // The close code is delivered reliably with the close event
@@ -172,4 +318,10 @@ function isRunning() {
   return server !== null;
 }
 
-module.exports = { start, stop, broadcast, isRunning };
+module.exports = {
+  start, stop, broadcast, isRunning,
+  registerHostPlayer, getRelayPlayers,
+  hostSendSignal, hostSendRelayAudio,
+  setRelayActivePair, clearHostRelayPair,
+  setOnRelayPlayersChanged, setOnHostRelayEvent,
+};

@@ -93,7 +93,9 @@
       "Bash(node -c src/renderer/js/ws-api-shim.js)",
       "Bash(node -c src/renderer/js/ui-connection.js)",
       "Bash(node -c src/main/phone-reader.js)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(node -e \"require\\(''./src/main/web-server''\\)\")",
+      "Bash(node -e \"require\\(''./src/main/ipc-handlers''\\)\")"
     ]
   }
 }

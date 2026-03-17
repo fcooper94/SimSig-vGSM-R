@@ -24,7 +24,15 @@ const FORCE_CLOSE_CALL_SCRIPT = require('path').join(SCRIPTS_DIR, 'force-close-c
 const DETECT_GATEWAY_SCRIPT = require('path').join(SCRIPTS_DIR, 'detect-gateway-host.ps1');
 
 const globalPtt = require('./global-ptt');
+const webServer = require('./web-server');
+const os = require('os');
 
+// Stable ID for this host instance — used for relay player registration
+const ourRelayId = `${os.hostname()}-${process.pid}-${Date.now()}`;
+
+// Relay call state
+let activeRelayCallPartnerId = null;
+let pendingRelayDialResolve = null;
 
 let stompManager = null;
 let phoneReader = null;
@@ -250,6 +258,7 @@ function parseWorkstationLines(lines) {
         console.log(`[Workstation] Our panel (client): "${fullPanel}"`);
         if (peerDiscovery) peerDiscovery.updatePanel(fullPanel);
         if (playerCallServer) playerCallServer.updatePanel(fullPanel);
+        webServer.registerHostPlayer(ourRelayId, fullPanel);
         sendToMainWindow('workstation:our-panel', panelName);
       }
     }
@@ -270,6 +279,7 @@ function parseWorkstationLines(lines) {
       const hostLabel = `${sim} (Host)`;
       if (peerDiscovery) peerDiscovery.updatePanel(hostLabel);
       if (playerCallServer) playerCallServer.updatePanel(hostLabel);
+      webServer.registerHostPlayer(ourRelayId, hostLabel);
       sendToMainWindow('workstation:our-panel', `Host — ${sim}`);
     }
   }
@@ -509,10 +519,63 @@ function registerIpcHandlers() {
       // Start UDP peer discovery for LAN player detection
       if (peerDiscovery) peerDiscovery.stop();
       peerDiscovery = new PeerDiscovery();
-      peerDiscovery.onPeersChanged = (peers) => {
-        sendToMainWindow(channels.PLAYER_PEERS_UPDATE, peers);
+      peerDiscovery.onPeersChanged = (udpPeers) => {
+        const relayPeers = webServer.getRelayPlayers().filter(p => p.id !== ourRelayId);
+        const seenIds = new Set(udpPeers.map(p => p.id));
+        const merged = [...udpPeers, ...relayPeers.filter(p => !seenIds.has(p.id))];
+        sendToMainWindow(channels.PLAYER_PEERS_UPDATE, merged);
       };
       peerDiscovery.start('', PLAYER_CALL_PORT);
+
+      // Relay: broadcast player list when web-server clients join/leave
+      webServer.setOnRelayPlayersChanged((relayPeers) => {
+        const udpPeers = peerDiscovery ? peerDiscovery.getPeers() : [];
+        const seenIds = new Set(udpPeers.map(p => p.id));
+        const merged = [...udpPeers, ...relayPeers.filter(p => !seenIds.has(p.id) && p.id !== ourRelayId)];
+        sendToMainWindow(channels.PLAYER_PEERS_UPDATE, merged);
+      });
+
+      // Relay: handle signals and audio addressed to the host
+      webServer.setOnHostRelayEvent((event) => {
+        if (event.type === 'audio') {
+          const float32 = new Float32Array(event.buffer.buffer, event.buffer.byteOffset, event.buffer.byteLength / 4);
+          sendToMainWindow(channels.PLAYER_AUDIO_RECEIVED, Array.from(float32));
+          return;
+        }
+        if (event.type !== 'signal') return;
+        const { from, fromPanel, payload } = event;
+        if (payload.type === 'call-request') {
+          activeRelayCallPartnerId = from;
+          sendToMainWindow(channels.PLAYER_INCOMING_CALL, { panel: fromPanel });
+        } else if (payload.type === 'call-accepted') {
+          activeRelayCallPartnerId = from;
+          webServer.setRelayActivePair(ourRelayId, from);
+          if (pendingRelayDialResolve) {
+            const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
+            r({ connected: true, peerPanel: fromPanel });
+          } else {
+            sendToMainWindow(channels.PLAYER_CALL_ANSWERED);
+          }
+        } else if (payload.type === 'call-rejected') {
+          if (pendingRelayDialResolve) {
+            const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
+            activeRelayCallPartnerId = null;
+            r({ error: payload.reason || 'Rejected' });
+          } else {
+            activeRelayCallPartnerId = null;
+            sendToMainWindow(channels.PLAYER_CALL_REJECTED, payload.reason || 'Rejected');
+          }
+        } else if (payload.type === 'call-end') {
+          webServer.clearHostRelayPair();
+          activeRelayCallPartnerId = null;
+          if (pendingRelayDialResolve) {
+            const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
+            r({ error: 'Peer hung up' });
+          } else {
+            sendToMainWindow(channels.PLAYER_CALL_ENDED);
+          }
+        }
+      });
 
     } catch (err) {
       console.error('[Gateway] Connection failed:', err);
@@ -522,6 +585,9 @@ function registerIpcHandlers() {
 
   registerHandler(channels.CONNECTION_DISCONNECT, async () => {
     workstationPanels = null;
+    activeRelayCallPartnerId = null;
+    if (pendingRelayDialResolve) { pendingRelayDialResolve({ error: 'Disconnected' }); pendingRelayDialResolve = null; }
+    webServer.clearHostRelayPair();
     if (peerDiscovery) { peerDiscovery.stop(); peerDiscovery = null; }
     if (playerCallServer) { playerCallServer.stop(); playerCallServer = null; }
     if (phoneReader) {
@@ -1503,32 +1569,80 @@ function registerIpcHandlers() {
   // ── Player-to-player calls ─────────────────────────────────────────
   registerHandler(channels.PLAYER_DIAL, async (_event, peerId, host, port) => {
     if (!playerCallServer) return { error: 'Not connected' };
+    // No host = relay peer (internet play)
+    if (!host) {
+      webServer.hostSendSignal(peerId, { type: 'call-request', panel: playerCallServer.panelName });
+      activeRelayCallPartnerId = peerId;
+      return new Promise((resolve) => {
+        pendingRelayDialResolve = resolve;
+        setTimeout(() => {
+          if (pendingRelayDialResolve === resolve) {
+            pendingRelayDialResolve = null;
+            activeRelayCallPartnerId = null;
+            webServer.clearHostRelayPair();
+            resolve({ error: 'No answer (timeout)' });
+          }
+        }, 30000);
+      });
+    }
     return playerCallServer.dialPeer(host, port, peerId);
   });
 
   registerHandler(channels.PLAYER_ANSWER, () => {
     if (!playerCallServer) return;
+    if (activeRelayCallPartnerId) {
+      webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-accepted', panel: playerCallServer.panelName });
+      webServer.setRelayActivePair(ourRelayId, activeRelayCallPartnerId);
+      sendToMainWindow(channels.PLAYER_CALL_ANSWERED);
+      return;
+    }
     playerCallServer.answerCall();
   });
 
   registerHandler(channels.PLAYER_REJECT, (_event, reason) => {
     if (!playerCallServer) return;
+    if (activeRelayCallPartnerId) {
+      webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-rejected', reason: reason || 'Busy' });
+      webServer.clearHostRelayPair();
+      activeRelayCallPartnerId = null;
+      return;
+    }
     playerCallServer.rejectCall(reason);
   });
 
   registerHandler(channels.PLAYER_HANGUP, () => {
     if (!playerCallServer) return;
+    if (activeRelayCallPartnerId) {
+      webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-end' });
+      webServer.clearHostRelayPair();
+      activeRelayCallPartnerId = null;
+      sendToMainWindow(channels.PLAYER_CALL_ENDED);
+      return;
+    }
     playerCallServer.hangUp();
   });
 
   registerHandler(channels.PLAYER_CANCEL_DIAL, () => {
     if (!playerCallServer) return;
+    if (activeRelayCallPartnerId && pendingRelayDialResolve) {
+      webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-end' });
+      webServer.clearHostRelayPair();
+      const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
+      activeRelayCallPartnerId = null;
+      r({ error: 'Cancelled' });
+      return;
+    }
     playerCallServer.cancelDial();
   });
 
   registerHandler(channels.PLAYER_SEND_AUDIO, (_event, pcmArray) => {
-    if (!playerCallServer || !playerCallServer.isInCall()) return;
+    if (!playerCallServer) return;
     const float32 = new Float32Array(pcmArray);
+    if (activeRelayCallPartnerId) {
+      webServer.hostSendRelayAudio(Buffer.from(float32.buffer));
+      return;
+    }
+    if (!playerCallServer.isInCall()) return;
     playerCallServer.sendAudio(float32);
   });
 }
