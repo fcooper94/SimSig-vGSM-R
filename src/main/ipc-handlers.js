@@ -251,6 +251,15 @@ function parseWorkstationLines(lines) {
     }
   }
 
+  // Enable transfer filtering on the phone reader when other players have panels
+  if (workstationPanels && phoneReader) {
+    const otherPlayers = Object.values(workstationPanels).filter(i => i !== ourInitials);
+    if (otherPlayers.length > 0) {
+      phoneReader.transferFilter = 'Transferred';
+      console.log(`[Workstation] Transfer filter enabled (other players: ${otherPlayers.join(', ')})`);
+    }
+  }
+
   // If we didn't match any transfer, we're the host — we own unclaimed panels
   if (!foundOurPanel && workstationPanels && ourInitials) {
     const allPanels = Object.keys(workstationPanels);
@@ -404,21 +413,7 @@ function registerIpcHandlers() {
             }
           }
 
-          // In multiplayer: filter out calls that another player is handling.
-          // Each vGSM-R instance broadcasts which headcodes it sees via UDP.
-          // Calls reported by another player are for their panel, not ours.
-          let filtered = afterAutoWait;
-          if (peerDiscovery) {
-            const peerCalls = peerDiscovery.getPeerCalls();
-            if (peerCalls.size > 0) {
-              filtered = afterAutoWait.filter(c => {
-                const hc = extractHeadcode(c.train);
-                return !peerCalls.has(hc);
-              });
-            }
-            // Update our broadcast with current call headcodes
-            peerDiscovery.updateCalls(afterAutoWait.map(c => extractHeadcode(c.train)));
-          }
+          const filtered = afterAutoWait;
 
           lastPhoneCalls = filtered;
           sendToMainWindow(channels.PHONE_CALLS_UPDATE, filtered);

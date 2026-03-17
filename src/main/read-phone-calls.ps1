@@ -1,8 +1,12 @@
 # read-phone-calls.ps1
 # Reads the SimSig "Telephone Calls" window using Win32 API
 # The TListBox is owner-drawn (Delphi), so LB_GETTEXT only returns
-# the train identifier. All items in the list are unanswered calls.
+# the train identifier. Uses ReadProcessMemory to detect transferred
+# calls by scanning item object data for transfer markers.
 # Outputs a JSON array to stdout.
+param(
+    [string]$TransferFilter = ""  # e.g. "Transferred" - skip items whose object data contains this
+)
 
 Add-Type @"
 using System;
@@ -29,10 +33,52 @@ public class SimSigListBox {
     public const int LB_GETCOUNT = 0x018B;
     public const int LB_GETTEXT = 0x0189;
     public const int LB_GETTEXTLEN = 0x018A;
+    public const int LB_GETITEMDATA = 0x0199;
     public const uint WM_KEYDOWN = 0x0100;
     public const uint WM_KEYUP = 0x0101;
     public const uint WM_CLOSE = 0x0010;
     public const int VK_F6 = 0x75;
+
+    // Process memory reading for transfer detection
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
+
+    [DllImport("kernel32.dll")]
+    public static extern bool ReadProcessMemory(IntPtr process, IntPtr address, byte[] buffer, uint size, out uint bytesRead);
+
+    [DllImport("kernel32.dll")]
+    public static extern bool CloseHandle(IntPtr handle);
+
+    public static IntPtr processHandle = IntPtr.Zero;
+
+    public static bool OpenSimSigProcess(IntPtr windowHandle) {
+        uint pid;
+        GetWindowThreadProcessId(windowHandle, out pid);
+        if (pid == 0) return false;
+        processHandle = OpenProcess(0x0010, false, pid); // PROCESS_VM_READ
+        return processHandle != IntPtr.Zero;
+    }
+
+    public static void CloseSimSigProcess() {
+        if (processHandle != IntPtr.Zero) {
+            CloseHandle(processHandle);
+            processHandle = IntPtr.Zero;
+        }
+    }
+
+    public static bool IsTransferred(IntPtr listBoxHwnd, int index, string searchText) {
+        if (processHandle == IntPtr.Zero) return false;
+        IntPtr itemData = SendMessage(listBoxHwnd, LB_GETITEMDATA, (IntPtr)index, IntPtr.Zero);
+        if ((long)itemData <= 0x10000) return false;
+        byte[] buf = new byte[4096];
+        uint read;
+        if (!ReadProcessMemory(processHandle, itemData, buf, 4096, out read)) return false;
+        string content = System.Text.Encoding.Default.GetString(buf, 0, (int)read);
+        return content.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
 
     public static int GetCount(IntPtr hWnd) {
         return (int)SendMessage(hWnd, LB_GETCOUNT, IntPtr.Zero, IntPtr.Zero);
@@ -235,15 +281,22 @@ try {
         # Find the TListBox child using pure Win32 API
         $listBoxHwnd = [SimSigListBox]::FindChildByClass($teleHwnd, "TListBox")
         if ($listBoxHwnd -ne [IntPtr]::Zero) {
+            # Open SimSig process for memory reading (transfer detection)
+            if ($TransferFilter) {
+                [SimSigListBox]::OpenSimSigProcess($teleHwnd) | Out-Null
+            }
             $count = [SimSigListBox]::GetCount($listBoxHwnd)
             for ($i = 0; $i -lt $count; $i++) {
                 $text = [SimSigListBox]::GetText($listBoxHwnd, $i)
                 if ($text) {
                     # Skip calls that have been transferred to another panel
                     if ($text -match "Transferred") { continue }
+                    # Check item object data for transfer marker via ReadProcessMemory
+                    if ($TransferFilter -and [SimSigListBox]::IsTransferred($listBoxHwnd, $i, $TransferFilter)) { continue }
                     $calls += @{ train = $text; status = "Unanswered" }
                 }
             }
+            if ($TransferFilter) { [SimSigListBox]::CloseSimSigProcess() }
         }
     }
 

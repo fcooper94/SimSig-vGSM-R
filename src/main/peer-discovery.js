@@ -13,13 +13,12 @@ const PEER_TIMEOUT = 15000; // consider peer gone after 15s of silence
 
 class PeerDiscovery {
   constructor() {
-    this.peers = new Map(); // id → { id, panel, host, port, calls, lastSeen }
+    this.peers = new Map(); // id → { id, panel, host, port, lastSeen }
     this.socket = null;
     this.announceTimer = null;
     this.cleanupTimer = null;
     this.panelName = '';
     this.callPort = 0;
-    this.currentCalls = []; // headcodes of our current incoming calls
     this.instanceId = `${os.hostname()}-${process.pid}-${Date.now()}`;
     this.onPeersChanged = null; // callback(peers[])
   }
@@ -48,7 +47,6 @@ class PeerDiscovery {
           panel: data.panel,
           host: rinfo.address,
           port: data.port,
-          calls: data.calls || [],
           lastSeen: Date.now(),
         });
         if (!existed) {
@@ -86,21 +84,6 @@ class PeerDiscovery {
     this.panelName = panelName;
   }
 
-  updateCalls(headcodes) {
-    this.currentCalls = headcodes || [];
-  }
-
-  // Get headcodes claimed by other players
-  getPeerCalls() {
-    const calls = new Set();
-    for (const peer of this.peers.values()) {
-      if (peer.calls) {
-        for (const hc of peer.calls) calls.add(hc);
-      }
-    }
-    return calls;
-  }
-
   getPeers() {
     return Array.from(this.peers.values()).map(({ id, panel, host, port }) => ({ id, panel, host, port }));
   }
@@ -116,7 +99,6 @@ class PeerDiscovery {
       id: this.instanceId,
       panel: this.panelName,
       port: this.callPort,
-      calls: this.currentCalls,
     });
     const buf = Buffer.from(msg);
     const broadcastAddrs = this._getBroadcastAddresses();

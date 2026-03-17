@@ -182,12 +182,16 @@ class PhoneReader {
     if (this.polling || this._locked) return; // skip if previous poll still running or locked
     this.polling = true;
 
-    execFile('powershell', [
+    const args = [
       '-NoProfile',
       '-NonInteractive',
       '-ExecutionPolicy', 'Bypass',
       '-File', SCRIPT_PATH,
-    ], { timeout: 5000 }, (err, stdout, stderr) => {
+    ];
+    if (this.transferFilter) {
+      args.push('-TransferFilter', this.transferFilter);
+    }
+    execFile('powershell', args, { timeout: 5000 }, (err, stdout, stderr) => {
       this.polling = false;
 
       if (err) {
