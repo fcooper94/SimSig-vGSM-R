@@ -3790,6 +3790,7 @@ const PhoneCallsUI = {
   },
 
   handlePlayerCallEnded() {
+    console.log('[PlayerCall] handlePlayerCallEnded — ringing:', this._playerRinging, 'inCall:', this._playerCall, 'dialing:', this._playerDialing);
     this._endPlayerCall('Peer hung up');
   },
 
@@ -3931,7 +3932,11 @@ const PhoneCallsUI = {
   },
 
   _endPlayerCall(reason) {
-    if (!this._playerCall && !this._playerDialing && !this._playerRinging) return;
+    console.log('[PlayerCall] _endPlayerCall:', reason, 'call:', this._playerCall, 'dialing:', this._playerDialing, 'ringing:', this._playerRinging);
+    if (!this._playerCall && !this._playerDialing && !this._playerRinging) {
+      console.log('[PlayerCall] _endPlayerCall — no active state, skipping');
+      return;
+    }
     this._playerRinging = false;
     this._stopPlayerRecording();
     this.stopBgNoise();
