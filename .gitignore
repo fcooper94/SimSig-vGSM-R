@@ -2,4 +2,5 @@ node_modules/
 dist/
 out/
 *.log
+src/main/restore-log.txt
 dev-app-update.yml
