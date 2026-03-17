@@ -875,6 +875,16 @@
   color: #ffffff;
 }
 
+#phonebook-table .pb-online {
+  color: #008800;
+  font-style: italic;
+  font-size: 0.85em;
+}
+
+#phonebook-table tr.pb-selected .pb-online {
+  color: #aaffaa;
+}
+
 /* Bottom bar: tabs + count */
 #phonebook-bottom {
   display: flex;

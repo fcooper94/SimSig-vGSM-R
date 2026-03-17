@@ -240,10 +240,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         tdName.className = 'pb-cell-name';
         tdName.textContent = peer.panel || 'Unknown Panel';
         tr.appendChild(tdName);
-        const tdNum = document.createElement('td');
-        tdNum.className = 'pb-cell-number';
-        tdNum.textContent = peer.host;
-        tr.appendChild(tdNum);
+        const tdStatus = document.createElement('td');
+        tdStatus.className = 'pb-cell-number pb-online';
+        tdStatus.textContent = 'Online';
+        tr.appendChild(tdStatus);
         tr.addEventListener('click', () => {
           _selectedPhonebookIndex = idx;
           phonebookList.querySelectorAll('.pb-row').forEach((r, i) => {

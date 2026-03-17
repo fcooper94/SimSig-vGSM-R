@@ -17,10 +17,13 @@ const ConnectionUI = {
           window.simsigAPI.connection.disconnect();
         });
       } else {
-        window.simsigAPI.connection.connect();
-        this.setStatus('connecting');
-        const initOverlay = document.getElementById('init-overlay');
-        if (initOverlay) initOverlay.classList.remove('hidden');
+        this.promptInitials((initials) => {
+          window.simsigAPI.settings.set('signaller.initials', initials);
+          window.simsigAPI.connection.connect();
+          this.setStatus('connecting');
+          const initOverlay = document.getElementById('init-overlay');
+          if (initOverlay) initOverlay.classList.remove('hidden');
+        });
       }
     });
 
@@ -42,6 +45,39 @@ const ConnectionUI = {
     if (winMin) winMin.addEventListener('click', () => window.simsigAPI.window.minimize());
     if (winMax) winMax.addEventListener('click', () => window.simsigAPI.window.maximize());
     if (winClose) winClose.addEventListener('click', () => window.simsigAPI.window.close());
+  },
+
+  promptInitials(onConnect) {
+    const modal = document.getElementById('initials-modal');
+    const input = document.getElementById('initials-input');
+    const okBtn = document.getElementById('initials-ok');
+    const cancelBtn = document.getElementById('initials-cancel');
+
+    // Pre-fill with last used initials
+    window.simsigAPI.settings.get('signaller.initials').then((saved) => {
+      input.value = saved || '';
+    });
+
+    modal.classList.remove('hidden');
+    input.focus();
+
+    const cleanup = () => {
+      modal.classList.add('hidden');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      input.removeEventListener('keydown', onKey);
+    };
+    const onOk = () => {
+      const val = input.value.trim().toUpperCase();
+      if (!val) { input.focus(); return; }
+      cleanup();
+      onConnect(val);
+    };
+    const onCancel = () => { cleanup(); };
+    const onKey = (e) => { if (e.key === 'Enter') onOk(); if (e.key === 'Escape') onCancel(); };
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    input.addEventListener('keydown', onKey);
   },
 
   showConfirm(title, message, onYes) {

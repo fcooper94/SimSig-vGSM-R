@@ -90,7 +90,8 @@
       "Bash(node -c src/preload/preload.js)",
       "Bash(node -c src/renderer/js/app.js)",
       "Bash(node -c src/renderer/js/ui-phone-calls.js)",
-      "Bash(node -c src/renderer/js/ws-api-shim.js)"
+      "Bash(node -c src/renderer/js/ws-api-shim.js)",
+      "Bash(node -c src/renderer/js/ui-connection.js)"
     ]
   }
 }

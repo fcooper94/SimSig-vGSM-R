@@ -32,6 +32,7 @@ let ttsVoicesCache = null;
 let elevenLabsVoicesCache = null;
 let peerDiscovery = null;
 let playerCallServer = null;
+let workstationPanels = null; // { "Panel 1": "JO", "Panel 2": "FC", ... }
 const PLAYER_CALL_PORT = 51521;
 
 // Tracked state for syncing new WebSocket clients
@@ -368,8 +369,11 @@ function registerIpcHandlers() {
         (simName) => {
           sendToMainWindow(channels.SIM_NAME, simName);
           settings.set('signaller.panelName', simName);
-          if (peerDiscovery) peerDiscovery.updatePanel(simName);
-          if (playerCallServer) playerCallServer.updatePanel(simName);
+          // Only use sim name as broadcast if we haven't found our specific panel yet
+          if (!workstationPanels) {
+            if (peerDiscovery) peerDiscovery.updatePanel(simName);
+            if (playerCallServer) playerCallServer.updatePanel(simName);
+          }
         },
         () => {
           console.log('[IPC] SimSig closed — forcing disconnect');
@@ -393,6 +397,26 @@ function registerIpcHandlers() {
           sendToMainWindow(channels.FAILURE_DISMISSED, dismissed);
         },
         (lines) => {
+          // Parse workstation transfer lines to detect panel assignments
+          // Format: "HH:MM:SS Workstation Panel X transferred to YY"
+          const ourInitials = (settings.get('signaller.initials') || '').toUpperCase();
+          for (const line of lines) {
+            const m = line.match(/Workstation\s+(.+?)\s+transferred\s+to\s+(\S+)/i);
+            if (m) {
+              const panelName = m[1].trim();
+              const initials = m[2].trim().toUpperCase();
+              console.log(`[Workstation] "${panelName}" → ${initials}`);
+              if (!workstationPanels) workstationPanels = {};
+              workstationPanels[panelName] = initials;
+              // If this is our initials, update our broadcast panel name
+              if (ourInitials && initials === ourInitials) {
+                const fullPanel = `${panelName} (${lastSimName || ''})`.trim();
+                console.log(`[Workstation] Our panel: "${fullPanel}"`);
+                if (peerDiscovery) peerDiscovery.updatePanel(fullPanel);
+                if (playerCallServer) playerCallServer.updatePanel(fullPanel);
+              }
+            }
+          }
           sendToMainWindow(channels.MESSAGE_LOG_LINES, lines);
         },
       );
@@ -461,6 +485,7 @@ function registerIpcHandlers() {
   });
 
   registerHandler(channels.CONNECTION_DISCONNECT, async () => {
+    workstationPanels = null;
     if (peerDiscovery) { peerDiscovery.stop(); peerDiscovery = null; }
     if (playerCallServer) { playerCallServer.stop(); playerCallServer = null; }
     if (phoneReader) {

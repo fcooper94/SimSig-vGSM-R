@@ -3731,7 +3731,8 @@ const PhoneCallsUI = {
       return;
     }
 
-    // Call connected
+    // Call connected — stop the dialing tone before entering call
+    this.stopDialing(true);
     this._startPlayerCall(peer.panel);
   },
 
