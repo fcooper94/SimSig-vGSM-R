@@ -315,7 +315,16 @@ function registerIpcHandlers() {
           sendToAllWindows(channels.MESSAGE_RECEIVED, msg);
         },
         onStatusChange: (status) => {
-          if (status === 'connected') gatewayConnected = true;
+          if (status === 'connected') {
+            gatewayConnected = true;
+            // Start peer discovery now that STOMP is connected
+            if (peerDiscovery) peerDiscovery.stop();
+            peerDiscovery = new PeerDiscovery();
+            peerDiscovery.onPeersChanged = (peers) => {
+              sendToMainWindow(channels.PLAYER_PEERS_UPDATE, peers);
+            };
+            peerDiscovery.start(config.signaller?.panelName || '', PLAYER_CALL_PORT, stompManager.client);
+          }
           // Stop retrying and show amber warning if gateway was never reached
           if (status === 'reconnecting' && !gatewayConnected) {
             sendToMainWindow(channels.CONNECTION_STATUS, { status: 'no-gateway' });
@@ -446,12 +455,6 @@ function registerIpcHandlers() {
       };
       playerCallServer.start(PLAYER_CALL_PORT, config.signaller?.panelName || '');
 
-      if (peerDiscovery) peerDiscovery.stop();
-      peerDiscovery = new PeerDiscovery();
-      peerDiscovery.onPeersChanged = (peers) => {
-        sendToMainWindow(channels.PLAYER_PEERS_UPDATE, peers);
-      };
-      peerDiscovery.start(config.signaller?.panelName || '', PLAYER_CALL_PORT, config.gateway.host, config.gateway.port);
     } catch (err) {
       console.error('[Gateway] Connection failed:', err);
       sendToMainWindow(channels.CONNECTION_STATUS, { status: 'no-gateway', error: err.message });
