@@ -287,9 +287,6 @@ function registerIpcHandlers() {
         username: config.credentials.username,
         password: config.credentials.password,
         onMessage: (msg) => {
-          // Check for vGSM-R peer presence messages — don't forward these to UI
-          if (peerDiscovery && peerDiscovery.handleMessage(msg)) return;
-
           const prevClock = getClockState().clockSeconds;
 
           // Handle clock messages (pause/speed changes) — always forward to renderer
@@ -318,16 +315,7 @@ function registerIpcHandlers() {
           sendToAllWindows(channels.MESSAGE_RECEIVED, msg);
         },
         onStatusChange: (status) => {
-          if (status === 'connected') {
-            gatewayConnected = true;
-            // Start peer discovery now that STOMP is connected
-            if (peerDiscovery) peerDiscovery.stop();
-            peerDiscovery = new PeerDiscovery();
-            peerDiscovery.onPeersChanged = (peers) => {
-              sendToMainWindow(channels.PLAYER_PEERS_UPDATE, peers);
-            };
-            peerDiscovery.start(config.signaller?.panelName || '', PLAYER_CALL_PORT, stompManager.client);
-          }
+          if (status === 'connected') gatewayConnected = true;
           // Stop retrying and show amber warning if gateway was never reached
           if (status === 'reconnecting' && !gatewayConnected) {
             sendToMainWindow(channels.CONNECTION_STATUS, { status: 'no-gateway' });
@@ -457,6 +445,14 @@ function registerIpcHandlers() {
         sendToMainWindow(channels.PLAYER_CALL_REJECTED, reason);
       };
       playerCallServer.start(PLAYER_CALL_PORT, config.signaller?.panelName || '');
+
+      // Start UDP peer discovery for LAN player detection
+      if (peerDiscovery) peerDiscovery.stop();
+      peerDiscovery = new PeerDiscovery();
+      peerDiscovery.onPeersChanged = (peers) => {
+        sendToMainWindow(channels.PLAYER_PEERS_UPDATE, peers);
+      };
+      peerDiscovery.start(config.signaller?.panelName || '', PLAYER_CALL_PORT);
 
     } catch (err) {
       console.error('[Gateway] Connection failed:', err);
