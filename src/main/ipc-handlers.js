@@ -287,6 +287,9 @@ function registerIpcHandlers() {
         username: config.credentials.username,
         password: config.credentials.password,
         onMessage: (msg) => {
+          // Check for vGSM-R peer presence messages — don't forward these to UI
+          if (peerDiscovery && peerDiscovery.handleMessage(msg)) return;
+
           const prevClock = getClockState().clockSeconds;
 
           // Handle clock messages (pause/speed changes) — always forward to renderer
