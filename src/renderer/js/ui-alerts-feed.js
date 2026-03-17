@@ -112,7 +112,7 @@ const AlertsFeed = {
 
       const redMatch = text.match(/^(\w+)\s+waiting at red signal\s+(\S+)/i);
       if (redMatch) {
-        const hc = redMatch[1];
+        const hc = redMatch[1].toUpperCase();
         const sig = redMatch[2];
         const existing = this._activeRedSignals.get(hc);
         if (!existing || existing.signal !== sig) {
@@ -149,8 +149,12 @@ const AlertsFeed = {
       const moveHc = this._extractMovementHeadcode(text);
       if (moveHc) {
         const entry = this._activeRedSignals.get(moveHc);
-        // Only remove un-waited trains; waited trains persist until manually removed
-        if (entry && !entry.waited) {
+        if (entry) {
+          if (entry.waited) {
+            // Clean up the auto-wait that was queued for this train
+            window.simsigAPI.phone.clearAutoWait(moveHc);
+            this._waitedPairs.delete(moveHc + '|' + entry.signal);
+          }
           if (this._selectedHc === moveHc) this._selectedHc = null;
           this._activeRedSignals.delete(moveHc);
           changed = true;
