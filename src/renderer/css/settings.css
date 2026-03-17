@@ -349,6 +349,122 @@ label input[type="range"] + span {
   font-weight: bold;
 }
 
+/* Initials modal */
+.initials-content {
+  background: var(--bg-panel);
+  border: 2px solid;
+  border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+  padding: 28px 36px 24px;
+  min-width: 320px;
+  max-width: 400px;
+  text-align: center;
+  color: var(--text);
+  border-radius: 2px;
+}
+
+.initials-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+
+.initials-content h3 {
+  margin: 0 0 10px;
+  color: #000080;
+  font-size: 18px;
+  letter-spacing: 0.5px;
+}
+
+.initials-content p {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #444;
+}
+
+.initials-hint {
+  font-size: 11px;
+  color: #888;
+}
+
+#initials-input {
+  width: 90px;
+  text-align: center;
+  font-size: 24px;
+  font-weight: bold;
+  font-family: inherit;
+  padding: 8px 12px;
+  text-transform: uppercase;
+  letter-spacing: 4px;
+  border: 2px solid;
+  border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+  background: #fff;
+  color: #000080;
+  margin: 0 0 18px;
+  outline: none;
+}
+
+#initials-input:focus {
+  border-color: #000080;
+  box-shadow: 0 0 0 2px rgba(0, 0, 128, 0.15);
+}
+
+#initials-input::placeholder {
+  color: #bbb;
+  letter-spacing: 4px;
+  font-weight: normal;
+}
+
+.initials-connect-btn {
+  background: #000080 !important;
+  color: #fff !important;
+  border-color: #3333cc #000044 #000044 #3333cc !important;
+}
+
+.initials-connect-btn:hover {
+  background: #0000aa !important;
+}
+
+body.dark-mode .initials-content {
+  background: var(--bg-panel);
+}
+
+body.dark-mode .initials-content h3 {
+  color: var(--accent);
+}
+
+body.dark-mode .initials-content p {
+  color: #aaa;
+}
+
+body.dark-mode .initials-hint {
+  color: #777;
+}
+
+body.dark-mode #initials-input {
+  background: #1a1a2e;
+  color: var(--accent);
+  border-color: #444 #222 #222 #444;
+}
+
+body.dark-mode #initials-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(0, 200, 255, 0.15);
+}
+
+body.dark-mode #initials-input::placeholder {
+  color: #555;
+}
+
+body.dark-mode .initials-connect-btn {
+  background: var(--accent) !important;
+  color: #000 !important;
+  border-color: #33ccee #006688 #006688 #33ccee !important;
+}
+
+body.dark-mode .initials-connect-btn:hover {
+  background: #00ccee !important;
+}
+
 #emrg-confirm-yes {
   background: #cc0000;
   color: #ffffff;

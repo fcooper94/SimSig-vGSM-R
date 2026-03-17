@@ -387,12 +387,13 @@
 
   <!-- ── GENERIC CONFIRM MODAL ──────────────────────────────── -->
   <div id="initials-modal" class="modal hidden">
-    <div class="confirm-content">
-      <h3>Enter Your Initials</h3>
-      <p>Enter the initials you used to join this SimSig multiplayer session.</p>
-      <input type="text" id="initials-input" maxlength="4" placeholder="e.g. JO" autocomplete="off" style="width:80px;text-align:center;font-size:18px;padding:6px 10px;text-transform:uppercase;margin:8px 0 12px;" />
+    <div class="initials-content">
+      <div class="initials-icon">📡</div>
+      <h3>Session Initials</h3>
+      <p>Enter your initials used to start/join this session.<br><span class="initials-hint">Used to identify your panel for telephone calling.</span></p>
+      <input type="text" id="initials-input" maxlength="4" placeholder="JO" autocomplete="off" spellcheck="false" />
       <div class="confirm-actions">
-        <button id="initials-ok">Connect</button>
+        <button id="initials-ok" class="initials-connect-btn">Connect</button>
         <button id="initials-cancel">Cancel</button>
       </div>
     </div>

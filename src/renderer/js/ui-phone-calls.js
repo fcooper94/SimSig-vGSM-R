@@ -651,6 +651,8 @@ const PhoneCallsUI = {
 
   phoneticize(text) {
     text = this.naturalizeTimes(text);
+    // Strip portion suffixes from headcodes (e.g. "2K12-1" → "2K12")
+    text = text.replace(/\b([0-9][A-Za-z][0-9]{2})-\d+\b/g, '$1');
     return text.replace(/\b[A-Z0-9]{2,}\b/gi, (match) => {
       // Check exception list — words that TTS should say as words
       if (this.TTS_WORDS[match.toUpperCase()]) return this.TTS_WORDS[match.toUpperCase()];
@@ -891,7 +893,9 @@ const PhoneCallsUI = {
   // Shorten a caller name to at most 4 words, stripping parenthesised suffixes
   shortenCaller(name) {
     const short = name.replace(/\s*\([^)]*\)\s*/g, '').replace(/\s*\/.*$/, '').trim();
-    const words = short.split(/\s+/);
+    // Strip portion suffixes from headcodes (e.g. "2K12-1" → "2K12")
+    const cleaned = short.replace(/\b([0-9][A-Za-z][0-9]{2})-\d+\b/g, '$1');
+    const words = cleaned.split(/\s+/);
     return words.slice(0, 4).join(' ');
   },
 
@@ -3726,15 +3730,6 @@ const PhoneCallsUI = {
 
     if (result.error) {
       this.stopDialing();
-      // Show brief error
-      this.messages = [{ type: 'system', text: result.error }];
-      this.showCommsOverlay();
-      this.renderChat();
-      setTimeout(() => {
-        if (!this._playerCall) this.hideCommsOverlay();
-        this.messages = [];
-        this.renderChat();
-      }, 3000);
       return;
     }
 
@@ -3801,14 +3796,6 @@ const PhoneCallsUI = {
   handlePlayerCallRejected(reason) {
     this._playerDialing = false;
     this.stopDialing();
-    this.messages = [{ type: 'system', text: reason || 'Call rejected' }];
-    this.showCommsOverlay();
-    this.renderChat();
-    setTimeout(() => {
-      if (!this._playerCall) this.hideCommsOverlay();
-      this.messages = [];
-      this.renderChat();
-    }, 3000);
   },
 
   handlePlayerAudioReceived(pcmArray) {
@@ -3842,13 +3829,7 @@ const PhoneCallsUI = {
     if (line1) line1.textContent = 'Player Call';
     if (line2) line2.textContent = peerPanel;
 
-    // Show comms overlay with connected message
-    this.messages = [
-      { type: 'system', text: `Connected to ${peerPanel}` },
-      { type: 'system', text: 'Hold PTT to speak' },
-    ];
-    this.showCommsOverlay();
-    this.renderChat();
+    // No comms overlay for player calls — voice only
 
     // Start background noise (radio static)
     this.bgCallerType = 'signaller';
@@ -3873,10 +3854,6 @@ const PhoneCallsUI = {
   async _startPlayerRecording() {
     if (this._playerRecording) return;
     this._playerRecording = true;
-
-    // Add visual indicator
-    this.messages.push({ type: 'system', text: 'Transmitting...' });
-    this.renderChat();
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -3909,10 +3886,6 @@ const PhoneCallsUI = {
   _stopPlayerRecording() {
     if (!this._playerRecording) return;
     this._playerRecording = false;
-
-    // Remove "Transmitting..." message
-    this.messages = this.messages.filter(m => !(m.type === 'system' && m.text === 'Transmitting...'));
-    this.renderChat();
 
     if (this._playerRecordProcessor) {
       this._playerRecordProcessor.disconnect();
@@ -3987,9 +3960,6 @@ const PhoneCallsUI = {
       this._playerPlaybackTime = 0;
     }
 
-    // Brief end message
-    this.messages = [{ type: 'system', text: reason || 'Call ended' }];
-    this.renderChat();
     this.hideNotification();
 
     // Reset radio display
@@ -4000,13 +3970,6 @@ const PhoneCallsUI = {
     if (line1) line1.textContent = 'GSM-R';
     if (line2) line2.textContent = 'Ready';
 
-    setTimeout(() => {
-      if (!this._playerCall && !this.inCall && !this._outgoingCall) {
-        this.hideCommsOverlay();
-        this.messages = [];
-        this.renderChat();
-      }
-      this._resumeIncoming();
-    }, 2000);
+    this._resumeIncoming();
   },
 };

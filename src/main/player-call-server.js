@@ -46,9 +46,16 @@ class PlayerCallServer {
         }
       });
       ws.on('close', () => {
+        console.log('[PlayerCalls] WebSocket closed, activeCall:', !!this.activeCall);
         if (this.activeCall && this.activeCall.ws === ws) {
-          console.log('[PlayerCalls] Peer disconnected — ending call');
-          this._endCall();
+          console.log('[PlayerCalls] Peer disconnected — ending call/ringing');
+          // Clear ring timeout if still ringing
+          if (this._ringTimeout) {
+            clearTimeout(this._ringTimeout);
+            this._ringTimeout = null;
+          }
+          this.activeCall = null;
+          if (this.onCallEnded) this.onCallEnded();
         }
       });
       ws.on('error', () => {});
@@ -156,7 +163,10 @@ class PlayerCallServer {
   // Cancel an outgoing dial attempt
   cancelDial() {
     if (this.outgoingWs) {
-      try { this.outgoingWs.send(JSON.stringify({ type: 'call-end' })); } catch {}
+      console.log('[PlayerCalls] Cancelling dial, ws state:', this.outgoingWs.readyState);
+      if (this.outgoingWs.readyState === WebSocket.OPEN) {
+        try { this.outgoingWs.send(JSON.stringify({ type: 'call-end' })); } catch {}
+      }
       try { this.outgoingWs.close(); } catch {}
       this.outgoingWs = null;
     }
@@ -194,6 +204,9 @@ class PlayerCallServer {
   hangUp() {
     if (this._ringTimeout) { clearTimeout(this._ringTimeout); this._ringTimeout = null; }
     if (this.outgoingWs) {
+      if (this.outgoingWs.readyState === WebSocket.OPEN) {
+        try { this.outgoingWs.send(JSON.stringify({ type: 'call-end' })); } catch {}
+      }
       try { this.outgoingWs.close(); } catch {}
       this.outgoingWs = null;
     }

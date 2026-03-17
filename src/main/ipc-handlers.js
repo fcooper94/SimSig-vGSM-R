@@ -411,11 +411,7 @@ function registerIpcHandlers() {
         (simName) => {
           sendToMainWindow(channels.SIM_NAME, simName);
           settings.set('signaller.panelName', simName);
-          // Only use sim name as broadcast if we haven't found our specific panel yet
-          if (!workstationPanels) {
-            if (peerDiscovery) peerDiscovery.updatePanel(simName);
-            if (playerCallServer) playerCallServer.updatePanel(simName);
-          }
+          // Don't broadcast sim name — wait for workstation detection to set the real panel
         },
         () => {
           console.log('[IPC] SimSig closed — forcing disconnect');
@@ -503,7 +499,7 @@ function registerIpcHandlers() {
       peerDiscovery.onPeersChanged = (peers) => {
         sendToMainWindow(channels.PLAYER_PEERS_UPDATE, peers);
       };
-      peerDiscovery.start(config.signaller?.panelName || '', PLAYER_CALL_PORT);
+      peerDiscovery.start('', PLAYER_CALL_PORT);
 
     } catch (err) {
       console.error('[Gateway] Connection failed:', err);
