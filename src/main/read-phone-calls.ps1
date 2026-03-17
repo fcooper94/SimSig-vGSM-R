@@ -274,6 +274,15 @@ try {
     # If telephone window is not open, don't send F6 from here.
     # The caller (PhoneReader) handles opening it once via a separate script.
 
+    # Determine if this SimSig instance is the server host.
+    # Host window title contains "(server on port ...)"; clients do not.
+    $isHost = $false
+    if ($simsigHwnd -ne [IntPtr]::Zero) {
+        $titleBuf = New-Object System.Text.StringBuilder 512
+        [SimSigListBox]::GetWindowText($simsigHwnd, $titleBuf, 512) | Out-Null
+        $isHost = $titleBuf.ToString() -match "server on port"
+    }
+
     # Read calls from listbox if telephone window is open
     if ($teleHwnd -ne [IntPtr]::Zero) {
         # Keep the telephone window hidden off-screen
@@ -284,17 +293,22 @@ try {
         if ($listBoxHwnd -ne [IntPtr]::Zero) {
             $count = [SimSigListBox]::GetCount($listBoxHwnd)
 
-            # Open the SimSig process for memory reading (to detect transferred calls)
+            # On the host, open the SimSig process for memory reading to detect
+            # calls transferred to other operators and exclude them.
+            # On a client, SimSig already filters the list to only show relevant
+            # calls, so all items should be shown without further filtering.
             $procId = 0
             [SimSigListBox]::GetWindowThreadProcessId($listBoxHwnd, [ref]$procId) | Out-Null
-            $hProc = if ($procId -ne 0) { [SimSigListBox]::OpenProcess([SimSigListBox]::PROCESS_VM_READ, $false, $procId) } else { [IntPtr]::Zero }
+            $hProc = if ($isHost -and $procId -ne 0) { [SimSigListBox]::OpenProcess([SimSigListBox]::PROCESS_VM_READ, $false, $procId) } else { [IntPtr]::Zero }
 
             for ($i = 0; $i -lt $count; $i++) {
                 $text = [SimSigListBox]::GetText($listBoxHwnd, $i)
                 if (!$text) { continue }
-                $itemData = [SimSigListBox]::GetItemData($listBoxHwnd, $i)
-                $callStatus = [SimSigListBox]::GetCallStatus($hProc, $itemData)
-                if ($callStatus -ne $null) { continue }
+                if ($isHost) {
+                    $itemData = [SimSigListBox]::GetItemData($listBoxHwnd, $i)
+                    $callStatus = [SimSigListBox]::GetCallStatus($hProc, $itemData)
+                    if ($callStatus -ne $null) { continue }
+                }
                 $calls += @{ train = $text; status = "Unanswered" }
             }
 
