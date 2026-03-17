@@ -126,8 +126,12 @@ class PhoneReader {
         }
         if (count > this._lastLineCount && this.onMessageLogLines) {
           let newLines = lines.slice(this._lastLineCount);
-          // On first load, filter to only last 30 minutes of game time
+          // On first load, scan ALL lines for workstation assignments before filtering
           if (this._lastLineCount === 0 && newLines.length > 0) {
+            if (this.onWorkstationLines) {
+              const wksLines = newLines.filter(l => /Workstation\s+.+\s+transferred\s+to\s+/i.test(l));
+              if (wksLines.length > 0) this.onWorkstationLines(wksLines);
+            }
             newLines = this._filterRecent(newLines, 30);
             console.log('[PhoneReader] Initial load: filtered to', newLines.length, 'recent lines from', count);
           } else {
@@ -138,9 +142,15 @@ class PhoneReader {
         } else if (count < this._lastLineCount) {
           // Log was cleared/reset (new sim loaded)
           this._lastLineCount = count;
-          if (count > 0 && this.onMessageLogLines) {
-            const filtered = this._filterRecent(lines, 30);
-            if (filtered.length > 0) this.onMessageLogLines(filtered);
+          if (count > 0) {
+            if (this.onWorkstationLines) {
+              const wksLines = lines.filter(l => /Workstation\s+.+\s+transferred\s+to\s+/i.test(l));
+              if (wksLines.length > 0) this.onWorkstationLines(wksLines);
+            }
+            if (this.onMessageLogLines) {
+              const filtered = this._filterRecent(lines, 30);
+              if (filtered.length > 0) this.onMessageLogLines(filtered);
+            }
           }
         }
       } catch (e) {

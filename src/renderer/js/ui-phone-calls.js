@@ -686,7 +686,7 @@ const PhoneCallsUI = {
   // Cached by headcode so the same train always gets the same voice within a session
   getTTSVoiceId(caller, voices) {
     // All outgoing calls share the same voice for the session
-    const cacheKey = this._outgoingCall ? '_outgoing' : (this.currentHeadCode || caller);
+    const cacheKey = this._outgoingCall ? '_outgoing' : (this._activeCallVoiceKey || this.currentHeadCode || caller);
     if (this.voiceCache[cacheKey]) return this.voiceCache[cacheKey];
     const hash = this.hashString(caller);
     const males = voices.filter((v) => v.gender === 'male');
@@ -786,13 +786,14 @@ const PhoneCallsUI = {
       const pool = onlineVoices.length > 0 ? onlineVoices
         : gbVoices.length > 0 ? gbVoices
         : voices;
-      const hash = this.hashString(caller);
+      const voiceKey = this._activeCallVoiceKey || caller;
+      const hash = this.hashString(voiceKey);
 
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'en-GB';
       utterance.voice = pool[hash % pool.length] || null;
       utterance.pitch = 0.7 + ((hash >> 4) % 100) / 100 * 0.6;
-      utterance.rate = 2.0 + ((hash >> 8) % 100) / 100 * 0.3;
+      utterance.rate = 1.0 + ((hash >> 8) % 100) / 100 * 0.2;
 
       utterance.onend = () => { resolve(); };
       utterance.onerror = () => { resolve(); };
@@ -3410,6 +3411,7 @@ const PhoneCallsUI = {
     }
     this._playerCall = false;
     this._playerDialing = false;
+    this._playerRinging = false;
     this._playerCallPanel = '';
     this._playerAnswerHandler = null;
 
@@ -3738,10 +3740,11 @@ const PhoneCallsUI = {
 
   // Called when we receive an incoming player call
   handleIncomingPlayerCall(peerPanel) {
-    if (this.inCall || this._outgoingCall || this._playerCall || this._playerDialing || this._dialingActive) {
+    if (this.inCall || this._outgoingCall || this._playerCall || this._playerDialing || this._dialingActive || this._playerRinging) {
       // Busy — auto-reject happens in main process
       return;
     }
+    this._playerRinging = true;
     this._playerCallPanel = peerPanel;
 
     // Show incoming call notification
@@ -3765,6 +3768,7 @@ const PhoneCallsUI = {
 
     // Answer button handler
     const answerHandler = () => {
+      this._playerRinging = false;
       this.stopRinging();
       window.simsigAPI.player.answer();
       this._startPlayerCall(peerPanel);
@@ -3949,7 +3953,8 @@ const PhoneCallsUI = {
   },
 
   _endPlayerCall(reason) {
-    if (!this._playerCall && !this._playerDialing) return;
+    if (!this._playerCall && !this._playerDialing && !this._playerRinging) return;
+    this._playerRinging = false;
     this._stopPlayerRecording();
     this.stopBgNoise();
     this.stopRinging();

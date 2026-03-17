@@ -229,6 +229,48 @@ function getInitialState() {
 }
 
 
+function parseWorkstationLines(lines) {
+  const ourInitials = (settings.get('signaller.initials') || '').toUpperCase();
+  let foundOurPanel = false;
+  for (const line of lines) {
+    const m = line.match(/Workstation\s+(.+?)\s+transferred\s+to\s+(\S+)/i);
+    if (m) {
+      const panelName = m[1].trim();
+      const initials = m[2].trim().toUpperCase();
+      console.log(`[Workstation] "${panelName}" → ${initials}`);
+      if (!workstationPanels) workstationPanels = {};
+      workstationPanels[panelName] = initials;
+      if (ourInitials && initials === ourInitials) {
+        foundOurPanel = true;
+        const fullPanel = `${panelName} (${lastSimName || ''})`.trim();
+        console.log(`[Workstation] Our panel (client): "${fullPanel}"`);
+        if (peerDiscovery) peerDiscovery.updatePanel(fullPanel);
+        if (playerCallServer) playerCallServer.updatePanel(fullPanel);
+        sendToMainWindow('workstation:our-panel', panelName);
+      }
+    }
+  }
+
+  // If we didn't match any transfer, we're the host — we own unclaimed panels
+  if (!foundOurPanel && workstationPanels && ourInitials) {
+    const allPanels = Object.keys(workstationPanels);
+    const claimedByOthers = new Set(Object.values(workstationPanels));
+    // All known panels were claimed by clients, so host owns the rest
+    // We can't know panel names that were never transferred, but we can
+    // identify ourselves as the host
+    const unclaimedPanels = allPanels.filter(p => workstationPanels[p] === ourInitials);
+    if (unclaimedPanels.length === 0) {
+      // No panels match our initials at all — we're the host
+      const sim = lastSimName || 'Unknown';
+      console.log(`[Workstation] No transfer for "${ourInitials}" — host of ${sim}`);
+      const hostLabel = `${sim} (Host)`;
+      if (peerDiscovery) peerDiscovery.updatePanel(hostLabel);
+      if (playerCallServer) playerCallServer.updatePanel(hostLabel);
+      sendToMainWindow('workstation:our-panel', `Host — ${sim}`);
+    }
+  }
+}
+
 function registerIpcHandlers() {
   // App info
   registerHandler('app:get-version', () => app.getVersion());
@@ -397,30 +439,15 @@ function registerIpcHandlers() {
           sendToMainWindow(channels.FAILURE_DISMISSED, dismissed);
         },
         (lines) => {
-          // Parse workstation transfer lines to detect panel assignments
-          // Format: "HH:MM:SS Workstation Panel X transferred to YY"
-          const ourInitials = (settings.get('signaller.initials') || '').toUpperCase();
-          for (const line of lines) {
-            const m = line.match(/Workstation\s+(.+?)\s+transferred\s+to\s+(\S+)/i);
-            if (m) {
-              const panelName = m[1].trim();
-              const initials = m[2].trim().toUpperCase();
-              console.log(`[Workstation] "${panelName}" → ${initials}`);
-              if (!workstationPanels) workstationPanels = {};
-              workstationPanels[panelName] = initials;
-              // If this is our initials, update our broadcast panel name
-              if (ourInitials && initials === ourInitials) {
-                const fullPanel = `${panelName} (${lastSimName || ''})`.trim();
-                console.log(`[Workstation] Our panel: "${fullPanel}"`);
-                if (peerDiscovery) peerDiscovery.updatePanel(fullPanel);
-                if (playerCallServer) playerCallServer.updatePanel(fullPanel);
-              }
-            }
-          }
+          parseWorkstationLines(lines);
           sendToMainWindow(channels.MESSAGE_LOG_LINES, lines);
         },
       );
       // Keep our window above SimSig without being always-on-top globally
+      // Scan full message log for workstation assignments (before 30-min filter)
+      phoneReader.onWorkstationLines = (wksLines) => {
+        parseWorkstationLines(wksLines);
+      };
       phoneReader.onKeepAbove = () => {
         if (mainInCall || autoWaitRunning) return; // don't fight with PS1 scripts during calls
         const win = BrowserWindow.getAllWindows()[0];

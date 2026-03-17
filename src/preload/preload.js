@@ -277,6 +277,11 @@ contextBridge.exposeInMainWorld('simsigAPI', {
       ipcRenderer.on(channels.PLAYER_CALL_REJECTED, listener);
       return () => ipcRenderer.removeListener(channels.PLAYER_CALL_REJECTED, listener);
     },
+    onOurPanel: (callback) => {
+      const listener = (_event, panelName) => callback(panelName);
+      ipcRenderer.on('workstation:our-panel', listener);
+      return () => ipcRenderer.removeListener('workstation:our-panel', listener);
+    },
   },
 
   app: {

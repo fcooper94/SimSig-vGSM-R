@@ -19,6 +19,7 @@ const ConnectionUI = {
       } else {
         this.promptInitials((initials) => {
           window.simsigAPI.settings.set('signaller.initials', initials);
+          document.getElementById('panel-name-tab').dataset.initials = initials;
           window.simsigAPI.connection.connect();
           this.setStatus('connecting');
           const initOverlay = document.getElementById('init-overlay');

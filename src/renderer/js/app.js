@@ -136,6 +136,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     AlertsFeed.restoreState();
   });
 
+  // Show our workstation panel name when detected from message log
+  if (window.simsigAPI.player.onOurPanel) {
+    window.simsigAPI.player.onOurPanel((panelName) => {
+      const initials = document.getElementById('panel-name-tab').dataset.initials || '';
+      document.getElementById('panel-subtitle').textContent = `${panelName}${initials ? ' (' + initials + ')' : ''}`;
+    });
+  }
+
   // Now do async initialization (PTTUI needs settings from main process)
   await PTTUI.init();
 
