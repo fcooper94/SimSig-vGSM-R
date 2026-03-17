@@ -45,14 +45,17 @@ class PlayerCallServer {
           this._handleSignaling(ws, JSON.parse(data.toString()));
         }
       });
-      ws.on('close', () => {
-        console.log('[PlayerCalls] WebSocket closed, activeCall:', !!this.activeCall);
+      const endIfActive = (reason) => {
         if (this.activeCall && this.activeCall.ws === ws) {
-          console.log('[PlayerCalls] Peer disconnected — ending call/ringing');
+          console.log(`[PlayerCalls] ${reason} — ending call/ringing`);
           this._endCall();
         }
+      };
+      ws.on('close', () => endIfActive('WebSocket closed'));
+      ws.on('error', (err) => {
+        console.log('[PlayerCalls] WebSocket error:', err.message);
+        endIfActive('WebSocket error');
       });
-      ws.on('error', () => {});
     });
   }
 
@@ -161,7 +164,8 @@ class PlayerCallServer {
       if (this.outgoingWs.readyState === WebSocket.OPEN) {
         try { this.outgoingWs.send(JSON.stringify({ type: 'call-end' })); } catch {}
       }
-      try { this.outgoingWs.close(); } catch {}
+      // terminate() for immediate disconnect — close() can delay
+      try { this.outgoingWs.terminate(); } catch {}
       this.outgoingWs = null;
     }
   }
@@ -199,11 +203,12 @@ class PlayerCallServer {
   // Hang up the active call
   hangUp() {
     if (this._ringTimeout) { clearTimeout(this._ringTimeout); this._ringTimeout = null; }
+    if (this._ringPing) { clearInterval(this._ringPing); this._ringPing = null; }
     if (this.outgoingWs) {
       if (this.outgoingWs.readyState === WebSocket.OPEN) {
         try { this.outgoingWs.send(JSON.stringify({ type: 'call-end' })); } catch {}
       }
-      try { this.outgoingWs.close(); } catch {}
+      try { this.outgoingWs.terminate(); } catch {}
       this.outgoingWs = null;
     }
     if (this.activeCall) {
@@ -250,20 +255,23 @@ class PlayerCallServer {
           if (this.onCallEnded) this.onCallEnded();
         }
       }, CALL_RING_TIMEOUT);
-      // Ping caller every 2s during ringing to detect early hangup
+      // Ping/pong to detect caller hangup during ringing
+      let pongReceived = true;
+      ws.on('pong', () => { pongReceived = true; });
       this._ringPing = setInterval(() => {
         if (!this.activeCall || this.activeCall.ws !== ws) {
           clearInterval(this._ringPing);
           this._ringPing = null;
           return;
         }
-        if (ws.readyState !== WebSocket.OPEN) {
-          console.log('[PlayerCalls] Caller disconnected during ringing (ping check)');
+        if (!pongReceived || ws.readyState !== WebSocket.OPEN) {
+          console.log('[PlayerCalls] Caller disconnected during ringing (no pong)');
           clearInterval(this._ringPing);
           this._ringPing = null;
           this._endCall();
           return;
         }
+        pongReceived = false;
         try { ws.ping(); } catch {}
       }, 2000);
       if (this.onIncomingCall) this.onIncomingCall(msg.panel, msg.id);

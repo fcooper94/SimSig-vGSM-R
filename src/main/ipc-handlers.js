@@ -384,27 +384,42 @@ function registerIpcHandlers() {
       phoneReader = new PhoneReader(
         (calls) => {
           // Intercept calls that match a pending auto-wait before they reach the renderer
-          const filtered = [];
+          const afterAutoWait = [];
           for (const call of calls) {
             const hc = extractHeadcode(call.train);
             if (pendingAutoWaits.has(hc)) {
-              // Driver just called — suppress and queue auto-wait (keep pending for repeat calls)
               console.log(`[AutoWait] Intercepted call from ${call.train} (${hc})`);
               suppressedAutoWaits.add(hc);
-              phoneReader._locked = true; // lock immediately to prevent next poll
+              phoneReader._locked = true;
               queueAutoWait(call.train, hc);
             } else if (suppressedAutoWaits.has(hc)) {
               // Still being auto-answered — keep suppressing
             } else {
-              filtered.push(call);
+              afterAutoWait.push(call);
             }
           }
-          // Clean up suppressions for calls no longer in list (auto-wait completed)
           for (const hc of suppressedAutoWaits) {
             if (!calls.some((c) => extractHeadcode(c.train) === hc)) {
               suppressedAutoWaits.delete(hc);
             }
           }
+
+          // In multiplayer: filter out calls that another player is handling.
+          // Each vGSM-R instance broadcasts which headcodes it sees via UDP.
+          // Calls reported by another player are for their panel, not ours.
+          let filtered = afterAutoWait;
+          if (peerDiscovery) {
+            const peerCalls = peerDiscovery.getPeerCalls();
+            if (peerCalls.size > 0) {
+              filtered = afterAutoWait.filter(c => {
+                const hc = extractHeadcode(c.train);
+                return !peerCalls.has(hc);
+              });
+            }
+            // Update our broadcast with current call headcodes
+            peerDiscovery.updateCalls(afterAutoWait.map(c => extractHeadcode(c.train)));
+          }
+
           lastPhoneCalls = filtered;
           sendToMainWindow(channels.PHONE_CALLS_UPDATE, filtered);
         },

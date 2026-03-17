@@ -3411,6 +3411,7 @@ const PhoneCallsUI = {
     this._outgoingReplyProcessing = false;
     this._outgoingReplies = null;
     this._dialingActive = false;
+    if (this._ringDebounce) { clearTimeout(this._ringDebounce); this._ringDebounce = null; }
 
     // Clear player call state
     if (this._playerCall || this._playerDialing) {
