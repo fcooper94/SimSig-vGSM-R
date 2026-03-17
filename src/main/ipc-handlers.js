@@ -286,6 +286,14 @@ function parseWorkstationLines(lines) {
 }
 
 function registerIpcHandlers() {
+  // Wire up relay player list → Electron renderer (runs at startup, not just on connect)
+  webServer.setOnRelayPlayersChanged((relayPeers) => {
+    const udpPeers = peerDiscovery ? peerDiscovery.getPeers() : [];
+    const seenIds = new Set(udpPeers.map(p => p.id));
+    const merged = [...udpPeers, ...relayPeers.filter(p => !seenIds.has(p.id) && p.id !== ourRelayId)];
+    sendToMainWindow(channels.PLAYER_PEERS_UPDATE, merged);
+  });
+
   // App info
   registerHandler('app:get-version', () => app.getVersion());
 
@@ -335,6 +343,9 @@ function registerIpcHandlers() {
       }
 
       const config = settings.getAll();
+      // Register host immediately so it appears in the player list right away
+      const hostInitials = (config.signaller?.initials || 'Host').toUpperCase();
+      webServer.registerHostPlayer(ourRelayId, hostInitials);
       console.log('[Gateway] Connecting to', config.gateway.host + ':' + config.gateway.port);
       let gatewayConnected = false;
 
@@ -526,14 +537,6 @@ function registerIpcHandlers() {
         sendToMainWindow(channels.PLAYER_PEERS_UPDATE, merged);
       };
       peerDiscovery.start('', PLAYER_CALL_PORT);
-
-      // Relay: broadcast player list when web-server clients join/leave
-      webServer.setOnRelayPlayersChanged((relayPeers) => {
-        const udpPeers = peerDiscovery ? peerDiscovery.getPeers() : [];
-        const seenIds = new Set(udpPeers.map(p => p.id));
-        const merged = [...udpPeers, ...relayPeers.filter(p => !seenIds.has(p.id) && p.id !== ourRelayId)];
-        sendToMainWindow(channels.PLAYER_PEERS_UPDATE, merged);
-      });
 
       // Relay: handle signals and audio addressed to the host
       webServer.setOnHostRelayEvent((event) => {

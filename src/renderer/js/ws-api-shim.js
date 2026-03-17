@@ -154,9 +154,18 @@
     ws.onopen = () => {
       connected = true;
       console.log('[WS-Shim] Connected to server');
-      // Re-register player presence if we already know our panel
-      if (ourPanelName) {
+      // Register player presence immediately — use panel name if known, else fall back to initials
+      const registerNow = (name) => {
+        if (!ourPanelName) ourPanelName = name;
         ws.send(JSON.stringify({ type: 'player-register', id: ourPlayerId, panel: ourPanelName }));
+      };
+      if (ourPanelName) {
+        registerNow(ourPanelName);
+      } else {
+        // Fetch initials from settings as a temporary name until panel is known
+        invoke('settings:get', 'signaller.initials')
+          .then(v => registerNow((v || 'Player').toUpperCase()))
+          .catch(() => registerNow('Player'));
       }
     };
 
@@ -424,8 +433,9 @@
     // No web server control from browser clients
   };
 
-  // Register player presence when panel name is known
+  // Update player registration when the real panel name is known from SimSig
   on('workstation:our-panel', (panel) => {
+    if (!panel || ourPanelName === panel) return;
     ourPanelName = panel;
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'player-register', id: ourPlayerId, panel: ourPanelName }));
