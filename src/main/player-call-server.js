@@ -49,13 +49,7 @@ class PlayerCallServer {
         console.log('[PlayerCalls] WebSocket closed, activeCall:', !!this.activeCall);
         if (this.activeCall && this.activeCall.ws === ws) {
           console.log('[PlayerCalls] Peer disconnected — ending call/ringing');
-          // Clear ring timeout if still ringing
-          if (this._ringTimeout) {
-            clearTimeout(this._ringTimeout);
-            this._ringTimeout = null;
-          }
-          this.activeCall = null;
-          if (this.onCallEnded) this.onCallEnded();
+          this._endCall();
         }
       });
       ws.on('error', () => {});
@@ -176,6 +170,7 @@ class PlayerCallServer {
   answerCall() {
     if (!this.activeCall || this.activeCall.direction !== 'incoming') return;
     if (this._ringTimeout) { clearTimeout(this._ringTimeout); this._ringTimeout = null; }
+    if (this._ringPing) { clearInterval(this._ringPing); this._ringPing = null; }
     try {
       this.activeCall.ws.send(JSON.stringify({
         type: 'call-accepted',
@@ -197,6 +192,7 @@ class PlayerCallServer {
     const ws = this.activeCall.ws;
     this.activeCall = null;
     if (this._ringTimeout) { clearTimeout(this._ringTimeout); this._ringTimeout = null; }
+    if (this._ringPing) { clearInterval(this._ringPing); this._ringPing = null; }
     try { ws.close(); } catch {}
   }
 
@@ -254,6 +250,22 @@ class PlayerCallServer {
           if (this.onCallEnded) this.onCallEnded();
         }
       }, CALL_RING_TIMEOUT);
+      // Ping caller every 2s during ringing to detect early hangup
+      this._ringPing = setInterval(() => {
+        if (!this.activeCall || this.activeCall.ws !== ws) {
+          clearInterval(this._ringPing);
+          this._ringPing = null;
+          return;
+        }
+        if (ws.readyState !== WebSocket.OPEN) {
+          console.log('[PlayerCalls] Caller disconnected during ringing (ping check)');
+          clearInterval(this._ringPing);
+          this._ringPing = null;
+          this._endCall();
+          return;
+        }
+        try { ws.ping(); } catch {}
+      }, 2000);
       if (this.onIncomingCall) this.onIncomingCall(msg.panel, msg.id);
     } else if (msg.type === 'call-end') {
       if (this.activeCall && this.activeCall.ws === ws) {
@@ -273,6 +285,7 @@ class PlayerCallServer {
 
   _endCall() {
     if (this._ringTimeout) { clearTimeout(this._ringTimeout); this._ringTimeout = null; }
+    if (this._ringPing) { clearInterval(this._ringPing); this._ringPing = null; }
     if (this.activeCall) {
       try { this.activeCall.ws.close(); } catch {}
       this.activeCall = null;
