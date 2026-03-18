@@ -424,6 +424,8 @@
         }
       },
 
+      rescan: () => Promise.resolve(), // no-op for browser clients — relay handles discovery
+
       onIncomingCall: (cb) => on('player:incoming-call', cb),
       onCallAnswered: (cb) => on('player:call-answered', cb),
       onCallEnded: (cb) => on('player:call-ended', cb),

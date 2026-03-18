@@ -1849,6 +1849,12 @@ function registerIpcHandlers() {
     console.log(`[WebRTC] Sending ${signal?.type} → ${targetId}`);
     _sendPlayerSignal(targetId, signal);
   });
+
+  // Rescan — re-register on all relays to get a fresh peer list broadcast
+  registerHandler(channels.PLAYER_RESCAN, () => {
+    console.log('[Relay] Rescan requested — re-registering on all relays');
+    _reregisterRelays(ourPanelName);
+  });
 }
 
 module.exports = { registerIpcHandlers, handlerMap, setWsBroadcast, getInitialState };

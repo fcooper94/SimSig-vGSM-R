@@ -27,19 +27,22 @@ wss.on('connection', (ws) => {
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'player-register') {
-      // Leave previous room if re-registering (panel name update)
-      if (playerId && roomId) {
+      const newRoomId = msg.room || 'default';
+
+      // If changing rooms, leave the old one and notify its remaining members
+      if (playerId && roomId && roomId !== newRoomId) {
         rooms.get(roomId)?.delete(playerId);
-        broadcastRoom(roomId);
+        if (rooms.get(roomId)?.size === 0) rooms.delete(roomId);
+        else broadcastRoom(roomId);
       }
 
       playerId = msg.id;
-      roomId = msg.room || 'default';
+      roomId = newRoomId;
 
       if (!rooms.has(roomId)) rooms.set(roomId, new Map());
       rooms.get(roomId).set(playerId, { ws, panel: msg.panel });
 
-      console.log(`[${roomId}] "${msg.panel}" joined — ${rooms.get(roomId).size} in room`);
+      console.log(`[${roomId}] "${msg.panel}" registered — ${rooms.get(roomId).size} in room`);
       broadcastRoom(roomId);
       return;
     }

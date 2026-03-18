@@ -463,11 +463,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   pbDialBtn.addEventListener('click', () => _dialSelectedContact());
   pbCloseBtn.addEventListener('click', () => phonebookOverlay.classList.add('hidden'));
 
+  const pbRescanBtn = document.getElementById('pb-rescan-btn');
+
+  function _updateRescanVisibility() {
+    if (pbRescanBtn) pbRescanBtn.classList.toggle('hidden', _phonebookTab !== 'global');
+  }
+
   pbTabLocal.addEventListener('click', () => {
     if (_phonebookTab === 'local') return;
     _phonebookTab = 'local';
     pbTabLocal.classList.add('active');
     pbTabGlobal.classList.remove('active');
+    _updateRescanVisibility();
     _renderPhonebook();
   });
 
@@ -476,8 +483,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     _phonebookTab = 'global';
     pbTabGlobal.classList.add('active');
     pbTabLocal.classList.remove('active');
+    _updateRescanVisibility();
     _renderPhonebook();
   });
+
+  if (pbRescanBtn) {
+    pbRescanBtn.addEventListener('click', async () => {
+      pbRescanBtn.disabled = true;
+      pbRescanBtn.textContent = 'Scanning...';
+      await window.simsigAPI.player.rescan();
+      setTimeout(() => {
+        pbRescanBtn.disabled = false;
+        pbRescanBtn.textContent = '\u21BB Rescan';
+      }, 2000);
+    });
+  }
 
   document.getElementById('phonebook-btn').addEventListener('click', () => {
     showPhonebook();

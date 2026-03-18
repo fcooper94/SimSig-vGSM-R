@@ -99,4 +99,5 @@ module.exports = {
   PLAYER_WEBRTC_SIGNAL: 'player:webrtc-signal',
   PLAYER_WEBRTC_SIGNAL_SEND: 'player:webrtc-signal-send',
   PLAYER_CALL_REJECTED: 'player:call-rejected',
+  PLAYER_RESCAN: 'player:rescan',
 };

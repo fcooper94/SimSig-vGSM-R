@@ -254,6 +254,7 @@ contextBridge.exposeInMainWorld('simsigAPI', {
     hangUp: () => ipcRenderer.invoke(channels.PLAYER_HANGUP),
     cancelDial: () => ipcRenderer.invoke(channels.PLAYER_CANCEL_DIAL),
     sendWebRTCSignal: (targetId, signal) => ipcRenderer.invoke(channels.PLAYER_WEBRTC_SIGNAL_SEND, targetId, signal),
+    rescan: () => ipcRenderer.invoke(channels.PLAYER_RESCAN),
     onWebRTCSignal: (callback) => {
       const listener = (_event, data) => callback(data);
       ipcRenderer.on(channels.PLAYER_WEBRTC_SIGNAL, listener);
