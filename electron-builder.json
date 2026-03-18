@@ -21,18 +21,15 @@
     "repo": "SimSig-vGSM-R"
   },
   "win": {
-    "target": "nsis",
+    "target": "squirrel",
     "icon": "images/icon.png",
-    "requestedExecutionLevel": "requireAdministrator"
+    "requestedExecutionLevel": "asInvoker"
   },
-  "nsis": {
-    "oneClick": false,
-    "perMachine": false,
-    "createDesktopShortcut": true,
-    "createStartMenuShortcut": true,
-    "shortcutName": "vGSM-R",
+  "squirrelWindows": {
+    "iconUrl": "https://raw.githubusercontent.com/fcooper94/SimSig-vGSM-R/main/images/icon.png",
+    "setupIcon": "images/icon.png",
     "artifactName": "vGSM-R-Setup-${version}.${ext}",
-    "installerSidebar": "build/installerSidebar.bmp",
-    "uninstallerSidebar": "build/installerSidebar.bmp"
+    "shortcutName": "vGSM-R",
+    "createDesktopShortcut": true
   }
 }

@@ -95,7 +95,9 @@
       "Bash(node -c src/main/phone-reader.js)",
       "Bash(git rm:*)",
       "Bash(node -e \"require\\(''./src/main/web-server''\\)\")",
-      "Bash(node -e \"require\\(''./src/main/ipc-handlers''\\)\")"
+      "Bash(node -e \"require\\(''./src/main/ipc-handlers''\\)\")",
+      "Bash(python -c \"import sys,json; p=json.load\\(sys.stdin\\); print\\(''''deps:'''', list\\(p.get\\(''''dependencies'''',{}\\).keys\\(\\)\\)\\); print\\(''''devdeps:'''', list\\(p.get\\(''''devDependencies'''',{}\\).keys\\(\\)\\)\\)\")",
+      "Bash(grep -v \"^$\")"
     ]
   }
 }
