@@ -148,6 +148,9 @@ const SettingsUI = {
     document.getElementById('setting-tts-apikey').value = settings.tts?.elevenLabsApiKey || '';
     this.toggleApiKeyRow(providerSelect.value);
 
+    // Internet players relay peers
+    document.getElementById('setting-relay-peers').value = (settings.relay?.peers || []).join(', ');
+
     // Browser access
     document.getElementById('setting-web-enabled').checked = settings.web?.enabled || false;
     document.getElementById('setting-web-port').value = settings.web?.port || 50507;
@@ -221,6 +224,11 @@ const SettingsUI = {
     if (typeof PhoneCallsUI !== 'undefined') {
       PhoneCallsUI.setRingDevice(ringSelect.value);
     }
+
+    // Internet players relay peers
+    const relayPeersRaw = document.getElementById('setting-relay-peers').value;
+    const relayPeers = relayPeersRaw.split(',').map(s => s.trim()).filter(Boolean);
+    await window.simsigAPI.settings.set('relay.peers', relayPeers);
 
     // Browser access
     const webEnabled = document.getElementById('setting-web-enabled').checked;

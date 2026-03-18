@@ -555,6 +555,11 @@ function registerIpcHandlers() {
         // Silently try the SimSig host's relay in case they run vGSM-R too
         _startRelayClient(gatewayHost);
       }
+      // Connect to any manually configured relay peers (internet play)
+      const relayPeers = config.relay?.peers || [];
+      for (const ip of relayPeers) {
+        if (ip) _connectToPeerRelay(ip);
+      }
 
       console.log('[Gateway] Connecting to', config.gateway.host + ':' + config.gateway.port);
       let gatewayConnected = false;
