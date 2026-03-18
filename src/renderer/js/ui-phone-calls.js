@@ -3930,14 +3930,26 @@ const PhoneCallsUI = {
       window.simsigAPI.app.log(msg);
     };
 
-    // Fallback: poll ICE/connection state every 2s in case event doesn't fire
-    const statePoller = setInterval(() => {
+    // Poll ICE state and RTP stats every 2s
+    let lastBytesSent = 0, lastBytesRecv = 0;
+    const statePoller = setInterval(async () => {
       if (!this._playerPeerConnection || this._playerPeerConnection !== pc) { clearInterval(statePoller); return; }
-      window.simsigAPI.app.log(`[WebRTC] Poll — ICE: ${pc.iceConnectionState}, conn: ${pc.connectionState}`);
-      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed' ||
-          pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
-        clearInterval(statePoller);
+      const ice = pc.iceConnectionState, conn = pc.connectionState;
+      try {
+        const stats = await pc.getStats();
+        let bytesSent = 0, bytesRecv = 0, pktSent = 0, pktRecv = 0;
+        stats.forEach(s => {
+          if (s.type === 'outbound-rtp' && s.kind === 'audio') { bytesSent = s.bytesSent || 0; pktSent = s.packetsSent || 0; }
+          if (s.type === 'inbound-rtp'  && s.kind === 'audio') { bytesRecv = s.bytesReceived || 0; pktRecv = s.packetsReceived || 0; }
+        });
+        const sentDelta = bytesSent - lastBytesSent;
+        const recvDelta = bytesRecv - lastBytesRecv;
+        lastBytesSent = bytesSent; lastBytesRecv = bytesRecv;
+        window.simsigAPI.app.log(`[WebRTC] ICE:${ice} conn:${conn} | sent:${pktSent}pkts(+${sentDelta}B) recv:${pktRecv}pkts(+${recvDelta}B)`);
+      } catch (_) {
+        window.simsigAPI.app.log(`[WebRTC] Poll — ICE: ${ice}, conn: ${conn}`);
       }
+      if (ice === 'failed' || ice === 'closed' || conn === 'failed' || conn === 'closed') clearInterval(statePoller);
     }, 2000);
 
     // ICE candidates — forward via relay
