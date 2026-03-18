@@ -516,7 +516,7 @@ const AlertsFeed = {
     try {
       const signals = [];
       for (const [hc, data] of this._activeRedSignals) {
-        signals.push({ hc, signal: data.signal, waited: data.waited, waitedAt: data.waitedAt });
+        signals.push({ hc, signal: data.signal, waited: data.waited, waitedAt: data.waitedAt, addedAt: data.addedAt });
       }
       const state = {
         signals,
@@ -540,10 +540,14 @@ const AlertsFeed = {
       if (!raw) return;
       const state = JSON.parse(raw);
       if (state.signals && state.signals.length > 0) {
+        const now = Date.now();
+        const STALE_MS = 45 * 60 * 1000; // 45 minutes — train has almost certainly moved
         for (const s of state.signals) {
+          const savedAt = s.addedAt || s.waitedAt || 0;
+          if (savedAt && (now - savedAt) > STALE_MS) continue; // skip stale entries
           this._activeRedSignals.set(s.hc, {
             signal: s.signal, waited: s.waited,
-            addedAt: Date.now(), waitedAt: s.waitedAt || 0,
+            addedAt: s.addedAt || now, waitedAt: s.waitedAt || 0,
           });
           // Re-queue auto-wait in the main process so repeat calls are intercepted
           if (s.waited) {
@@ -591,11 +595,18 @@ const AlertsFeed = {
   // Handles: "2C09 something", "STEP 2C09 : 246 -> 250", "LOCATION 2C09 at S246"
   _extractMovementHeadcode(text) {
     const HC = /[0-9][A-Za-z]\d{2}/;
-    // Direct: headcode at start
+    // Direct: headcode at start of line (e.g. "2C09 arrived at Platform 3")
     let m = text.match(new RegExp(`^(${HC.source})\\s`));
     if (m) return m[1].toUpperCase();
-    // STEP or LOCATION prefix
+    // STEP or LOCATION prefix (TD berth step messages)
     m = text.match(new RegExp(`^(?:STEP|LOCATION)\\s+(${HC.source})\\b`, 'i'));
+    if (m) return m[1].toUpperCase();
+    // "Signal X TRIS for HC" / "Signal X cleared for HC" / "...for HC at..."
+    // SimSig logs these when a signal clears and a train moves through
+    m = text.match(new RegExp(`(?:TRIS|cleared|clears)\\s+(?:for\\s+)?(${HC.source})\\b`, 'i'));
+    if (m) return m[1].toUpperCase();
+    // "...for HC at ..." generic — catches other SimSig movement notifications
+    m = text.match(new RegExp(`\\bfor\\s+(${HC.source})\\s+at\\b`, 'i'));
     if (m) return m[1].toUpperCase();
     return null;
   },
