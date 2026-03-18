@@ -96,7 +96,7 @@ module.exports = {
   PLAYER_INCOMING_CALL: 'player:incoming-call',
   PLAYER_CALL_ANSWERED: 'player:call-answered',
   PLAYER_CALL_ENDED: 'player:call-ended',
-  PLAYER_SEND_AUDIO: 'player:send-audio',
-  PLAYER_AUDIO_RECEIVED: 'player:audio-received',
+  PLAYER_WEBRTC_SIGNAL: 'player:webrtc-signal',
+  PLAYER_WEBRTC_SIGNAL_SEND: 'player:webrtc-signal-send',
   PLAYER_CALL_REJECTED: 'player:call-rejected',
 };

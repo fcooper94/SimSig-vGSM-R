@@ -67,8 +67,8 @@ const channels = {
   PLAYER_INCOMING_CALL: 'player:incoming-call',
   PLAYER_CALL_ANSWERED: 'player:call-answered',
   PLAYER_CALL_ENDED: 'player:call-ended',
-  PLAYER_SEND_AUDIO: 'player:send-audio',
-  PLAYER_AUDIO_RECEIVED: 'player:audio-received',
+  PLAYER_WEBRTC_SIGNAL: 'player:webrtc-signal',
+  PLAYER_WEBRTC_SIGNAL_SEND: 'player:webrtc-signal-send',
   PLAYER_CALL_REJECTED: 'player:call-rejected',
 };
 
@@ -253,14 +253,19 @@ contextBridge.exposeInMainWorld('simsigAPI', {
     reject: (reason) => ipcRenderer.invoke(channels.PLAYER_REJECT, reason),
     hangUp: () => ipcRenderer.invoke(channels.PLAYER_HANGUP),
     cancelDial: () => ipcRenderer.invoke(channels.PLAYER_CANCEL_DIAL),
-    sendAudio: (pcmData) => ipcRenderer.invoke(channels.PLAYER_SEND_AUDIO, pcmData),
+    sendWebRTCSignal: (targetId, signal) => ipcRenderer.invoke(channels.PLAYER_WEBRTC_SIGNAL_SEND, targetId, signal),
+    onWebRTCSignal: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on(channels.PLAYER_WEBRTC_SIGNAL, listener);
+      return () => ipcRenderer.removeListener(channels.PLAYER_WEBRTC_SIGNAL, listener);
+    },
     onIncomingCall: (callback) => {
       const listener = (_event, data) => callback(data);
       ipcRenderer.on(channels.PLAYER_INCOMING_CALL, listener);
       return () => ipcRenderer.removeListener(channels.PLAYER_INCOMING_CALL, listener);
     },
     onCallAnswered: (callback) => {
-      const listener = () => callback();
+      const listener = (_event, data) => callback(data);
       ipcRenderer.on(channels.PLAYER_CALL_ANSWERED, listener);
       return () => ipcRenderer.removeListener(channels.PLAYER_CALL_ANSWERED, listener);
     },
@@ -268,11 +273,6 @@ contextBridge.exposeInMainWorld('simsigAPI', {
       const listener = () => callback();
       ipcRenderer.on(channels.PLAYER_CALL_ENDED, listener);
       return () => ipcRenderer.removeListener(channels.PLAYER_CALL_ENDED, listener);
-    },
-    onAudioReceived: (callback) => {
-      const listener = (_event, data) => callback(data);
-      ipcRenderer.on(channels.PLAYER_AUDIO_RECEIVED, listener);
-      return () => ipcRenderer.removeListener(channels.PLAYER_AUDIO_RECEIVED, listener);
     },
     onCallRejected: (callback) => {
       const listener = (_event, reason) => callback(reason);

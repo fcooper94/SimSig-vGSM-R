@@ -48,6 +48,11 @@
   function _handleRelaySignal(data) {
     const { from, fromPanel, payload } = data || {};
     if (!payload) return;
+    // WebRTC signaling — forward to renderer
+    if (payload.type === 'offer' || payload.type === 'answer' || payload.type === 'ice') {
+      _fireListeners('player:webrtc-signal', { from, signal: payload });
+      return;
+    }
     if (payload.type === 'call-request') {
       relayCallPartnerId = from;
       _fireListeners('player:incoming-call', { panel: fromPanel, id: from });
@@ -55,9 +60,9 @@
       relayCallPartnerId = from;
       if (pendingRelayDialResolve) {
         const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
-        r({ connected: true, peerPanel: fromPanel });
+        r({ connected: true, peerPanel: fromPanel, peerId: from });
       }
-      _fireListeners('player:call-answered');
+      _fireListeners('player:call-answered', { panel: fromPanel, id: from });
     } else if (payload.type === 'call-rejected') {
       if (pendingRelayDialResolve) {
         const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
@@ -184,12 +189,8 @@
     ws.onerror = () => {}; // onclose will handle reconnect
 
     ws.onmessage = (event) => {
-      // Binary = relay audio
-      if (event.data instanceof ArrayBuffer) {
-        const float32 = new Float32Array(event.data);
-        _fireListeners('player:audio-received', float32);
-        return;
-      }
+      // Binary frames not used (WebRTC handles audio P2P)
+      if (event.data instanceof ArrayBuffer) return;
 
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
@@ -417,16 +418,16 @@
         return Promise.resolve();
       },
 
-      sendAudio: (float32Array) => {
-        if (relayCallPartnerId && ws?.readyState === WebSocket.OPEN) {
-          ws.send(float32Array.buffer instanceof ArrayBuffer ? float32Array.buffer : float32Array);
+      sendWebRTCSignal: (targetId, signal) => {
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'player-signal', targetId, payload: signal }));
         }
       },
 
       onIncomingCall: (cb) => on('player:incoming-call', cb),
       onCallAnswered: (cb) => on('player:call-answered', cb),
       onCallEnded: (cb) => on('player:call-ended', cb),
-      onAudioReceived: (cb) => on('player:audio-received', cb),
+      onWebRTCSignal: (cb) => on('player:webrtc-signal', cb),
       onCallRejected: (cb) => on('player:call-rejected', cb),
     },
 

@@ -108,16 +108,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Player call events
   window.simsigAPI.player.onIncomingCall((data) => {
-    PhoneCallsUI.handleIncomingPlayerCall(data.panel);
+    PhoneCallsUI.handleIncomingPlayerCall(data.panel, data.id);
   });
-  window.simsigAPI.player.onCallAnswered(() => {
-    PhoneCallsUI.handlePlayerCallAnswered();
+  window.simsigAPI.player.onCallAnswered((data) => {
+    PhoneCallsUI.handlePlayerCallAnswered(data);
   });
   window.simsigAPI.player.onCallEnded(() => {
     PhoneCallsUI.handlePlayerCallEnded();
   });
-  window.simsigAPI.player.onAudioReceived((pcmArray) => {
-    PhoneCallsUI.handlePlayerAudioReceived(pcmArray);
+  window.simsigAPI.player.onWebRTCSignal((data) => {
+    PhoneCallsUI.handleWebRTCSignal(data);
   });
   window.simsigAPI.player.onCallRejected((reason) => {
     PhoneCallsUI.handlePlayerCallRejected(reason);

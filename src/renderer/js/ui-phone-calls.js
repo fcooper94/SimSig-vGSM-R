@@ -3422,9 +3422,7 @@ const PhoneCallsUI = {
 
     // Clear player call state
     if (this._playerCall || this._playerDialing) {
-      this._stopPlayerRecording();
-      if (this._playerPttListener) { this._playerPttListener(); this._playerPttListener = null; }
-      if (this._playerAudioCtx) { this._playerAudioCtx.close().catch(() => {}); this._playerAudioCtx = null; }
+      this._closeWebRTC();
     }
     this._playerCall = false;
     this._playerDialing = false;
@@ -3699,14 +3697,14 @@ const PhoneCallsUI = {
 
   // ── Player-to-Player Calls ──────────────────────────────────────────
 
-  _playerCall: false,        // true when in a player call
-  _playerCallPanel: '',      // peer's panel name
-  _playerDialing: false,     // true while dialing a player
-  _playerAudioCtx: null,     // AudioContext for playback
-  _playerRecording: false,   // true while PTT is held during a player call
-  _playerRecordStream: null,
-  _playerRecordProcessor: null,
-  _playerRecordSource: null,
+  _playerCall: false,           // true when in a player call
+  _playerCallPanel: '',         // peer's panel name
+  _playerCallPeerId: null,      // peer's relay ID (for WebRTC signaling)
+  _playerDialing: false,        // true while dialing a player
+  _playerPeerConnection: null,  // RTCPeerConnection
+  _playerLocalStream: null,     // local mic stream
+  _playerRemoteAudio: null,     // Audio element for remote stream
+  _playerPttListener: null,
 
   // Called when user dials a player from the Global phonebook
   async dialPlayer(peer) {
@@ -3730,7 +3728,7 @@ const PhoneCallsUI = {
     }
 
     // Actually dial via main process
-    const result = await window.simsigAPI.player.dial(peer.id, peer.host, peer.port);
+    const result = await window.simsigAPI.player.dial(peer.id);
     if (this.notificationAnswerBtn) this.notificationAnswerBtn.onclick = null;
 
     if (!this._playerDialing) return; // cancelled
@@ -3743,17 +3741,19 @@ const PhoneCallsUI = {
 
     // Call connected — stop the dialing tone before entering call
     this.stopDialing(true);
-    this._startPlayerCall(peer.panel);
+    const peerId = result.peerId || peer.id;
+    this._startPlayerCall(peer.panel, peerId, true);
   },
 
   // Called when we receive an incoming player call
-  handleIncomingPlayerCall(peerPanel) {
+  handleIncomingPlayerCall(peerPanel, peerId) {
     if (this.inCall || this._outgoingCall || this._playerCall || this._playerDialing || this._dialingActive || this._playerRinging) {
       // Busy — auto-reject happens in main process
       return;
     }
     this._playerRinging = true;
     this._playerCallPanel = peerPanel;
+    this._playerCallPeerId = peerId;
 
     // Show incoming call notification
     this.stopRinging();
@@ -3779,7 +3779,7 @@ const PhoneCallsUI = {
       this._playerRinging = false;
       this.stopRinging();
       window.simsigAPI.player.answer();
-      this._startPlayerCall(peerPanel);
+      this._startPlayerCall(peerPanel, this._playerCallPeerId, false);
     };
 
     if (this.notificationAnswerBtn) {
@@ -3793,8 +3793,9 @@ const PhoneCallsUI = {
     // (auto-reject handled in main process after 30s)
   },
 
-  handlePlayerCallAnswered() {
-    // Outgoing call was accepted — _startPlayerCall already called from dialPlayer
+  handlePlayerCallAnswered(data) {
+    // For incoming call that we answered — WebRTC already set up as answerer
+    // For outgoing call — _startPlayerCall already called from dialPlayer (as offer)
   },
 
   handlePlayerCallEnded() {
@@ -3807,14 +3808,30 @@ const PhoneCallsUI = {
     this.stopDialing();
   },
 
-  handlePlayerAudioReceived(pcmArray) {
-    if (!this._playerCall) return;
-    this._playPlayerAudio(new Float32Array(pcmArray));
+  handleWebRTCSignal(data) {
+    if (!this._playerPeerConnection) return;
+    const { signal } = data;
+    if (signal.type === 'offer') {
+      this._playerPeerConnection.setRemoteDescription({ type: 'offer', sdp: signal.sdp })
+        .then(() => this._playerPeerConnection.createAnswer())
+        .then(answer => {
+          this._playerPeerConnection.setLocalDescription(answer);
+          window.simsigAPI.player.sendWebRTCSignal(this._playerCallPeerId, { type: 'answer', sdp: answer.sdp });
+        })
+        .catch(err => console.error('[WebRTC] Answer error:', err));
+    } else if (signal.type === 'answer') {
+      this._playerPeerConnection.setRemoteDescription({ type: 'answer', sdp: signal.sdp })
+        .catch(err => console.error('[WebRTC] setRemoteDescription answer error:', err));
+    } else if (signal.type === 'ice') {
+      this._playerPeerConnection.addIceCandidate(signal.candidate)
+        .catch(err => console.error('[WebRTC] addIceCandidate error:', err));
+    }
   },
 
-  _startPlayerCall(peerPanel) {
+  _startPlayerCall(peerPanel, peerId, isOffer) {
     this._playerCall = true;
     this._playerCallPanel = peerPanel;
+    this._playerCallPeerId = peerId;
     window.simsigAPI.keys.setInCall(true);
 
     // Update notification to "in call"
@@ -3838,99 +3855,85 @@ const PhoneCallsUI = {
     if (line1) line1.textContent = 'Player Call';
     if (line2) line2.textContent = peerPanel;
 
-    // No comms overlay for player calls — voice only
-
     // Start background noise (radio static)
     this.bgCallerType = 'signaller';
     this.startBgNoise();
 
-    // Set up PTT audio streaming
-    this._setupPlayerPTT();
+    // Set up WebRTC connection
+    this._setupWebRTC(isOffer);
   },
 
-  _setupPlayerPTT() {
-    // Listen for PTT state changes to start/stop audio capture + streaming
+  async _setupWebRTC(isOffer) {
+    const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    const pc = new RTCPeerConnection(STUN);
+    this._playerPeerConnection = pc;
+
+    // Get mic stream — muted by default (PTT controls it)
+    let localStream = null;
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      this._playerLocalStream = localStream;
+    } catch (err) {
+      console.error('[WebRTC] getUserMedia error:', err);
+    }
+
+    if (localStream) {
+      for (const track of localStream.getAudioTracks()) {
+        track.enabled = false; // start muted — PTT unmutes
+        pc.addTrack(track, localStream);
+      }
+    }
+
+    // PTT controls the local audio track
     this._playerPttListener = window.simsigAPI.ptt.onStateChange((active) => {
-      if (!this._playerCall) return;
-      if (active) {
-        this._startPlayerRecording();
-      } else {
-        this._stopPlayerRecording();
+      if (!this._playerCall || !this._playerLocalStream) return;
+      for (const track of this._playerLocalStream.getAudioTracks()) {
+        track.enabled = active;
       }
     });
-  },
 
-  async _startPlayerRecording() {
-    if (this._playerRecording) return;
-    this._playerRecording = true;
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1, sampleRate: 16000 },
-      });
-      const audioContext = new AudioContext({ sampleRate: 16000 });
-      const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-      processor.onaudioprocess = (event) => {
-        if (!this._playerRecording || !this._playerCall) return;
-        const data = event.inputBuffer.getChannelData(0);
-        // Send audio to peer via main process
-        window.simsigAPI.player.sendAudio(Array.from(data));
-      };
-
-      source.connect(processor);
-      processor.connect(audioContext.destination);
-
-      this._playerRecordStream = stream;
-      this._playerRecordSource = source;
-      this._playerRecordProcessor = processor;
-      this._playerRecordCtx = audioContext;
-    } catch (err) {
-      console.error('[PlayerCall] Mic error:', err);
-      this._playerRecording = false;
-    }
-  },
-
-  _stopPlayerRecording() {
-    if (!this._playerRecording) return;
-    this._playerRecording = false;
-
-    if (this._playerRecordProcessor) {
-      this._playerRecordProcessor.disconnect();
-      this._playerRecordProcessor = null;
-    }
-    if (this._playerRecordSource) {
-      this._playerRecordSource.disconnect();
-      this._playerRecordSource = null;
-    }
-    if (this._playerRecordStream) {
-      this._playerRecordStream.getTracks().forEach(t => t.stop());
-      this._playerRecordStream = null;
-    }
-    if (this._playerRecordCtx) {
-      this._playerRecordCtx.close().catch(() => {});
-      this._playerRecordCtx = null;
-    }
-  },
-
-  _playPlayerAudio(pcmFloat32) {
-    try {
-      if (!this._playerAudioCtx) {
-        this._playerAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    // Remote audio
+    pc.ontrack = (event) => {
+      if (!this._playerRemoteAudio) {
+        this._playerRemoteAudio = new Audio();
+        this._playerRemoteAudio.autoplay = true;
       }
-      const ctx = this._playerAudioCtx;
-      const buffer = ctx.createBuffer(1, pcmFloat32.length, 16000);
-      buffer.getChannelData(0).set(pcmFloat32);
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
-      // Queue playback at the end of the current audio to avoid overlaps
-      const startTime = Math.max(ctx.currentTime, this._playerPlaybackTime || ctx.currentTime);
-      source.start(startTime);
-      this._playerPlaybackTime = startTime + buffer.duration;
-    } catch (err) {
-      console.error('[PlayerCall] Audio playback error:', err);
+      this._playerRemoteAudio.srcObject = event.streams[0];
+    };
+
+    // ICE candidates — forward via relay
+    pc.onicecandidate = (event) => {
+      if (event.candidate && this._playerCallPeerId) {
+        window.simsigAPI.player.sendWebRTCSignal(this._playerCallPeerId, {
+          type: 'ice', candidate: event.candidate,
+        });
+      }
+    };
+
+    if (isOffer) {
+      pc.createOffer()
+        .then(offer => {
+          pc.setLocalDescription(offer);
+          window.simsigAPI.player.sendWebRTCSignal(this._playerCallPeerId, { type: 'offer', sdp: offer.sdp });
+        })
+        .catch(err => console.error('[WebRTC] createOffer error:', err));
+    }
+    // Answer side: waits for handleWebRTCSignal to receive the offer
+  },
+
+  _closeWebRTC() {
+    if (this._playerPttListener) { this._playerPttListener(); this._playerPttListener = null; }
+    if (this._playerLocalStream) {
+      this._playerLocalStream.getTracks().forEach(t => t.stop());
+      this._playerLocalStream = null;
+    }
+    if (this._playerRemoteAudio) {
+      this._playerRemoteAudio.srcObject = null;
+      this._playerRemoteAudio = null;
+    }
+    if (this._playerPeerConnection) {
+      this._playerPeerConnection.close();
+      this._playerPeerConnection = null;
     }
   },
 
@@ -3946,31 +3949,20 @@ const PhoneCallsUI = {
       return;
     }
     this._playerRinging = false;
-    this._stopPlayerRecording();
+    this._closeWebRTC();
     this.stopBgNoise();
     this.stopRinging();
 
     this._playerCall = false;
     this._playerDialing = false;
+    this._playerCallPeerId = null;
     window.simsigAPI.keys.setInCall(false);
 
     // Clean up notification button handler
     if (this.notificationAnswerBtn) this.notificationAnswerBtn.onclick = null;
 
-    // Clean up PTT listener
-    if (this._playerPttListener) {
-      this._playerPttListener();
-      this._playerPttListener = null;
-    }
     if (this._playerAnswerHandler) {
       this._playerAnswerHandler = null;
-    }
-
-    // Close audio context
-    if (this._playerAudioCtx) {
-      this._playerAudioCtx.close().catch(() => {});
-      this._playerAudioCtx = null;
-      this._playerPlaybackTime = 0;
     }
 
     this.hideNotification();

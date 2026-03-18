@@ -7,7 +7,6 @@ const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 const StompConnectionManager = require('./stomp-client');
 const PhoneReader = require('./phone-reader');
 const PeerDiscovery = require('./peer-discovery');
-const PlayerCallServer = require('./player-call-server');
 
 const SCRIPTS_DIR = __dirname.replace('app.asar', 'app.asar.unpacked');
 const ANSWER_SCRIPT = require('path').join(SCRIPTS_DIR, 'answer-phone-call.ps1');
@@ -39,8 +38,8 @@ let phoneReader = null;
 let ttsVoicesCache = null;
 let elevenLabsVoicesCache = null;
 let peerDiscovery = null;
-let playerCallServer = null;
 let workstationPanels = null; // { "Panel 1": "JO", "Panel 2": "FC", ... }
+let ourPanelName = ''; // our panel label (set at connect + workstation detection)
 const PLAYER_CALL_PORT = 51521;
 
 // Tracked state for syncing new WebSocket clients
@@ -256,8 +255,8 @@ function parseWorkstationLines(lines) {
         foundOurPanel = true;
         const fullPanel = `${panelName} (${lastSimName || ''})`.trim();
         console.log(`[Workstation] Our panel (client): "${fullPanel}"`);
+        ourPanelName = fullPanel;
         if (peerDiscovery) peerDiscovery.updatePanel(fullPanel);
-        if (playerCallServer) playerCallServer.updatePanel(fullPanel);
         webServer.registerHostPlayer(ourRelayId, fullPanel);
         sendToMainWindow('workstation:our-panel', panelName);
       }
@@ -277,8 +276,8 @@ function parseWorkstationLines(lines) {
       const sim = lastSimName || 'Unknown';
       console.log(`[Workstation] No transfer for "${ourInitials}" — host of ${sim}`);
       const hostLabel = `${sim} (Host)`;
+      ourPanelName = hostLabel;
       if (peerDiscovery) peerDiscovery.updatePanel(hostLabel);
-      if (playerCallServer) playerCallServer.updatePanel(hostLabel);
       webServer.registerHostPlayer(ourRelayId, hostLabel);
       sendToMainWindow('workstation:our-panel', `Host — ${sim}`);
     }
@@ -345,6 +344,7 @@ function registerIpcHandlers() {
       const config = settings.getAll();
       // Register host immediately so it appears in the player list right away
       const hostInitials = (config.signaller?.initials || 'Host').toUpperCase();
+      ourPanelName = hostInitials;
       webServer.registerHostPlayer(ourRelayId, hostInitials);
       console.log('[Gateway] Connecting to', config.gateway.host + ':' + config.gateway.port);
       let gatewayConnected = false;
@@ -506,27 +506,6 @@ function registerIpcHandlers() {
         prefetchVoices().catch(() => {});
       }
 
-      // Start player-to-player call server and peer discovery
-      if (playerCallServer) playerCallServer.stop();
-      playerCallServer = new PlayerCallServer();
-      playerCallServer.onIncomingCall = (peerPanel) => {
-        sendToMainWindow(channels.PLAYER_INCOMING_CALL, { panel: peerPanel });
-      };
-      playerCallServer.onCallAnswered = () => {
-        sendToMainWindow(channels.PLAYER_CALL_ANSWERED);
-      };
-      playerCallServer.onCallEnded = () => {
-        sendToMainWindow(channels.PLAYER_CALL_ENDED);
-      };
-      playerCallServer.onAudioReceived = (pcmFloat32) => {
-        // Send as regular array for IPC structured clone
-        sendToMainWindow(channels.PLAYER_AUDIO_RECEIVED, Array.from(pcmFloat32));
-      };
-      playerCallServer.onCallRejected = (reason) => {
-        sendToMainWindow(channels.PLAYER_CALL_REJECTED, reason);
-      };
-      playerCallServer.start(PLAYER_CALL_PORT, config.signaller?.panelName || '');
-
       // Start UDP peer discovery for LAN player detection
       if (peerDiscovery) peerDiscovery.stop();
       peerDiscovery = new PeerDiscovery();
@@ -540,24 +519,26 @@ function registerIpcHandlers() {
 
       // Relay: handle signals and audio addressed to the host
       webServer.setOnHostRelayEvent((event) => {
-        if (event.type === 'audio') {
-          const float32 = new Float32Array(event.buffer.buffer, event.buffer.byteOffset, event.buffer.byteLength / 4);
-          sendToMainWindow(channels.PLAYER_AUDIO_RECEIVED, Array.from(float32));
-          return;
-        }
         if (event.type !== 'signal') return;
         const { from, fromPanel, payload } = event;
+
+        // WebRTC signals (offer/answer/ice) — forward straight to renderer
+        if (payload.type === 'offer' || payload.type === 'answer' || payload.type === 'ice') {
+          sendToMainWindow(channels.PLAYER_WEBRTC_SIGNAL, { from, signal: payload });
+          return;
+        }
+
         if (payload.type === 'call-request') {
           activeRelayCallPartnerId = from;
-          sendToMainWindow(channels.PLAYER_INCOMING_CALL, { panel: fromPanel });
+          sendToMainWindow(channels.PLAYER_INCOMING_CALL, { panel: fromPanel, id: from });
         } else if (payload.type === 'call-accepted') {
           activeRelayCallPartnerId = from;
           webServer.setRelayActivePair(ourRelayId, from);
           if (pendingRelayDialResolve) {
             const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
-            r({ connected: true, peerPanel: fromPanel });
+            r({ connected: true, peerPanel: fromPanel, peerId: from });
           } else {
-            sendToMainWindow(channels.PLAYER_CALL_ANSWERED);
+            sendToMainWindow(channels.PLAYER_CALL_ANSWERED, { panel: fromPanel, id: from });
           }
         } else if (payload.type === 'call-rejected') {
           if (pendingRelayDialResolve) {
@@ -592,7 +573,6 @@ function registerIpcHandlers() {
     if (pendingRelayDialResolve) { pendingRelayDialResolve({ error: 'Disconnected' }); pendingRelayDialResolve = null; }
     webServer.clearHostRelayPair();
     if (peerDiscovery) { peerDiscovery.stop(); peerDiscovery = null; }
-    if (playerCallServer) { playerCallServer.stop(); playerCallServer = null; }
     if (phoneReader) {
       phoneReader.stopPolling();
       phoneReader = null;
@@ -1569,84 +1549,59 @@ function registerIpcHandlers() {
     });
   });
 
-  // ── Player-to-player calls ─────────────────────────────────────────
-  registerHandler(channels.PLAYER_DIAL, async (_event, peerId, host, port) => {
-    if (!playerCallServer) return { error: 'Not connected' };
-    // No host = relay peer (internet play)
-    if (!host) {
-      webServer.hostSendSignal(peerId, { type: 'call-request', panel: playerCallServer.panelName });
-      activeRelayCallPartnerId = peerId;
-      return new Promise((resolve) => {
-        pendingRelayDialResolve = resolve;
-        setTimeout(() => {
-          if (pendingRelayDialResolve === resolve) {
-            pendingRelayDialResolve = null;
-            activeRelayCallPartnerId = null;
-            webServer.clearHostRelayPair();
-            resolve({ error: 'No answer (timeout)' });
-          }
-        }, 30000);
-      });
-    }
-    return playerCallServer.dialPeer(host, port, peerId);
+  // ── Player-to-player calls (WebRTC relay) ─────────────────────────────────
+  registerHandler(channels.PLAYER_DIAL, async (_event, peerId) => {
+    // All calls go through the relay — audio is P2P via WebRTC after signaling
+    webServer.hostSendSignal(peerId, { type: 'call-request', panel: ourPanelName });
+    activeRelayCallPartnerId = peerId;
+    return new Promise((resolve) => {
+      pendingRelayDialResolve = resolve;
+      setTimeout(() => {
+        if (pendingRelayDialResolve === resolve) {
+          pendingRelayDialResolve = null;
+          activeRelayCallPartnerId = null;
+          webServer.clearHostRelayPair();
+          resolve({ error: 'No answer (timeout)' });
+        }
+      }, 30000);
+    });
   });
 
   registerHandler(channels.PLAYER_ANSWER, () => {
-    if (!playerCallServer) return;
-    if (activeRelayCallPartnerId) {
-      webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-accepted', panel: playerCallServer.panelName });
-      webServer.setRelayActivePair(ourRelayId, activeRelayCallPartnerId);
-      sendToMainWindow(channels.PLAYER_CALL_ANSWERED);
-      return;
-    }
-    playerCallServer.answerCall();
+    if (!activeRelayCallPartnerId) return;
+    webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-accepted', panel: ourPanelName });
+    webServer.setRelayActivePair(ourRelayId, activeRelayCallPartnerId);
+    sendToMainWindow(channels.PLAYER_CALL_ANSWERED, { panel: ourPanelName, id: activeRelayCallPartnerId });
   });
 
   registerHandler(channels.PLAYER_REJECT, (_event, reason) => {
-    if (!playerCallServer) return;
-    if (activeRelayCallPartnerId) {
-      webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-rejected', reason: reason || 'Busy' });
-      webServer.clearHostRelayPair();
-      activeRelayCallPartnerId = null;
-      return;
-    }
-    playerCallServer.rejectCall(reason);
+    if (!activeRelayCallPartnerId) return;
+    webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-rejected', reason: reason || 'Busy' });
+    webServer.clearHostRelayPair();
+    activeRelayCallPartnerId = null;
   });
 
   registerHandler(channels.PLAYER_HANGUP, () => {
-    if (!playerCallServer) return;
-    if (activeRelayCallPartnerId) {
-      webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-end' });
-      webServer.clearHostRelayPair();
-      activeRelayCallPartnerId = null;
-      sendToMainWindow(channels.PLAYER_CALL_ENDED);
-      return;
-    }
-    playerCallServer.hangUp();
+    if (!activeRelayCallPartnerId) return;
+    webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-end' });
+    webServer.clearHostRelayPair();
+    activeRelayCallPartnerId = null;
+    sendToMainWindow(channels.PLAYER_CALL_ENDED);
   });
 
   registerHandler(channels.PLAYER_CANCEL_DIAL, () => {
-    if (!playerCallServer) return;
     if (activeRelayCallPartnerId && pendingRelayDialResolve) {
       webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-end' });
       webServer.clearHostRelayPair();
       const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
       activeRelayCallPartnerId = null;
       r({ error: 'Cancelled' });
-      return;
     }
-    playerCallServer.cancelDial();
   });
 
-  registerHandler(channels.PLAYER_SEND_AUDIO, (_event, pcmArray) => {
-    if (!playerCallServer) return;
-    const float32 = new Float32Array(pcmArray);
-    if (activeRelayCallPartnerId) {
-      webServer.hostSendRelayAudio(Buffer.from(float32.buffer));
-      return;
-    }
-    if (!playerCallServer.isInCall()) return;
-    playerCallServer.sendAudio(float32);
+  // WebRTC signaling — forward offer/answer/ICE candidates to relay target
+  registerHandler(channels.PLAYER_WEBRTC_SIGNAL_SEND, (_event, targetId, signal) => {
+    webServer.hostSendSignal(targetId, signal);
   });
 }
 

@@ -108,20 +108,8 @@ function start(port, handlers, getInitialState) {
     }
 
     ws.on('message', async (raw, isBinary) => {
-      // Binary = relay audio frame — forward to call partner
-      if (isBinary) {
-        const sender = relayPlayers.get(ws);
-        if (sender?.id && activePairs.has(sender.id)) {
-          const partnerId = activePairs.get(sender.id);
-          if (partnerId === hostRelayInfo?.id) {
-            if (onHostRelayEvent) onHostRelayEvent({ type: 'audio', buffer: raw });
-          } else {
-            const partnerWs = relayById.get(partnerId);
-            if (partnerWs?.readyState === 1) partnerWs.send(raw);
-          }
-        }
-        return;
-      }
+      // Binary frames not used (WebRTC handles audio P2P)
+      if (isBinary) return;
 
       let msg;
       try {
@@ -259,14 +247,6 @@ function hostSendSignal(targetId, payload) {
   return false;
 }
 
-function hostSendRelayAudio(buffer) {
-  if (!hostRelayInfo?.id) return;
-  const partnerId = activePairs.get(hostRelayInfo.id);
-  if (!partnerId) return;
-  const partnerWs = relayById.get(partnerId);
-  if (partnerWs?.readyState === 1) partnerWs.send(buffer);
-}
-
 function setRelayActivePair(id1, id2) {
   activePairs.set(id1, id2);
   activePairs.set(id2, id1);
@@ -321,7 +301,6 @@ function isRunning() {
 module.exports = {
   start, stop, broadcast, isRunning,
   registerHostPlayer, getRelayPlayers,
-  hostSendSignal, hostSendRelayAudio,
-  setRelayActivePair, clearHostRelayPair,
+  hostSendSignal, setRelayActivePair, clearHostRelayPair,
   setOnRelayPlayersChanged, setOnHostRelayEvent,
 };
