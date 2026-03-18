@@ -2,6 +2,7 @@
 // Groups players by SimSig session (gateway IP:port) so everyone in the same
 // session automatically discovers each other. No state, no database.
 
+const http = require('http');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 50507;
@@ -9,7 +10,13 @@ const PORT = process.env.PORT || 50507;
 // rooms: Map<roomId, Map<playerId, { ws, panel }>>
 const rooms = new Map();
 
-const wss = new WebSocketServer({ port: PORT });
+// HTTP server handles Railway health checks
+const server = http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end('vGSM-R relay OK');
+});
+
+const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws) => {
   let playerId = null;
@@ -74,4 +81,6 @@ function broadcastRoom(roomId) {
   }
 }
 
-console.log(`vGSM-R relay listening on port ${PORT}`);
+server.listen(PORT, () => {
+  console.log(`vGSM-R relay listening on port ${PORT}`);
+});
