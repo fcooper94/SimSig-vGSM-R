@@ -300,10 +300,12 @@ function parseWorkstationLines(lines) {
 // otherwise uses the host web server (if we're the host).
 function _sendPlayerSignal(targetId, payload) {
   if (relayClientWs?.readyState === 1) {
+    console.log(`[Signal] Send ${payload.type} → ${targetId} via relayClientWs`);
     relayClientWs.send(JSON.stringify({ type: 'player-signal', targetId, payload }));
     return;
   }
-  webServer.hostSendSignal(targetId, payload);
+  const ok = webServer.hostSendSignal(targetId, payload);
+  console.log(`[Signal] Send ${payload.type} → ${targetId} via hostSendSignal: ${ok ? 'ok' : 'no target'}`);
 }
 
 function _handleRelayClientMessage(data) {

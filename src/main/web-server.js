@@ -186,13 +186,20 @@ function start(port, handlers, getInitialState) {
 
 function _routeSignal(fromId, fromPanel, targetId, payload) {
   if (!targetId) return;
+  console.log(`[Relay] Route ${payload.type} from ${fromId} → ${targetId} (host=${hostRelayInfo?.id})`);
   if (targetId === hostRelayInfo?.id) {
-    if (onHostRelayEvent) onHostRelayEvent({ type: 'signal', from: fromId, fromPanel, payload });
+    if (onHostRelayEvent) {
+      onHostRelayEvent({ type: 'signal', from: fromId, fromPanel, payload });
+    } else {
+      console.log('[Relay] onHostRelayEvent not set — signal dropped');
+    }
   } else {
     const targetWs = relayById.get(targetId);
     if (targetWs?.readyState === 1) {
       targetWs.send(JSON.stringify({ type: 'event', channel: 'player:signal',
         data: { from: fromId, fromPanel, payload } }));
+    } else {
+      console.log(`[Relay] Target ${targetId} not found or disconnected`);
     }
   }
   // Manage active call pair state

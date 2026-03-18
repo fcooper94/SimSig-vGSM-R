@@ -3822,10 +3822,13 @@ const PhoneCallsUI = {
 
   handleWebRTCSignal(data) {
     const { signal } = data;
+    const log = (msg) => { console.log(msg); window.simsigAPI.app.log(msg); };
+    log(`[WebRTC] handleWebRTCSignal: ${signal?.type}, pc=${!!this._playerPeerConnection}, setting=${this._webRTCSettingUp}`);
     if (!this._playerPeerConnection || this._webRTCSettingUp) {
       // PC not ready yet — buffer until _setupWebRTC completes
       if (!this._pendingWebRTCSignals) this._pendingWebRTCSignals = [];
       this._pendingWebRTCSignals.push(signal);
+      log(`[WebRTC] Buffered ${signal?.type} (${this._pendingWebRTCSignals.length} pending)`);
       return;
     }
     this._processWebRTCSignal(signal);
