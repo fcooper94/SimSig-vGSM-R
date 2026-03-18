@@ -264,9 +264,7 @@ function parseWorkstationLines(lines) {
         ourPanelName = fullPanel;
         if (peerDiscovery) peerDiscovery.updatePanel(fullPanel);
         webServer.registerHostPlayer(ourRelayId, fullPanel);
-        if (relayClientWs?.readyState === 1) {
-          relayClientWs.send(JSON.stringify({ type: 'player-register', id: ourRelayId, panel: fullPanel }));
-        }
+        _reregisterRelays(fullPanel);
         sendToMainWindow('workstation:our-panel', panelName);
       }
     }
@@ -288,9 +286,7 @@ function parseWorkstationLines(lines) {
       ourPanelName = hostLabel;
       if (peerDiscovery) peerDiscovery.updatePanel(hostLabel);
       webServer.registerHostPlayer(ourRelayId, hostLabel);
-      if (relayClientWs?.readyState === 1) {
-        relayClientWs.send(JSON.stringify({ type: 'player-register', id: ourRelayId, panel: hostLabel }));
-      }
+      _reregisterRelays(hostLabel);
       sendToMainWindow('workstation:our-panel', `Host — ${sim}`);
     }
   }
@@ -342,19 +338,36 @@ function _sendPlayerSignal(targetId, payload) {
   console.log(`[Signal] No route for ${payload.type} → ${targetId}`);
 }
 
-function _connectToPeerRelay(peerIp) {
-  if (peerRelayClients.has(peerIp)) return;
+function _reregisterRelays(panel) {
+  ourPanelName = panel;
+  if (relayClientWs?.readyState === 1) {
+    relayClientWs.send(JSON.stringify({ type: 'player-register', id: ourRelayId, panel }));
+  }
+  for (const [, entry] of peerRelayClients) {
+    if (entry.ws?.readyState === 1) {
+      const reg = { type: 'player-register', id: ourRelayId, panel };
+      if (entry.room) reg.room = entry.room;
+      entry.ws.send(JSON.stringify(reg));
+    }
+  }
+}
+
+function _connectToPeerRelay(peerIpOrUrl, room) {
+  const key = peerIpOrUrl;
+  if (peerRelayClients.has(key)) return;
   const { WebSocket } = require('ws');
-  const url = `ws://${peerIp}:${RELAY_PORT}`;
-  const entry = { ws: null, players: [] };
+  const url = peerIpOrUrl.startsWith('ws') ? peerIpOrUrl : `ws://${peerIpOrUrl}:${RELAY_PORT}`;
+  const entry = { ws: null, players: [], room: room || null };
   const ws = new WebSocket(url);
   entry.ws = ws;
-  peerRelayClients.set(peerIp, entry);
-  console.log(`[PeerRelay] Connecting to ${url}`);
+  peerRelayClients.set(key, entry);
+  console.log(`[PeerRelay] Connecting to ${url}${room ? ` (room: ${room})` : ''}`);
 
   ws.on('open', () => {
-    console.log(`[PeerRelay] Connected to ${peerIp} — registering as ${ourRelayId} / ${ourPanelName}`);
-    ws.send(JSON.stringify({ type: 'player-register', id: ourRelayId, panel: ourPanelName }));
+    console.log(`[PeerRelay] Connected to ${url} — registering as ${ourRelayId} / ${ourPanelName}`);
+    const reg = { type: 'player-register', id: ourRelayId, panel: ourPanelName };
+    if (entry.room) reg.room = entry.room;
+    ws.send(JSON.stringify(reg));
   });
 
   ws.on('message', (raw) => {
@@ -371,14 +384,14 @@ function _connectToPeerRelay(peerIp) {
   });
 
   ws.on('close', () => {
-    peerRelayClients.delete(peerIp);
+    peerRelayClients.delete(key);
     _mergeAndSendPeerList();
-    console.log(`[PeerRelay] Disconnected from ${peerIp}`);
+    console.log(`[PeerRelay] Disconnected from ${url}`);
   });
 
   ws.on('error', (err) => {
-    peerRelayClients.delete(peerIp);
-    console.warn(`[PeerRelay] ${peerIp} error:`, err.message);
+    peerRelayClients.delete(key);
+    console.warn(`[PeerRelay] ${url} error:`, err.message);
   });
 }
 
@@ -423,6 +436,7 @@ function _handleRelayClientMessage(data) {
 }
 
 const RELAY_PORT = 50507;
+const CENTRAL_RELAY_URL = 'wss://PLACEHOLDER.up.railway.app';
 
 function _startRelayClient(host) {
   if (relayClientWs) {
@@ -555,7 +569,11 @@ function registerIpcHandlers() {
         // Silently try the SimSig host's relay in case they run vGSM-R too
         _startRelayClient(gatewayHost);
       }
-      // Connect to any manually configured relay peers (internet play)
+      // Connect to central relay — groups by SimSig session so all players find each other
+      const room = `${gatewayHost}:${config.gateway.port}`;
+      _connectToPeerRelay(CENTRAL_RELAY_URL, room);
+
+      // Connect to any manually configured relay peers (internet play, fallback)
       const relayPeers = config.relay?.peers || [];
       for (const ip of relayPeers) {
         if (ip) _connectToPeerRelay(ip);
