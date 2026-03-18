@@ -354,8 +354,10 @@ function _startRelayClient(url) {
   const ws = new WebSocket(url);
   relayClientWs = ws;
 
+  console.log('[RelayClient] Connecting to host relay:', url);
+
   ws.on('open', () => {
-    console.log('[RelayClient] Connected to host relay:', url);
+    console.log('[RelayClient] Connected — registering as', ourRelayId, '/', ourPanelName);
     ws.send(JSON.stringify({ type: 'player-register', id: ourRelayId, panel: ourPanelName }));
   });
 
@@ -364,7 +366,9 @@ function _startRelayClient(url) {
     try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (msg.type === 'event') {
       if (msg.channel === 'player:peers-update') {
-        const relayPeers = (msg.data || []).filter(p => p.id !== ourRelayId);
+        const allPeers = msg.data || [];
+        const relayPeers = allPeers.filter(p => p.id !== ourRelayId);
+        console.log(`[RelayClient] Peers update — ${allPeers.length} total, showing ${relayPeers.length}: ${relayPeers.map(p => p.panel).join(', ') || '(none)'}`);
         const udpPeers = peerDiscovery ? peerDiscovery.getPeers() : [];
         const seenIds = new Set(udpPeers.map(p => p.id));
         const merged = [...udpPeers, ...relayPeers.filter(p => !seenIds.has(p.id))];
@@ -381,7 +385,7 @@ function _startRelayClient(url) {
   });
 
   ws.on('error', (err) => {
-    console.warn('[RelayClient] Connection error:', err.message);
+    console.warn('[RelayClient] Connection failed:', err.message);
   });
 }
 
@@ -398,6 +402,7 @@ function registerIpcHandlers() {
     const udpPeers = peerDiscovery ? peerDiscovery.getPeers() : [];
     const seenIds = new Set(udpPeers.map(p => p.id));
     const merged = [...udpPeers, ...relayPeers.filter(p => !seenIds.has(p.id) && p.id !== ourRelayId)];
+    console.log(`[WebServer] Relay players changed — ${relayPeers.length} relay, sending ${merged.length} to renderer: ${merged.map(p => p.panel).join(', ') || '(none)'}`);
     sendToMainWindow(channels.PLAYER_PEERS_UPDATE, merged);
   });
 
@@ -462,7 +467,12 @@ function registerIpcHandlers() {
         gatewayHost !== 'localhost' && gatewayHost !== '127.0.0.1';
       if (isNonLocal && !webServer.isRunning()) {
         const relayPort = (config.web || {}).port || 3000;
+        console.log(`[RelayClient] Remote gateway detected (${gatewayHost}) — will connect relay to port ${relayPort}`);
         _startRelayClient(`ws://${gatewayHost}:${relayPort}`);
+      } else if (webServer.isRunning()) {
+        console.log('[RelayClient] We are the host (web server running) — no relay client needed');
+      } else {
+        console.log('[RelayClient] Local gateway — relay client skipped');
       }
 
       console.log('[Gateway] Connecting to', config.gateway.host + ':' + config.gateway.port);

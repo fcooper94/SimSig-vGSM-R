@@ -101,6 +101,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Player peer discovery updates
   window.simsigAPI.player.onPeersUpdate((peers) => {
     _globalPeers = peers;
+    console.log(`[Players] Peers updated — ${peers.length} online: ${peers.map(p => p.panel).join(', ') || '(none)'}`);
     if (_phonebookTab === 'global' && !phonebookOverlay.classList.contains('hidden')) {
       _renderPhonebook();
     }
