@@ -515,7 +515,7 @@ function registerIpcHandlers() {
         const merged = [...udpPeers, ...relayPeers.filter(p => !seenIds.has(p.id))];
         sendToMainWindow(channels.PLAYER_PEERS_UPDATE, merged);
       };
-      peerDiscovery.start('', PLAYER_CALL_PORT);
+      peerDiscovery.start(ourPanelName, PLAYER_CALL_PORT);
 
       // Relay: handle signals and audio addressed to the host
       webServer.setOnHostRelayEvent((event) => {
