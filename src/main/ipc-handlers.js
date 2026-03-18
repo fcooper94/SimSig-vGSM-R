@@ -462,8 +462,8 @@ function _startRelayClient(host) {
     _mergeAndSendPeerList();
   });
 
-  ws.on('error', (err) => {
-    console.warn('[RelayClient] Connection failed:', err.message);
+  ws.on('error', () => {
+    // Silently ignore — SimSig host may not be running vGSM-R
   });
 }
 
@@ -539,7 +539,11 @@ function registerIpcHandlers() {
       // For remote gateways, also try connecting to the SimSig host's relay in case
       // they are running vGSM-R (backward compat with host-based setup).
       if (!webServer.isRelayRunning()) {
-        webServer.startRelay(RELAY_PORT);
+        webServer.startRelay(RELAY_PORT, () => {
+          // Port already in use — another vGSM-R instance on this machine has the relay
+          console.log('[Relay] Connecting to local relay (same machine)');
+          _connectToPeerRelay('127.0.0.1');
+        });
         console.log(`[Relay] Started relay WS on port ${RELAY_PORT}`);
       } else {
         console.log('[Relay] Relay WS already running');
@@ -548,7 +552,7 @@ function registerIpcHandlers() {
       const isNonLocal = gatewayHost &&
         gatewayHost !== 'localhost' && gatewayHost !== '127.0.0.1';
       if (isNonLocal) {
-        console.log(`[RelayClient] Remote gateway (${gatewayHost}) — trying to connect to their relay`);
+        // Silently try the SimSig host's relay in case they run vGSM-R too
         _startRelayClient(gatewayHost);
       }
 

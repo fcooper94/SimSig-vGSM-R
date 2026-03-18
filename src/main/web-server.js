@@ -305,7 +305,7 @@ function broadcast(channel, data) {
 // Started automatically when hosting a SimSig session so other Electron
 // players can connect and register even without Browser Access enabled.
 
-function startRelay(port) {
+function startRelay(port, onPortInUse) {
   if (wss) return; // already running (either relay-only or full web server)
 
   wss = new WebSocketServer({ port });
@@ -352,7 +352,13 @@ function startRelay(port) {
   });
 
   wss.on('error', (err) => {
-    console.error('[WebServer] Relay WS error:', err.message);
+    if (err.code === 'EADDRINUSE') {
+      console.log(`[WebServer] Port ${port} already in use — another instance has the relay`);
+      wss = null;
+      if (onPortInUse) onPortInUse();
+    } else {
+      console.error('[WebServer] Relay WS error:', err.message);
+    }
   });
 
   console.log(`[WebServer] Relay-only WS listening on port ${port}`);
