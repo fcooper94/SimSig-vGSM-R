@@ -27,9 +27,6 @@
   },
   "squirrelWindows": {
     "iconUrl": "https://raw.githubusercontent.com/fcooper94/SimSig-vGSM-R/main/images/icon.png",
-    "setupIcon": "images/icon.png",
-    "artifactName": "vGSM-R-Setup-${version}.${ext}",
-    "shortcutName": "vGSM-R",
-    "createDesktopShortcut": true
+    "artifactName": "vGSM-R-Setup-${version}.${ext}"
   }
 }
