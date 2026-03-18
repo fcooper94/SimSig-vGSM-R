@@ -3898,14 +3898,19 @@ const PhoneCallsUI = {
     // Remote audio
     pc.ontrack = (event) => {
       const msg = `[WebRTC] ontrack — kind: ${event.track.kind}, streams: ${event.streams.length}`;
-      console.log(msg);
-      window.simsigAPI.app.log(msg);
+      const iceAtTrack = `[WebRTC] ontrack — kind: ${event.track.kind}, streams: ${event.streams.length}, ICE state at track: ${pc.iceConnectionState}`;
+      console.log(iceAtTrack);
+      window.simsigAPI.app.log(iceAtTrack);
       if (!this._playerRemoteAudio) {
-        this._playerRemoteAudio = new Audio();
+        this._playerRemoteAudio = document.createElement('audio');
         this._playerRemoteAudio.autoplay = true;
+        this._playerRemoteAudio.volume = 1.0;
+        document.body.appendChild(this._playerRemoteAudio);
       }
       this._playerRemoteAudio.srcObject = event.streams[0] || new MediaStream([event.track]);
-      this._playerRemoteAudio.play().catch(err => {
+      this._playerRemoteAudio.play().then(() => {
+        window.simsigAPI.app.log('[WebRTC] Remote audio playing');
+      }).catch(err => {
         const e = `[WebRTC] Remote audio play() failed: ${err}`;
         console.warn(e);
         window.simsigAPI.app.log(e);
@@ -3924,6 +3929,16 @@ const PhoneCallsUI = {
       console.log(msg);
       window.simsigAPI.app.log(msg);
     };
+
+    // Fallback: poll ICE/connection state every 2s in case event doesn't fire
+    const statePoller = setInterval(() => {
+      if (!this._playerPeerConnection || this._playerPeerConnection !== pc) { clearInterval(statePoller); return; }
+      window.simsigAPI.app.log(`[WebRTC] Poll — ICE: ${pc.iceConnectionState}, conn: ${pc.connectionState}`);
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed' ||
+          pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
+        clearInterval(statePoller);
+      }
+    }, 2000);
 
     // ICE candidates — forward via relay
     pc.onicecandidate = (event) => {
@@ -3987,6 +4002,7 @@ const PhoneCallsUI = {
     }
     if (this._playerRemoteAudio) {
       this._playerRemoteAudio.srcObject = null;
+      if (this._playerRemoteAudio.parentNode) this._playerRemoteAudio.parentNode.removeChild(this._playerRemoteAudio);
       this._playerRemoteAudio = null;
     }
     if (this._playerPeerConnection) {
