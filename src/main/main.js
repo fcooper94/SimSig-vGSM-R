@@ -313,7 +313,7 @@ app.whenReady().then(async () => {
   // Web server IPC handlers
   ipcMain.handle(channels.WEB_START, (_event, port) => {
     if (webServer.isRunning()) stopWebServer();
-    const actualPort = port || 3000;
+    const actualPort = port || 50507;
     startWebServer(actualPort);
 
     // Get local network IP for the overlay URL

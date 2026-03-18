@@ -150,7 +150,7 @@ const SettingsUI = {
 
     // Browser access
     document.getElementById('setting-web-enabled').checked = settings.web?.enabled || false;
-    document.getElementById('setting-web-port').value = settings.web?.port || 3000;
+    document.getElementById('setting-web-port').value = settings.web?.port || 50507;
 
     // Appearance
     const darkCheckbox = document.getElementById('setting-dark-mode');
@@ -224,7 +224,7 @@ const SettingsUI = {
 
     // Browser access
     const webEnabled = document.getElementById('setting-web-enabled').checked;
-    const webPort = parseInt(document.getElementById('setting-web-port').value, 10) || 3000;
+    const webPort = parseInt(document.getElementById('setting-web-port').value, 10) || 50507;
     await window.simsigAPI.settings.set('web.enabled', webEnabled);
     await window.simsigAPI.settings.set('web.port', webPort);
 

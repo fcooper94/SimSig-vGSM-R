@@ -345,11 +345,15 @@ function _handleRelayClientMessage(data) {
   }
 }
 
-function _startRelayClient(url) {
+const RELAY_PORT = 50507;
+
+function _startRelayClient(host) {
   if (relayClientWs) {
     try { relayClientWs.close(); } catch (_) {}
     relayClientWs = null;
   }
+
+  const url = `ws://${host}:${RELAY_PORT}`;
   const { WebSocket } = require('ws');
   const ws = new WebSocket(url);
   relayClientWs = ws;
@@ -463,22 +467,21 @@ function registerIpcHandlers() {
       // If connecting to a non-local gateway, also connect to the host's vGSM-R relay
       // so this Electron app is discoverable by other Electron players (VATSIM-style).
       const gatewayHost = config.gateway.host;
-      const relayPort = (config.web || {}).port || 3000;
       const isNonLocal = gatewayHost &&
         gatewayHost !== 'localhost' && gatewayHost !== '127.0.0.1';
       if (!isNonLocal) {
-        // Local gateway — we are the SimSig host; start relay WS so clients can find us
+        // Local gateway — we are the SimSig host; start relay WS on fixed port
         if (!webServer.isRelayRunning()) {
-          webServer.startRelay(relayPort);
-          console.log(`[RelayClient] Local gateway — started relay WS on port ${relayPort}`);
+          webServer.startRelay(RELAY_PORT);
+          console.log(`[RelayClient] Local gateway — started relay WS on port ${RELAY_PORT}`);
         } else {
           console.log('[RelayClient] Local gateway — relay already running');
         }
       } else {
         // Remote gateway — we are a client; connect to the host's relay WS
         if (!webServer.isRelayRunning()) {
-          console.log(`[RelayClient] Remote gateway detected (${gatewayHost}) — connecting relay client to port ${relayPort}`);
-          _startRelayClient(`ws://${gatewayHost}:${relayPort}`);
+          console.log(`[RelayClient] Remote gateway detected (${gatewayHost}) — connecting to relay on port ${RELAY_PORT}`);
+          _startRelayClient(gatewayHost);
         } else {
           console.log('[RelayClient] Remote gateway — relay already running (host mode), no client needed');
         }

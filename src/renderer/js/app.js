@@ -687,7 +687,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (window.simsigAPI.web) {
       const webSettings = await window.simsigAPI.settings.getAll();
       if (webSettings.web?.enabled) {
-        const port = webSettings.web.port || 3000;
+        const port = webSettings.web.port || 50507;
         const result = await window.simsigAPI.web.start(port);
         document.getElementById('browser-overlay-url').textContent = `${result.ip || 'localhost'}:${port}`;
         document.getElementById('browser-overlay').classList.remove('hidden');

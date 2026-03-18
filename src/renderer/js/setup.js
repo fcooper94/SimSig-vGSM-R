@@ -29,7 +29,7 @@ const SetupWizard = {
         ttsProvider: all.tts?.provider || 'edge',
         elevenLabsApiKey: all.tts?.elevenLabsApiKey || '',
         webEnabled: all.web?.enabled || false,
-        webPort: String(all.web?.port || '3000'),
+        webPort: String(all.web?.port || '50507'),
       };
     }
 
@@ -140,7 +140,7 @@ const SetupWizard = {
       case 'browser': {
         const checkbox = document.getElementById('setup-web-enabled');
         s.webEnabled = checkbox ? checkbox.checked : false;
-        s.webPort = this.val('setup-web-port') || '3000';
+        s.webPort = this.val('setup-web-port') || '50507';
         break;
       }
     }
@@ -191,7 +191,7 @@ const SetupWizard = {
       'tts.provider': s.ttsProvider || 'edge',
       'tts.elevenLabsApiKey': s.elevenLabsApiKey || '',
       'web.enabled': !!s.webEnabled,
-      'web.port': parseInt(s.webPort, 10) || 3000,
+      'web.port': parseInt(s.webPort, 10) || 50507,
     };
     await window.setupAPI.complete(payload);
   },
@@ -582,9 +582,9 @@ const SetupWizard = {
       <div id="web-port-group" class="form-group setup-hidden ${enabled ? 'visible' : ''}"
         <label for="setup-web-port">Web Server Port</label>
         <input type="number" id="setup-web-port" class="setup-input"
-               value="${s.webPort || '3000'}" min="1024" max="65535">
+               value="${s.webPort || '50507'}" min="1024" max="65535">
         <div id="web-port-error" class="validation-error">Port must be 1024-65535</div>
-        <div class="form-hint">Accessible at http://&lt;your-ip&gt;:${s.webPort || '3000'} on your network</div>
+        <div class="form-hint">Accessible at http://&lt;your-ip&gt;:${s.webPort || '50507'} on your network</div>
       </div>
       <div class="btn-row">
         <button class="btn-secondary" data-action="prev">Back</button>
@@ -615,7 +615,7 @@ const SetupWizard = {
           </li>
           <li>
             <span class="summary-label">Browser Access</span>
-            <span class="summary-value">${s.webEnabled ? 'Port ' + (s.webPort || '3000') : 'Disabled'}</span>
+            <span class="summary-value">${s.webEnabled ? 'Port ' + (s.webPort || '50507') : 'Disabled'}</span>
           </li>
         </ul>
         <div class="btn-row center stacked">
