@@ -120,11 +120,12 @@ public class Win32Reply {
     public const uint KEYEVENTF_KEYUP      = 0x0002;
     public const byte VK_DOWN = 0x28;
     public const byte VK_HOME = 0x24;
-    public const int  LB_GETCOUNT = 0x018B;
+    public const int  LB_GETCOUNT  = 0x018B;
     public const int  LB_SETCURSEL = 0x0186;
-    public const int  WM_SETTEXT  = 0x000C;
-    public const int  BM_CLICK    = 0x00F5;
-    public const int  SW_RESTORE  = 9;
+    public const int  CB_SETCURSEL = 0x014E;
+    public const int  WM_SETTEXT   = 0x000C;
+    public const int  BM_CLICK     = 0x00F5;
+    public const int  SW_RESTORE   = 9;
 
     public static void ClickAt(int x, int y) {
         SetCursorPos(x, y);
@@ -342,8 +343,17 @@ try {
         exit 0
     }
 
-    # Find the TListBox (reply options) child
+    # Find the TListBox (reply options) child — fall back to TComboBox if not found
+    # (some call types, e.g. Shunter ready-at, use a TComboBox instead of TListBox)
     $listBoxHwnd = [Win32Reply]::FindChildByClass($dialogHwnd, "TListBox")
+    $useComboBox = $false
+    if ($listBoxHwnd -eq [IntPtr]::Zero) {
+        $listBoxHwnd = [Win32Reply]::FindChildByClass($dialogHwnd, "TComboBox")
+        if ($listBoxHwnd -ne [IntPtr]::Zero) {
+            $useComboBox = $true
+            [Console]::Error.WriteLine("Using TComboBox for reply selection")
+        }
+    }
 
     if ($listBoxHwnd -eq [IntPtr]::Zero) {
         Write-Output '{"error":"Reply listbox not found"}'
@@ -358,8 +368,12 @@ try {
         exit 0
     }
 
-    # Select the reply in the ListBox via message (no keyboard needed)
-    [Win32Reply]::SendMessage($listBoxHwnd, [Win32Reply]::LB_SETCURSEL, [IntPtr]$ReplyIndex, [IntPtr]::Zero) | Out-Null
+    # Select the reply via the appropriate control type
+    if ($useComboBox) {
+        [Win32Reply]::SendMessage($listBoxHwnd, [Win32Reply]::CB_SETCURSEL, [IntPtr]$ReplyIndex, [IntPtr]::Zero) | Out-Null
+    } else {
+        [Win32Reply]::SendMessage($listBoxHwnd, [Win32Reply]::LB_SETCURSEL, [IntPtr]$ReplyIndex, [IntPtr]::Zero) | Out-Null
+    }
     Start-Sleep -Milliseconds 100
 
     # Click the Reply button via async PostMessage — Reply may open a modal dialog
