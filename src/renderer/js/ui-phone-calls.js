@@ -3834,6 +3834,17 @@ const PhoneCallsUI = {
     this._processWebRTCSignal(signal);
   },
 
+  _flushPendingIce() {
+    const pc = this._playerPeerConnection;
+    if (!pc || !this._pendingIceCandidates?.length) return;
+    const log = (msg) => { console.log(msg); window.simsigAPI.app.log(msg); };
+    log(`[WebRTC] Flushing ${this._pendingIceCandidates.length} buffered ICE candidates`);
+    for (const candidate of this._pendingIceCandidates) {
+      pc.addIceCandidate(candidate).catch(err => log(`[WebRTC] addIceCandidate error: ${err}`));
+    }
+    this._pendingIceCandidates = [];
+  },
+
   _processWebRTCSignal(signal) {
     const pc = this._playerPeerConnection;
     if (!pc) return;
@@ -3841,7 +3852,7 @@ const PhoneCallsUI = {
     if (signal.type === 'offer') {
       log('[WebRTC] Processing offer — setRemoteDescription → createAnswer → setLocalDescription');
       pc.setRemoteDescription({ type: 'offer', sdp: signal.sdp })
-        .then(() => pc.createAnswer())
+        .then(() => { this._flushPendingIce(); return pc.createAnswer(); })
         .then(answer => pc.setLocalDescription(answer).then(() => {
           log('[WebRTC] Answer set — sending answer');
           window.simsigAPI.player.sendWebRTCSignal(this._playerCallPeerId, { type: 'answer', sdp: answer.sdp });
@@ -3850,11 +3861,17 @@ const PhoneCallsUI = {
     } else if (signal.type === 'answer') {
       log('[WebRTC] Processing answer — setRemoteDescription');
       pc.setRemoteDescription({ type: 'answer', sdp: signal.sdp })
-        .then(() => log('[WebRTC] Remote description set OK'))
+        .then(() => { log('[WebRTC] Remote description set OK'); this._flushPendingIce(); })
         .catch(err => log(`[WebRTC] setRemoteDescription error: ${err}`));
     } else if (signal.type === 'ice') {
-      pc.addIceCandidate(signal.candidate)
-        .catch(err => log(`[WebRTC] addIceCandidate error: ${err}`));
+      if (!pc.remoteDescription) {
+        if (!this._pendingIceCandidates) this._pendingIceCandidates = [];
+        this._pendingIceCandidates.push(signal.candidate);
+        log(`[WebRTC] Buffered ICE candidate (${this._pendingIceCandidates.length} pending, no remote desc yet)`);
+      } else {
+        pc.addIceCandidate(signal.candidate)
+          .catch(err => log(`[WebRTC] addIceCandidate error: ${err}`));
+      }
     }
   },
 
@@ -4048,6 +4065,7 @@ const PhoneCallsUI = {
     }
     this._webRTCSettingUp = false;
     this._pendingWebRTCSignals = null;
+    this._pendingIceCandidates = null;
   },
 
   hangUpPlayerCall() {
