@@ -3887,7 +3887,21 @@ const PhoneCallsUI = {
   },
 
   async _setupWebRTC(isOffer) {
-    const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    // STUN for direct P2P + TURN relay for when NAT blocks direct UDP
+    const STUN = { iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      {
+        urls: [
+          'turn:openrelay.metered.ca:80',
+          'turn:openrelay.metered.ca:80?transport=tcp',
+          'turn:openrelay.metered.ca:443',
+          'turn:openrelay.metered.ca:443?transport=tcp',
+        ],
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+    ] };
     const pc = new RTCPeerConnection(STUN);
 
     // Set PC immediately so ICE/answer signals can be buffered rather than dropped
@@ -3955,6 +3969,8 @@ const PhoneCallsUI = {
     // ICE candidates — forward via relay
     pc.onicecandidate = (event) => {
       if (event.candidate && this._playerCallPeerId) {
+        const c = event.candidate;
+        window.simsigAPI.app.log(`[WebRTC] ICE candidate: ${c.type || 'unknown'} ${c.protocol || ''} ${c.address || ''}`);
         window.simsigAPI.player.sendWebRTCSignal(this._playerCallPeerId, {
           type: 'ice', candidate: event.candidate,
         });
