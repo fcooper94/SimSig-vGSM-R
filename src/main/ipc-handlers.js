@@ -37,6 +37,7 @@ let pendingRelayDialResolve = null;
 // When connecting to a remote gateway, we also open a WS connection to the
 // host's vGSM-R web relay so our Electron app registers as a relay player.
 let relayClientWs = null;
+let legacyRelayPeers = []; // players seen on the legacy relay (SimSig host running vGSM-R)
 
 let stompManager = null;
 let phoneReader = null;
@@ -296,16 +297,89 @@ function parseWorkstationLines(lines) {
 }
 
 // ── Relay client (Electron-to-Electron internet play) ──────────────────────
-// Unified signal send: uses relay client WS if we're a client,
-// otherwise uses the host web server (if we're the host).
+// peerRelayClients: Map<ip, { ws: WebSocket, players: Array }>
+// Connections we've opened TO other peers' relay WSs (for LAN peers via UDP discovery).
+const peerRelayClients = new Map();
+
+function _mergeAndSendPeerList() {
+  const udpPeers = peerDiscovery ? peerDiscovery.getPeers() : [];
+  const ourRelayPeers = webServer.getRelayPlayers().filter(p => p.id !== ourRelayId);
+  const seenIds = new Set([ourRelayId]);
+  const merged = [];
+  for (const p of [...udpPeers, ...ourRelayPeers, ...legacyRelayPeers]) {
+    if (!seenIds.has(p.id)) { seenIds.add(p.id); merged.push(p); }
+  }
+  for (const [, entry] of peerRelayClients) {
+    for (const p of entry.players) {
+      if (!seenIds.has(p.id)) { seenIds.add(p.id); merged.push(p); }
+    }
+  }
+  console.log(`[Relay] Phonebook: ${merged.map(p => p.panel).join(', ') || '(none)'}`);
+  sendToMainWindow(channels.PLAYER_PEERS_UPDATE, merged);
+}
+
+// Unified signal send: direct to target's WS if on our relay, else via peer relay, else legacy relay client.
 function _sendPlayerSignal(targetId, payload) {
+  // 1. Target connected directly to our relay
+  if (webServer.hostSendSignal(targetId, payload)) {
+    console.log(`[Signal] Send ${payload.type} → ${targetId} via ownRelay: ok`);
+    return;
+  }
+  // 2. Route through a peer relay that has the target registered
+  for (const [ip, entry] of peerRelayClients) {
+    if (entry.ws?.readyState === 1 && entry.players.some(p => p.id === targetId)) {
+      console.log(`[Signal] Send ${payload.type} → ${targetId} via peerRelay ${ip}`);
+      entry.ws.send(JSON.stringify({ type: 'player-signal', targetId, payload }));
+      return;
+    }
+  }
+  // 3. Fallback: legacy relay client (e.g. SimSig host running vGSM-R)
   if (relayClientWs?.readyState === 1) {
-    console.log(`[Signal] Send ${payload.type} → ${targetId} via relayClientWs`);
+    console.log(`[Signal] Send ${payload.type} → ${targetId} via legacyRelayClient`);
     relayClientWs.send(JSON.stringify({ type: 'player-signal', targetId, payload }));
     return;
   }
-  const ok = webServer.hostSendSignal(targetId, payload);
-  console.log(`[Signal] Send ${payload.type} → ${targetId} via hostSendSignal: ${ok ? 'ok' : 'no target'}`);
+  console.log(`[Signal] No route for ${payload.type} → ${targetId}`);
+}
+
+function _connectToPeerRelay(peerIp) {
+  if (peerRelayClients.has(peerIp)) return;
+  const { WebSocket } = require('ws');
+  const url = `ws://${peerIp}:${RELAY_PORT}`;
+  const entry = { ws: null, players: [] };
+  const ws = new WebSocket(url);
+  entry.ws = ws;
+  peerRelayClients.set(peerIp, entry);
+  console.log(`[PeerRelay] Connecting to ${url}`);
+
+  ws.on('open', () => {
+    console.log(`[PeerRelay] Connected to ${peerIp} — registering as ${ourRelayId} / ${ourPanelName}`);
+    ws.send(JSON.stringify({ type: 'player-register', id: ourRelayId, panel: ourPanelName }));
+  });
+
+  ws.on('message', (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
+    if (msg.type !== 'event') return;
+    if (msg.channel === 'player:peers-update') {
+      entry.players = (msg.data || []).filter(p => p.id !== ourRelayId);
+      console.log(`[PeerRelay] ${peerIp} peers: ${entry.players.map(p => p.panel).join(', ') || '(none)'}`);
+      _mergeAndSendPeerList();
+    } else if (msg.channel === 'player:signal') {
+      _handleRelayClientMessage(msg.data);
+    }
+  });
+
+  ws.on('close', () => {
+    peerRelayClients.delete(peerIp);
+    _mergeAndSendPeerList();
+    console.log(`[PeerRelay] Disconnected from ${peerIp}`);
+  });
+
+  ws.on('error', (err) => {
+    peerRelayClients.delete(peerIp);
+    console.warn(`[PeerRelay] ${peerIp} error:`, err.message);
+  });
 }
 
 function _handleRelayClientMessage(data) {
@@ -373,13 +447,9 @@ function _startRelayClient(host) {
     try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (msg.type === 'event') {
       if (msg.channel === 'player:peers-update') {
-        const allPeers = msg.data || [];
-        const relayPeers = allPeers.filter(p => p.id !== ourRelayId);
-        console.log(`[RelayClient] Peers update — ${allPeers.length} total, showing ${relayPeers.length}: ${relayPeers.map(p => p.panel).join(', ') || '(none)'}`);
-        const udpPeers = peerDiscovery ? peerDiscovery.getPeers() : [];
-        const seenIds = new Set(udpPeers.map(p => p.id));
-        const merged = [...udpPeers, ...relayPeers.filter(p => !seenIds.has(p.id))];
-        sendToMainWindow(channels.PLAYER_PEERS_UPDATE, merged);
+        legacyRelayPeers = (msg.data || []).filter(p => p.id !== ourRelayId);
+        console.log(`[RelayClient] Peers from host relay: ${legacyRelayPeers.map(p => p.panel).join(', ') || '(none)'}`);
+        _mergeAndSendPeerList();
       } else if (msg.channel === 'player:signal') {
         _handleRelayClientMessage(msg.data);
       }
@@ -387,8 +457,9 @@ function _startRelayClient(host) {
   });
 
   ws.on('close', () => {
-    if (relayClientWs === ws) relayClientWs = null;
+    if (relayClientWs === ws) { relayClientWs = null; legacyRelayPeers = []; }
     console.log('[RelayClient] Disconnected from host relay');
+    _mergeAndSendPeerList();
   });
 
   ws.on('error', (err) => {
@@ -405,13 +476,7 @@ function _stopRelayClient() {
 
 function registerIpcHandlers() {
   // Wire up relay player list → Electron renderer (runs at startup, not just on connect)
-  webServer.setOnRelayPlayersChanged((relayPeers) => {
-    const udpPeers = peerDiscovery ? peerDiscovery.getPeers() : [];
-    const seenIds = new Set(udpPeers.map(p => p.id));
-    const merged = [...udpPeers, ...relayPeers.filter(p => !seenIds.has(p.id) && p.id !== ourRelayId)];
-    console.log(`[WebServer] Relay players changed — ${relayPeers.length} relay, sending ${merged.length} to renderer: ${merged.map(p => p.panel).join(', ') || '(none)'}`);
-    sendToMainWindow(channels.PLAYER_PEERS_UPDATE, merged);
-  });
+  webServer.setOnRelayPlayersChanged(() => _mergeAndSendPeerList());
 
   // App info
   registerHandler('app:get-version', () => app.getVersion());
@@ -470,27 +535,21 @@ function registerIpcHandlers() {
       ourPanelName = hostInitials;
       webServer.registerHostPlayer(ourRelayId, hostInitials);
 
-      // If connecting to a non-local gateway, also connect to the host's vGSM-R relay
-      // so this Electron app is discoverable by other Electron players (VATSIM-style).
+      // Every instance starts its own relay WS so others can connect to it.
+      // For remote gateways, also try connecting to the SimSig host's relay in case
+      // they are running vGSM-R (backward compat with host-based setup).
+      if (!webServer.isRelayRunning()) {
+        webServer.startRelay(RELAY_PORT);
+        console.log(`[Relay] Started relay WS on port ${RELAY_PORT}`);
+      } else {
+        console.log('[Relay] Relay WS already running');
+      }
       const gatewayHost = config.gateway.host;
       const isNonLocal = gatewayHost &&
         gatewayHost !== 'localhost' && gatewayHost !== '127.0.0.1';
-      if (!isNonLocal) {
-        // Local gateway — we are the SimSig host; start relay WS on fixed port
-        if (!webServer.isRelayRunning()) {
-          webServer.startRelay(RELAY_PORT);
-          console.log(`[RelayClient] Local gateway — started relay WS on port ${RELAY_PORT}`);
-        } else {
-          console.log('[RelayClient] Local gateway — relay already running');
-        }
-      } else {
-        // Remote gateway — we are a client; connect to the host's relay WS
-        if (!webServer.isRelayRunning()) {
-          console.log(`[RelayClient] Remote gateway detected (${gatewayHost}) — connecting to relay on port ${RELAY_PORT}`);
-          _startRelayClient(gatewayHost);
-        } else {
-          console.log('[RelayClient] Remote gateway — relay already running (host mode), no client needed');
-        }
+      if (isNonLocal) {
+        console.log(`[RelayClient] Remote gateway (${gatewayHost}) — trying to connect to their relay`);
+        _startRelayClient(gatewayHost);
       }
 
       console.log('[Gateway] Connecting to', config.gateway.host + ':' + config.gateway.port);
@@ -657,10 +716,11 @@ function registerIpcHandlers() {
       if (peerDiscovery) peerDiscovery.stop();
       peerDiscovery = new PeerDiscovery();
       peerDiscovery.onPeersChanged = (udpPeers) => {
-        const relayPeers = webServer.getRelayPlayers().filter(p => p.id !== ourRelayId);
-        const seenIds = new Set(udpPeers.map(p => p.id));
-        const merged = [...udpPeers, ...relayPeers.filter(p => !seenIds.has(p.id))];
-        sendToMainWindow(channels.PLAYER_PEERS_UPDATE, merged);
+        // Connect to relay WS of newly discovered LAN peers so we can exchange player lists
+        for (const peer of udpPeers) {
+          _connectToPeerRelay(peer.host);
+        }
+        _mergeAndSendPeerList();
       };
       peerDiscovery.start(ourPanelName, PLAYER_CALL_PORT);
 
@@ -720,7 +780,12 @@ function registerIpcHandlers() {
     activeRelayCallPartnerId = null;
     if (pendingRelayDialResolve) { pendingRelayDialResolve({ error: 'Disconnected' }); pendingRelayDialResolve = null; }
     webServer.clearHostRelayPair();
+    legacyRelayPeers = [];
     _stopRelayClient();
+    for (const [, entry] of peerRelayClients) {
+      try { entry.ws.close(); } catch (_) {}
+    }
+    peerRelayClients.clear();
     // Stop auto-started relay-only WS (but not the full web server managed by the user)
     if (webServer.isRelayRunning() && !webServer.isRunning()) {
       webServer.stop();
