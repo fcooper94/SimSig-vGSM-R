@@ -120,6 +120,8 @@ const PhoneCallsUI = {
       this.notificationEl.addEventListener('click', () => {
         if (this.inCall || this._outgoingCall) {
           window.simsigAPI.phone.remoteAction({ type: 'hangup' });
+        } else if (this._playerAnswerHandler) {
+          this._playerAnswerHandler();
         } else if (this.calls.length > 0) {
           window.simsigAPI.phone.remoteAction({ type: 'answer' });
         }
@@ -218,7 +220,9 @@ const PhoneCallsUI = {
 
     // Listen for remote actions from the browser (answer/reply/hangup)
     window.simsigAPI.phone.onRemoteAction((action) => {
-      if (action.type === 'answer' && !this.inCall && !this._outgoingCall && this.calls.length > 0) {
+      if (action.type === 'answer' && !this.inCall && !this._outgoingCall && this._playerAnswerHandler) {
+        this._playerAnswerHandler();
+      } else if (action.type === 'answer' && !this.inCall && !this._outgoingCall && this.calls.length > 0) {
         this.answerCall(action.index != null ? action.index : this.calls.length - 1);
       } else if (action.type === 'reply' && this.inCall && !this._replySent && !this._replyClicked) {
         this._replyClicked = true;
@@ -269,6 +273,8 @@ const PhoneCallsUI = {
         if (this._hasReplyOptions && !this._replySent) return; // must reply first
         if (this._hangUpLocked) return; // reply/goodbye still in progress
         this.hangUp();
+      } else if (this._playerAnswerHandler) {
+        this._playerAnswerHandler();
       } else if (this.calls.length > 0) {
         this.answerCall(this.calls.length - 1);
       }
@@ -3705,6 +3711,8 @@ const PhoneCallsUI = {
   _playerLocalStream: null,     // local mic stream
   _playerRemoteAudio: null,     // Audio element for remote stream
   _playerPttListener: null,
+  _webRTCSettingUp: false,      // true while getUserMedia is pending (signals buffered)
+  _pendingWebRTCSignals: null,  // signals buffered during setup
 
   // Called when user dials a player from the Global phonebook
   async dialPlayer(peer) {
@@ -3809,21 +3817,32 @@ const PhoneCallsUI = {
   },
 
   handleWebRTCSignal(data) {
-    if (!this._playerPeerConnection) return;
     const { signal } = data;
+    if (!this._playerPeerConnection || this._webRTCSettingUp) {
+      // PC not ready yet — buffer until _setupWebRTC completes
+      if (!this._pendingWebRTCSignals) this._pendingWebRTCSignals = [];
+      this._pendingWebRTCSignals.push(signal);
+      return;
+    }
+    this._processWebRTCSignal(signal);
+  },
+
+  _processWebRTCSignal(signal) {
+    const pc = this._playerPeerConnection;
+    if (!pc) return;
     if (signal.type === 'offer') {
-      this._playerPeerConnection.setRemoteDescription({ type: 'offer', sdp: signal.sdp })
-        .then(() => this._playerPeerConnection.createAnswer())
+      pc.setRemoteDescription({ type: 'offer', sdp: signal.sdp })
+        .then(() => pc.createAnswer())
         .then(answer => {
-          this._playerPeerConnection.setLocalDescription(answer);
+          pc.setLocalDescription(answer);
           window.simsigAPI.player.sendWebRTCSignal(this._playerCallPeerId, { type: 'answer', sdp: answer.sdp });
         })
         .catch(err => console.error('[WebRTC] Answer error:', err));
     } else if (signal.type === 'answer') {
-      this._playerPeerConnection.setRemoteDescription({ type: 'answer', sdp: signal.sdp })
+      pc.setRemoteDescription({ type: 'answer', sdp: signal.sdp })
         .catch(err => console.error('[WebRTC] setRemoteDescription answer error:', err));
     } else if (signal.type === 'ice') {
-      this._playerPeerConnection.addIceCandidate(signal.candidate)
+      pc.addIceCandidate(signal.candidate)
         .catch(err => console.error('[WebRTC] addIceCandidate error:', err));
     }
   },
@@ -3866,7 +3885,29 @@ const PhoneCallsUI = {
   async _setupWebRTC(isOffer) {
     const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
     const pc = new RTCPeerConnection(STUN);
+
+    // Set PC immediately so ICE/answer signals can be buffered rather than dropped
     this._playerPeerConnection = pc;
+    this._webRTCSettingUp = true; // block signal processing until tracks are added
+    this._pendingWebRTCSignals = [];
+
+    // Remote audio
+    pc.ontrack = (event) => {
+      if (!this._playerRemoteAudio) {
+        this._playerRemoteAudio = new Audio();
+        this._playerRemoteAudio.autoplay = true;
+      }
+      this._playerRemoteAudio.srcObject = event.streams[0];
+    };
+
+    // ICE candidates — forward via relay
+    pc.onicecandidate = (event) => {
+      if (event.candidate && this._playerCallPeerId) {
+        window.simsigAPI.player.sendWebRTCSignal(this._playerCallPeerId, {
+          type: 'ice', candidate: event.candidate,
+        });
+      }
+    };
 
     // Get mic stream — muted by default (PTT controls it)
     let localStream = null;
@@ -3892,23 +3933,8 @@ const PhoneCallsUI = {
       }
     });
 
-    // Remote audio
-    pc.ontrack = (event) => {
-      if (!this._playerRemoteAudio) {
-        this._playerRemoteAudio = new Audio();
-        this._playerRemoteAudio.autoplay = true;
-      }
-      this._playerRemoteAudio.srcObject = event.streams[0];
-    };
-
-    // ICE candidates — forward via relay
-    pc.onicecandidate = (event) => {
-      if (event.candidate && this._playerCallPeerId) {
-        window.simsigAPI.player.sendWebRTCSignal(this._playerCallPeerId, {
-          type: 'ice', candidate: event.candidate,
-        });
-      }
-    };
+    // Tracks added — now safe to process signals
+    this._webRTCSettingUp = false;
 
     if (isOffer) {
       pc.createOffer()
@@ -3918,7 +3944,13 @@ const PhoneCallsUI = {
         })
         .catch(err => console.error('[WebRTC] createOffer error:', err));
     }
-    // Answer side: waits for handleWebRTCSignal to receive the offer
+
+    // Flush any signals that arrived while we were waiting for getUserMedia
+    const pending = this._pendingWebRTCSignals || [];
+    this._pendingWebRTCSignals = null;
+    for (const signal of pending) {
+      this._processWebRTCSignal(signal);
+    }
   },
 
   _closeWebRTC() {
@@ -3935,6 +3967,8 @@ const PhoneCallsUI = {
       this._playerPeerConnection.close();
       this._playerPeerConnection = null;
     }
+    this._webRTCSettingUp = false;
+    this._pendingWebRTCSignals = null;
   },
 
   hangUpPlayerCall() {
