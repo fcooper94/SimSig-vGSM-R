@@ -3897,22 +3897,32 @@ const PhoneCallsUI = {
 
     // Remote audio
     pc.ontrack = (event) => {
-      console.log('[WebRTC] ontrack fired — streams:', event.streams.length, 'track kind:', event.track.kind);
+      const msg = `[WebRTC] ontrack — kind: ${event.track.kind}, streams: ${event.streams.length}`;
+      console.log(msg);
+      window.simsigAPI.app.log(msg);
       if (!this._playerRemoteAudio) {
         this._playerRemoteAudio = new Audio();
         this._playerRemoteAudio.autoplay = true;
       }
       this._playerRemoteAudio.srcObject = event.streams[0] || new MediaStream([event.track]);
-      this._playerRemoteAudio.play().catch(err => console.warn('[WebRTC] Remote audio play() failed:', err));
+      this._playerRemoteAudio.play().catch(err => {
+        const e = `[WebRTC] Remote audio play() failed: ${err}`;
+        console.warn(e);
+        window.simsigAPI.app.log(e);
+      });
     };
 
-    // ICE connection state — log for diagnostics
+    // ICE connection state — log for diagnostics (piped to main process terminal)
     pc.oniceconnectionstatechange = () => {
-      console.log('[WebRTC] ICE connection state:', pc.iceConnectionState);
+      const msg = `[WebRTC] ICE state: ${pc.iceConnectionState}`;
+      console.log(msg);
+      window.simsigAPI.app.log(msg);
     };
 
     pc.onconnectionstatechange = () => {
-      console.log('[WebRTC] Connection state:', pc.connectionState);
+      const msg = `[WebRTC] Connection state: ${pc.connectionState}`;
+      console.log(msg);
+      window.simsigAPI.app.log(msg);
     };
 
     // ICE candidates — forward via relay
@@ -3946,6 +3956,7 @@ const PhoneCallsUI = {
       for (const track of this._playerLocalStream.getAudioTracks()) {
         track.enabled = active;
       }
+      window.simsigAPI.app.log(`[WebRTC] PTT ${active ? 'ON — transmitting' : 'OFF — muted'}`);
     });
 
     // Tracks added — now safe to process signals

@@ -414,6 +414,9 @@ function registerIpcHandlers() {
   // App info
   registerHandler('app:get-version', () => app.getVersion());
 
+  // Renderer diagnostic logging → main process terminal
+  ipcMain.on('log:renderer', (_event, msg) => console.log(msg));
+
   // Settings
   registerHandler(channels.SETTINGS_GET, (_event, key) => settings.get(key));
   registerHandler(channels.SETTINGS_SET, (_event, key, value) => {

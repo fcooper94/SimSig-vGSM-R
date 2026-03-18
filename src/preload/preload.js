@@ -288,5 +288,6 @@ contextBridge.exposeInMainWorld('simsigAPI', {
 
   app: {
     getVersion: () => ipcRenderer.invoke('app:get-version'),
+    log: (msg) => ipcRenderer.send('log:renderer', msg),
   },
 });
