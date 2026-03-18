@@ -311,6 +311,7 @@ function _handleRelayClientMessage(data) {
   if (!payload) return;
 
   if (payload.type === 'offer' || payload.type === 'answer' || payload.type === 'ice') {
+    console.log(`[WebRTC] Received ${payload.type} from ${from} → renderer`);
     sendToMainWindow(channels.PLAYER_WEBRTC_SIGNAL, { from, signal: payload });
     return;
   }
@@ -665,6 +666,7 @@ function registerIpcHandlers() {
 
         // WebRTC signals (offer/answer/ice) — forward straight to renderer
         if (payload.type === 'offer' || payload.type === 'answer' || payload.type === 'ice') {
+          console.log(`[WebRTC] Host received ${payload.type} from ${from} → renderer`);
           sendToMainWindow(channels.PLAYER_WEBRTC_SIGNAL, { from, signal: payload });
           return;
         }
@@ -1747,6 +1749,7 @@ function registerIpcHandlers() {
 
   // WebRTC signaling — forward offer/answer/ICE candidates to relay target
   registerHandler(channels.PLAYER_WEBRTC_SIGNAL_SEND, (_event, targetId, signal) => {
+    console.log(`[WebRTC] Sending ${signal?.type} → ${targetId}`);
     _sendPlayerSignal(targetId, signal);
   });
 }
