@@ -31,11 +31,7 @@ class StompConnectionManager {
         reconnectDelay: 5000,
         heartbeatIncoming: 10000,
         heartbeatOutgoing: 10000,
-        debug: (msg) => {
-          // Suppress credential logging
-          if (msg.includes('passcode')) return;
-          console.log('[STOMP]', msg);
-        },
+        debug: () => {},
         onConnect: () => this._onConnected(),
         onDisconnect: () => this._onDisconnected(),
         onStompError: (frame) => this._onStompError(frame),
