@@ -92,6 +92,10 @@ const PhoneCallsUI = {
         this.renderChat();
         this.renderCalls(); // re-render call list so In Call badge matches
         if (state.notification) this._applyNotification(state.notification);
+        // Show/hide comms overlay to mirror host
+        if (this.commsOverlay) {
+          this.commsOverlay.classList.toggle('hidden', !state.commsVisible);
+        }
         // Update radio display
         const radioDisplay = document.getElementById('radio-display');
         const line1 = document.getElementById('display-line-1');
@@ -3518,6 +3522,7 @@ const PhoneCallsUI = {
       isSignallerCall: this.isSignallerCall || false,
       isThirdPartyCall: this.isThirdPartyCall || false,
       silenceBtnVisible: this.silenceBtn && !this.silenceBtn.classList.contains('hidden'),
+      commsVisible: this.commsOverlay ? !this.commsOverlay.classList.contains('hidden') : false,
       notification: this._getNotificationState(),
     });
   },

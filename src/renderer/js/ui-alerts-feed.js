@@ -15,6 +15,7 @@ const AlertsFeed = {
   _stateRestored: false, // Prevents duplicate restoreState calls
   _clockValidated: false, // Whether clock-based timetable check has run
   _lastClockSeconds: 0, // Last known game clock seconds
+  _initialLogProcessed: false, // True after first log batch received
 
   init() {
     this.feedEl = document.getElementById('alerts-feed');
@@ -99,8 +100,31 @@ const AlertsFeed = {
     this.renderWaited();
   },
 
+  // Pre-scan a batch to find trains with movement appearing after their last "waiting at red" line.
+  // Used on initial load so we don't show trains that already moved within the same log batch.
+  _findMovedAfterRed(lines) {
+    const lastRedIdx = new Map(); // hc → line index of last "waiting at red"
+    const movers = new Set();
+    lines.forEach((raw, idx) => {
+      const trimmed = raw.trim();
+      if (!trimmed) return;
+      const tsMatch = trimmed.match(/^(\d{1,2}:\d{2}(?::\d{2})?)\s+(.+)$/);
+      const text = tsMatch ? tsMatch[2] : trimmed;
+      const redMatch = text.match(/^(\w+)\s+waiting at red signal\s+(\S+)/i);
+      if (redMatch) { lastRedIdx.set(redMatch[1].toUpperCase(), idx); return; }
+      const moveHc = this._extractMovementHeadcode(text);
+      if (moveHc && lastRedIdx.has(moveHc) && idx > lastRedIdx.get(moveHc)) movers.add(moveHc);
+    });
+    return movers;
+  },
+
   addMessageLogLines(lines) {
     let changed = false;
+
+    // On the first batch, pre-scan to find trains that have moved — skip adding them
+    const isInitialLoad = !this._initialLogProcessed;
+    this._initialLogProcessed = true;
+    const skipReds = isInitialLoad ? this._findMovedAfterRed(lines) : null;
 
     for (const raw of lines) {
       const trimmed = raw.trim();
@@ -113,6 +137,7 @@ const AlertsFeed = {
       const redMatch = text.match(/^(\w+)\s+waiting at red signal\s+(\S+)/i);
       if (redMatch) {
         const hc = redMatch[1].toUpperCase();
+        if (skipReds?.has(hc)) continue; // movement found later in this batch — skip
         const sig = redMatch[2];
         const existing = this._activeRedSignals.get(hc);
         if (!existing || existing.signal !== sig) {
@@ -403,6 +428,7 @@ const AlertsFeed = {
     this._waitedPairs = new Set();
     this._selectedHc = null;
     this._stateRestored = false;
+    this._initialLogProcessed = false;
     if (this.feedEl) this.feedEl.innerHTML = '';
     if (this.waitedFeedEl) this.waitedFeedEl.innerHTML = '';
     this._hideDetail();
