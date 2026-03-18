@@ -294,12 +294,73 @@ function broadcast(channel, data) {
   }
 }
 
+// ── Relay-only WebSocket (no HTTP, no IPC bridge) ─────────────────────────
+// Started automatically when hosting a SimSig session so other Electron
+// players can connect and register even without Browser Access enabled.
+
+function startRelay(port) {
+  if (wss) return; // already running (either relay-only or full web server)
+
+  wss = new WebSocketServer({ port });
+
+  wss.on('connection', (ws) => {
+    // Relay-only: just handle player-register and player-signal
+    ws.send(JSON.stringify({ type: 'role', role: 'relay' }));
+
+    ws.on('message', (raw, isBinary) => {
+      if (isBinary) return;
+      let msg;
+      try { msg = JSON.parse(raw.toString()); } catch { return; }
+
+      if (msg.type === 'player-register') {
+        const prev = relayPlayers.get(ws);
+        if (prev?.id) relayById.delete(prev.id);
+        const info = { id: msg.id, panel: msg.panel };
+        relayPlayers.set(ws, info);
+        relayById.set(msg.id, ws);
+        console.log(`[WebServer] Relay player registered: "${msg.panel}" (${msg.id})`);
+        _broadcastRelayPlayers();
+        return;
+      }
+
+      if (msg.type === 'player-signal') {
+        const sender = relayPlayers.get(ws);
+        if (!sender?.id) return;
+        _routeSignal(sender.id, sender.panel, msg.targetId, msg.payload);
+      }
+    });
+
+    ws.on('close', () => {
+      const player = relayPlayers.get(ws);
+      if (player?.id) {
+        if (activePairs.has(player.id)) {
+          _routeSignal(player.id, player.panel, activePairs.get(player.id), { type: 'call-end' });
+          _clearRelayPair(player.id);
+        }
+        relayById.delete(player.id);
+        relayPlayers.delete(ws);
+        _broadcastRelayPlayers();
+      }
+    });
+  });
+
+  wss.on('error', (err) => {
+    console.error('[WebServer] Relay WS error:', err.message);
+  });
+
+  console.log(`[WebServer] Relay-only WS listening on port ${port}`);
+}
+
 function isRunning() {
   return server !== null;
 }
 
+function isRelayRunning() {
+  return wss !== null;
+}
+
 module.exports = {
-  start, stop, broadcast, isRunning,
+  start, startRelay, stop, broadcast, isRunning, isRelayRunning,
   registerHostPlayer, getRelayPlayers,
   hostSendSignal, setRelayActivePair, clearHostRelayPair,
   setOnRelayPlayersChanged, setOnHostRelayEvent,

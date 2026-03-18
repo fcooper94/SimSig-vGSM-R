@@ -463,16 +463,25 @@ function registerIpcHandlers() {
       // If connecting to a non-local gateway, also connect to the host's vGSM-R relay
       // so this Electron app is discoverable by other Electron players (VATSIM-style).
       const gatewayHost = config.gateway.host;
+      const relayPort = (config.web || {}).port || 3000;
       const isNonLocal = gatewayHost &&
         gatewayHost !== 'localhost' && gatewayHost !== '127.0.0.1';
-      if (isNonLocal && !webServer.isRunning()) {
-        const relayPort = (config.web || {}).port || 3000;
-        console.log(`[RelayClient] Remote gateway detected (${gatewayHost}) — will connect relay to port ${relayPort}`);
-        _startRelayClient(`ws://${gatewayHost}:${relayPort}`);
-      } else if (webServer.isRunning()) {
-        console.log('[RelayClient] We are the host (web server running) — no relay client needed');
+      if (!isNonLocal) {
+        // Local gateway — we are the SimSig host; start relay WS so clients can find us
+        if (!webServer.isRelayRunning()) {
+          webServer.startRelay(relayPort);
+          console.log(`[RelayClient] Local gateway — started relay WS on port ${relayPort}`);
+        } else {
+          console.log('[RelayClient] Local gateway — relay already running');
+        }
       } else {
-        console.log('[RelayClient] Local gateway — relay client skipped');
+        // Remote gateway — we are a client; connect to the host's relay WS
+        if (!webServer.isRelayRunning()) {
+          console.log(`[RelayClient] Remote gateway detected (${gatewayHost}) — connecting relay client to port ${relayPort}`);
+          _startRelayClient(`ws://${gatewayHost}:${relayPort}`);
+        } else {
+          console.log('[RelayClient] Remote gateway — relay already running (host mode), no client needed');
+        }
       }
 
       console.log('[Gateway] Connecting to', config.gateway.host + ':' + config.gateway.port);
@@ -702,6 +711,10 @@ function registerIpcHandlers() {
     if (pendingRelayDialResolve) { pendingRelayDialResolve({ error: 'Disconnected' }); pendingRelayDialResolve = null; }
     webServer.clearHostRelayPair();
     _stopRelayClient();
+    // Stop auto-started relay-only WS (but not the full web server managed by the user)
+    if (webServer.isRelayRunning() && !webServer.isRunning()) {
+      webServer.stop();
+    }
     if (peerDiscovery) { peerDiscovery.stop(); peerDiscovery = null; }
     if (phoneReader) {
       phoneReader.stopPolling();
