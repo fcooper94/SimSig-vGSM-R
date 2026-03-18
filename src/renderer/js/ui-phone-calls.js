@@ -49,6 +49,10 @@ const PhoneCallsUI = {
     this.tabIncomingEl = document.getElementById('tab-incoming');
     this.silenceBtn = document.getElementById('silence-btn');
     this.silenced = false;
+    this._browserModeActive = false;
+    if (!this._isBrowser && window.simsigAPI?.settings?.get) {
+      window.simsigAPI.settings.get('web.enabled').then(v => { this._browserModeActive = !!v; }).catch(() => {});
+    }
 
     // ── Compact mode notification mirror ─────────────────────────────
     const compactNotif = document.getElementById('compact-notification');
@@ -3500,6 +3504,8 @@ const PhoneCallsUI = {
   },
 
   showCommsOverlay() {
+    // When browser mode is active, only the browser client shows the comms panel
+    if (this._browserModeActive) return;
     if (this.commsOverlay) this.commsOverlay.classList.remove('hidden');
   },
 

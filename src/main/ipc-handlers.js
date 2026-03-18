@@ -573,12 +573,6 @@ function registerIpcHandlers() {
       const room = `${gatewayHost}:${config.gateway.port}`;
       _connectToPeerRelay(CENTRAL_RELAY_URL, room);
 
-      // Connect to any manually configured relay peers (internet play, fallback)
-      const relayPeers = config.relay?.peers || [];
-      for (const ip of relayPeers) {
-        if (ip) _connectToPeerRelay(ip);
-      }
-
       console.log('[Gateway] Connecting to', config.gateway.host + ':' + config.gateway.port);
       let gatewayConnected = false;
 

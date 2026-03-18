@@ -225,15 +225,20 @@
 
       // Push event from server
       if (msg.type === 'event' && msg.channel) {
+        // Filter ourselves from the peer list so we don't appear in our own Global tab
+        let data = msg.data;
+        if (msg.channel === 'player:peers-update' && Array.isArray(data)) {
+          data = data.filter(p => p.id !== ourPlayerId);
+        }
         const cbs = listeners[msg.channel];
         if (cbs && cbs.length > 0) {
           for (const cb of cbs) {
-            try { cb(msg.data); } catch (e) { console.error('[WS-Shim] Listener error:', e); }
+            try { cb(data); } catch (e) { console.error('[WS-Shim] Listener error:', e); }
           }
         } else {
           // No listeners yet — buffer so we can replay when on() is called
           if (!buffered[msg.channel]) buffered[msg.channel] = [];
-          buffered[msg.channel].push(msg.data);
+          buffered[msg.channel].push(data);
         }
       }
     };

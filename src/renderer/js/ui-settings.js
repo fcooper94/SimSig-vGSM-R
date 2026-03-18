@@ -125,7 +125,7 @@ const SettingsUI = {
   },
 
   populate(settings) {
-    document.getElementById('setting-host').value = 'localhost';
+    document.getElementById('setting-host').value = settings.gateway?.host || 'localhost';
     document.getElementById('setting-port').value = settings.gateway?.port || 51515;
     document.getElementById('setting-username').value = settings.credentials?.username || '';
     document.getElementById('setting-password').value = settings.credentials?.password || '';
@@ -148,9 +148,6 @@ const SettingsUI = {
     document.getElementById('setting-tts-apikey').value = settings.tts?.elevenLabsApiKey || '';
     this.toggleApiKeyRow(providerSelect.value);
 
-    // Internet players relay peers
-    document.getElementById('setting-relay-peers').value = (settings.relay?.peers || []).join(', ');
-
     // Browser access
     document.getElementById('setting-web-enabled').checked = settings.web?.enabled || false;
     document.getElementById('setting-web-port').value = settings.web?.port || 50507;
@@ -164,10 +161,18 @@ const SettingsUI = {
   },
 
   async save() {
-    await window.simsigAPI.settings.set('gateway.host', document.getElementById('setting-host').value);
-    await window.simsigAPI.settings.set('gateway.port', parseInt(document.getElementById('setting-port').value, 10));
+    const prevSettings = await window.simsigAPI.settings.getAll();
+    const prevHost = prevSettings?.gateway?.host;
+    const prevPort = prevSettings?.gateway?.port;
+
+    const newHost = document.getElementById('setting-host').value;
+    const newPort = parseInt(document.getElementById('setting-port').value, 10);
+    await window.simsigAPI.settings.set('gateway.host', newHost);
+    await window.simsigAPI.settings.set('gateway.port', newPort);
     await window.simsigAPI.settings.set('credentials.username', document.getElementById('setting-username').value);
     await window.simsigAPI.settings.set('credentials.password', document.getElementById('setting-password').value);
+
+    const gatewayChanged = newHost !== prevHost || newPort !== prevPort;
 
     const inputSelect = document.getElementById('setting-audio-input');
     const outputSelect = document.getElementById('setting-audio-output');
@@ -225,16 +230,12 @@ const SettingsUI = {
       PhoneCallsUI.setRingDevice(ringSelect.value);
     }
 
-    // Internet players relay peers
-    const relayPeersRaw = document.getElementById('setting-relay-peers').value;
-    const relayPeers = relayPeersRaw.split(',').map(s => s.trim()).filter(Boolean);
-    await window.simsigAPI.settings.set('relay.peers', relayPeers);
-
     // Browser access
     const webEnabled = document.getElementById('setting-web-enabled').checked;
     const webPort = parseInt(document.getElementById('setting-web-port').value, 10) || 50507;
     await window.simsigAPI.settings.set('web.enabled', webEnabled);
     await window.simsigAPI.settings.set('web.port', webPort);
+    if (typeof PhoneCallsUI !== 'undefined') PhoneCallsUI._browserModeActive = webEnabled;
 
     if (window.simsigAPI.web) {
       const overlay = document.getElementById('browser-overlay');
@@ -254,6 +255,12 @@ const SettingsUI = {
     await window.simsigAPI.settings.set('theme', theme);
     document.body.classList.toggle('dark-mode', theme === 'dark');
     this._savedTheme = theme; // prevent close() from reverting
+
+    // If the gateway host/port changed, force a disconnect and reconnect so new settings take effect
+    if (gatewayChanged && window.simsigAPI.connection) {
+      window.simsigAPI.connection.disconnect();
+      setTimeout(() => window.simsigAPI.connection.connect(), 500);
+    }
 
     this.close();
   },

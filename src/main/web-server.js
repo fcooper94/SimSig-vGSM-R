@@ -107,6 +107,9 @@ function start(port, handlers, getInitialState) {
       }
     }
 
+    // Send current player list immediately so the Global tab populates without waiting for a change
+    ws.send(JSON.stringify({ type: 'event', channel: 'player:peers-update', data: getRelayPlayers() }));
+
     ws.on('message', async (raw, isBinary) => {
       // Binary frames not used (WebRTC handles audio P2P)
       if (isBinary) return;
