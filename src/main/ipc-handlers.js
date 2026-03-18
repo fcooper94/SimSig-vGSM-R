@@ -436,7 +436,7 @@ function _handleRelayClientMessage(data) {
 }
 
 const RELAY_PORT = 50507;
-const CENTRAL_RELAY_URL = 'wss://PLACEHOLDER.up.railway.app';
+const CENTRAL_RELAY_URL = 'wss://simsig-vgsm-r-production.up.railway.app';
 
 function _startRelayClient(host) {
   if (relayClientWs) {
