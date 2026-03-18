@@ -3834,20 +3834,24 @@ const PhoneCallsUI = {
   _processWebRTCSignal(signal) {
     const pc = this._playerPeerConnection;
     if (!pc) return;
+    const log = (msg) => { console.log(msg); window.simsigAPI.app.log(msg); };
     if (signal.type === 'offer') {
+      log('[WebRTC] Processing offer — setRemoteDescription → createAnswer → setLocalDescription');
       pc.setRemoteDescription({ type: 'offer', sdp: signal.sdp })
         .then(() => pc.createAnswer())
-        .then(answer => {
-          pc.setLocalDescription(answer);
+        .then(answer => pc.setLocalDescription(answer).then(() => {
+          log('[WebRTC] Answer set — sending answer');
           window.simsigAPI.player.sendWebRTCSignal(this._playerCallPeerId, { type: 'answer', sdp: answer.sdp });
-        })
-        .catch(err => console.error('[WebRTC] Answer error:', err));
+        }))
+        .catch(err => log(`[WebRTC] offer/answer error: ${err}`));
     } else if (signal.type === 'answer') {
+      log('[WebRTC] Processing answer — setRemoteDescription');
       pc.setRemoteDescription({ type: 'answer', sdp: signal.sdp })
-        .catch(err => console.error('[WebRTC] setRemoteDescription answer error:', err));
+        .then(() => log('[WebRTC] Remote description set OK'))
+        .catch(err => log(`[WebRTC] setRemoteDescription error: ${err}`));
     } else if (signal.type === 'ice') {
       pc.addIceCandidate(signal.candidate)
-        .catch(err => console.error('[WebRTC] addIceCandidate error:', err));
+        .catch(err => log(`[WebRTC] addIceCandidate error: ${err}`));
     }
   },
 
@@ -4006,12 +4010,14 @@ const PhoneCallsUI = {
     this._webRTCSettingUp = false;
 
     if (isOffer) {
+      const log = (msg) => { console.log(msg); window.simsigAPI.app.log(msg); };
+      log('[WebRTC] createOffer — creating offer');
       pc.createOffer()
-        .then(offer => {
-          pc.setLocalDescription(offer);
+        .then(offer => pc.setLocalDescription(offer).then(() => {
+          log('[WebRTC] Offer set — sending offer');
           window.simsigAPI.player.sendWebRTCSignal(this._playerCallPeerId, { type: 'offer', sdp: offer.sdp });
-        })
-        .catch(err => console.error('[WebRTC] createOffer error:', err));
+        }))
+        .catch(err => log(`[WebRTC] createOffer error: ${err}`));
     }
 
     // Flush any signals that arrived while we were waiting for getUserMedia
