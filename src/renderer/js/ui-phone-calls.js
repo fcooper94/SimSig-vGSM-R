@@ -3995,8 +3995,9 @@ const PhoneCallsUI = {
       if (event.candidate && this._playerCallPeerId) {
         const c = event.candidate;
         window.simsigAPI.app.log(`[WebRTC] ICE candidate: ${c.type || 'unknown'} ${c.protocol || ''} ${c.address || ''}`);
+        // Use toJSON() — RTCIceCandidate is a DOM object and won't survive contextBridge/IPC
         window.simsigAPI.player.sendWebRTCSignal(this._playerCallPeerId, {
-          type: 'ice', candidate: event.candidate,
+          type: 'ice', candidate: c.toJSON(),
         });
       }
     };
