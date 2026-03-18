@@ -169,7 +169,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  tabs.incoming.tab.addEventListener('click', () => switchTab('incoming'));
+  tabs.incoming.tab.addEventListener('click', () => {
+    if (typeof PhoneCallsUI !== 'undefined' && PhoneCallsUI._playerCall) {
+      PhoneCallsUI.hangUpPlayerCall();
+      return;
+    }
+    switchTab('incoming');
+  });
   tabs.trains.tab.addEventListener('click', () => switchTab('trains'));
   tabs.log.tab.addEventListener('click', () => switchTab('log'));
 

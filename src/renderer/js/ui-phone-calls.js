@@ -266,6 +266,10 @@ const PhoneCallsUI = {
         this._resumeIncoming();
         return;
       }
+      if (this._playerCall) {
+        this.hangUpPlayerCall();
+        return;
+      }
       if (this._outgoingCall) {
         if (this._outgoingReplies && this._outgoingReplies.length > 0 && !this._outgoingReplySent && !this._awaitingHeadcode) return;
         this.endOutgoingCall();
@@ -3893,11 +3897,22 @@ const PhoneCallsUI = {
 
     // Remote audio
     pc.ontrack = (event) => {
+      console.log('[WebRTC] ontrack fired — streams:', event.streams.length, 'track kind:', event.track.kind);
       if (!this._playerRemoteAudio) {
         this._playerRemoteAudio = new Audio();
         this._playerRemoteAudio.autoplay = true;
       }
-      this._playerRemoteAudio.srcObject = event.streams[0];
+      this._playerRemoteAudio.srcObject = event.streams[0] || new MediaStream([event.track]);
+      this._playerRemoteAudio.play().catch(err => console.warn('[WebRTC] Remote audio play() failed:', err));
+    };
+
+    // ICE connection state — log for diagnostics
+    pc.oniceconnectionstatechange = () => {
+      console.log('[WebRTC] ICE connection state:', pc.iceConnectionState);
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log('[WebRTC] Connection state:', pc.connectionState);
     };
 
     // ICE candidates — forward via relay
