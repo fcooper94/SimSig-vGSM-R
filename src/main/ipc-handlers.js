@@ -376,7 +376,7 @@ function _connectToPeerRelay(peerIpOrUrl, room) {
     if (msg.type !== 'event') return;
     if (msg.channel === 'player:peers-update') {
       entry.players = (msg.data || []).filter(p => p.id !== ourRelayId);
-      console.log(`[PeerRelay] ${peerIp} peers: ${entry.players.map(p => p.panel).join(', ') || '(none)'}`);
+      console.log(`[PeerRelay] ${url} peers: ${entry.players.map(p => p.panel).join(', ') || '(none)'}`);
       _mergeAndSendPeerList();
     } else if (msg.channel === 'player:signal') {
       _handleRelayClientMessage(msg.data);
