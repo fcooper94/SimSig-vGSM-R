@@ -921,6 +921,25 @@
   font-size: 14px;
   color: var(--text-dim);
   margin-left: 8px;
+  flex: 1;
+}
+
+#pb-rescan-btn {
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+#pb-rescan-btn:hover:not(:disabled) {
+  background: #e8e8e8;
+  color: var(--text);
+}
+#pb-rescan-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 /* Right sidebar: action buttons */
