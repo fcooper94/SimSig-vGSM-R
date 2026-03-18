@@ -33,6 +33,11 @@ const ourRelayId = `${os.hostname()}-${process.pid}-${Date.now()}`;
 let activeRelayCallPartnerId = null;
 let pendingRelayDialResolve = null;
 
+// Relay client — Electron-to-Electron internet play.
+// When connecting to a remote gateway, we also open a WS connection to the
+// host's vGSM-R web relay so our Electron app registers as a relay player.
+let relayClientWs = null;
+
 let stompManager = null;
 let phoneReader = null;
 let ttsVoicesCache = null;
@@ -258,6 +263,9 @@ function parseWorkstationLines(lines) {
         ourPanelName = fullPanel;
         if (peerDiscovery) peerDiscovery.updatePanel(fullPanel);
         webServer.registerHostPlayer(ourRelayId, fullPanel);
+        if (relayClientWs?.readyState === 1) {
+          relayClientWs.send(JSON.stringify({ type: 'player-register', id: ourRelayId, panel: fullPanel }));
+        }
         sendToMainWindow('workstation:our-panel', panelName);
       }
     }
@@ -279,8 +287,108 @@ function parseWorkstationLines(lines) {
       ourPanelName = hostLabel;
       if (peerDiscovery) peerDiscovery.updatePanel(hostLabel);
       webServer.registerHostPlayer(ourRelayId, hostLabel);
+      if (relayClientWs?.readyState === 1) {
+        relayClientWs.send(JSON.stringify({ type: 'player-register', id: ourRelayId, panel: hostLabel }));
+      }
       sendToMainWindow('workstation:our-panel', `Host — ${sim}`);
     }
+  }
+}
+
+// ── Relay client (Electron-to-Electron internet play) ──────────────────────
+// Unified signal send: uses relay client WS if we're a client,
+// otherwise uses the host web server (if we're the host).
+function _sendPlayerSignal(targetId, payload) {
+  if (relayClientWs?.readyState === 1) {
+    relayClientWs.send(JSON.stringify({ type: 'player-signal', targetId, payload }));
+    return;
+  }
+  webServer.hostSendSignal(targetId, payload);
+}
+
+function _handleRelayClientMessage(data) {
+  const { from, fromPanel, payload } = data || {};
+  if (!payload) return;
+
+  if (payload.type === 'offer' || payload.type === 'answer' || payload.type === 'ice') {
+    sendToMainWindow(channels.PLAYER_WEBRTC_SIGNAL, { from, signal: payload });
+    return;
+  }
+  if (payload.type === 'call-request') {
+    activeRelayCallPartnerId = from;
+    sendToMainWindow(channels.PLAYER_INCOMING_CALL, { panel: fromPanel, id: from });
+  } else if (payload.type === 'call-accepted') {
+    activeRelayCallPartnerId = from;
+    if (pendingRelayDialResolve) {
+      const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
+      r({ connected: true, peerPanel: fromPanel, peerId: from });
+    } else {
+      sendToMainWindow(channels.PLAYER_CALL_ANSWERED, { panel: fromPanel, id: from });
+    }
+  } else if (payload.type === 'call-rejected') {
+    if (pendingRelayDialResolve) {
+      const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
+      activeRelayCallPartnerId = null;
+      r({ error: payload.reason || 'Rejected' });
+    } else {
+      activeRelayCallPartnerId = null;
+      sendToMainWindow(channels.PLAYER_CALL_REJECTED, payload.reason || 'Rejected');
+    }
+  } else if (payload.type === 'call-end') {
+    if (pendingRelayDialResolve) {
+      const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
+      r({ error: 'Peer hung up' });
+    } else {
+      sendToMainWindow(channels.PLAYER_CALL_ENDED);
+    }
+    activeRelayCallPartnerId = null;
+  }
+}
+
+function _startRelayClient(url) {
+  if (relayClientWs) {
+    try { relayClientWs.close(); } catch (_) {}
+    relayClientWs = null;
+  }
+  const { WebSocket } = require('ws');
+  const ws = new WebSocket(url);
+  relayClientWs = ws;
+
+  ws.on('open', () => {
+    console.log('[RelayClient] Connected to host relay:', url);
+    ws.send(JSON.stringify({ type: 'player-register', id: ourRelayId, panel: ourPanelName }));
+  });
+
+  ws.on('message', (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
+    if (msg.type === 'event') {
+      if (msg.channel === 'player:peers-update') {
+        const relayPeers = (msg.data || []).filter(p => p.id !== ourRelayId);
+        const udpPeers = peerDiscovery ? peerDiscovery.getPeers() : [];
+        const seenIds = new Set(udpPeers.map(p => p.id));
+        const merged = [...udpPeers, ...relayPeers.filter(p => !seenIds.has(p.id))];
+        sendToMainWindow(channels.PLAYER_PEERS_UPDATE, merged);
+      } else if (msg.channel === 'player:signal') {
+        _handleRelayClientMessage(msg.data);
+      }
+    }
+  });
+
+  ws.on('close', () => {
+    if (relayClientWs === ws) relayClientWs = null;
+    console.log('[RelayClient] Disconnected from host relay');
+  });
+
+  ws.on('error', (err) => {
+    console.warn('[RelayClient] Connection error:', err.message);
+  });
+}
+
+function _stopRelayClient() {
+  if (relayClientWs) {
+    try { relayClientWs.close(); } catch (_) {}
+    relayClientWs = null;
   }
 }
 
@@ -346,6 +454,17 @@ function registerIpcHandlers() {
       const hostInitials = (config.signaller?.initials || 'Host').toUpperCase();
       ourPanelName = hostInitials;
       webServer.registerHostPlayer(ourRelayId, hostInitials);
+
+      // If connecting to a non-local gateway, also connect to the host's vGSM-R relay
+      // so this Electron app is discoverable by other Electron players (VATSIM-style).
+      const gatewayHost = config.gateway.host;
+      const isNonLocal = gatewayHost &&
+        gatewayHost !== 'localhost' && gatewayHost !== '127.0.0.1';
+      if (isNonLocal && !webServer.isRunning()) {
+        const relayPort = (config.web || {}).port || 3000;
+        _startRelayClient(`ws://${gatewayHost}:${relayPort}`);
+      }
+
       console.log('[Gateway] Connecting to', config.gateway.host + ':' + config.gateway.port);
       let gatewayConnected = false;
 
@@ -572,6 +691,7 @@ function registerIpcHandlers() {
     activeRelayCallPartnerId = null;
     if (pendingRelayDialResolve) { pendingRelayDialResolve({ error: 'Disconnected' }); pendingRelayDialResolve = null; }
     webServer.clearHostRelayPair();
+    _stopRelayClient();
     if (peerDiscovery) { peerDiscovery.stop(); peerDiscovery = null; }
     if (phoneReader) {
       phoneReader.stopPolling();
@@ -1552,7 +1672,7 @@ function registerIpcHandlers() {
   // ── Player-to-player calls (WebRTC relay) ─────────────────────────────────
   registerHandler(channels.PLAYER_DIAL, async (_event, peerId) => {
     // All calls go through the relay — audio is P2P via WebRTC after signaling
-    webServer.hostSendSignal(peerId, { type: 'call-request', panel: ourPanelName });
+    _sendPlayerSignal(peerId, { type: 'call-request', panel: ourPanelName });
     activeRelayCallPartnerId = peerId;
     return new Promise((resolve) => {
       pendingRelayDialResolve = resolve;
@@ -1569,21 +1689,21 @@ function registerIpcHandlers() {
 
   registerHandler(channels.PLAYER_ANSWER, () => {
     if (!activeRelayCallPartnerId) return;
-    webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-accepted', panel: ourPanelName });
+    _sendPlayerSignal(activeRelayCallPartnerId, { type: 'call-accepted', panel: ourPanelName });
     webServer.setRelayActivePair(ourRelayId, activeRelayCallPartnerId);
     sendToMainWindow(channels.PLAYER_CALL_ANSWERED, { panel: ourPanelName, id: activeRelayCallPartnerId });
   });
 
   registerHandler(channels.PLAYER_REJECT, (_event, reason) => {
     if (!activeRelayCallPartnerId) return;
-    webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-rejected', reason: reason || 'Busy' });
+    _sendPlayerSignal(activeRelayCallPartnerId, { type: 'call-rejected', reason: reason || 'Busy' });
     webServer.clearHostRelayPair();
     activeRelayCallPartnerId = null;
   });
 
   registerHandler(channels.PLAYER_HANGUP, () => {
     if (!activeRelayCallPartnerId) return;
-    webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-end' });
+    _sendPlayerSignal(activeRelayCallPartnerId, { type: 'call-end' });
     webServer.clearHostRelayPair();
     activeRelayCallPartnerId = null;
     sendToMainWindow(channels.PLAYER_CALL_ENDED);
@@ -1591,7 +1711,7 @@ function registerIpcHandlers() {
 
   registerHandler(channels.PLAYER_CANCEL_DIAL, () => {
     if (activeRelayCallPartnerId && pendingRelayDialResolve) {
-      webServer.hostSendSignal(activeRelayCallPartnerId, { type: 'call-end' });
+      _sendPlayerSignal(activeRelayCallPartnerId, { type: 'call-end' });
       webServer.clearHostRelayPair();
       const r = pendingRelayDialResolve; pendingRelayDialResolve = null;
       activeRelayCallPartnerId = null;
@@ -1601,7 +1721,7 @@ function registerIpcHandlers() {
 
   // WebRTC signaling — forward offer/answer/ICE candidates to relay target
   registerHandler(channels.PLAYER_WEBRTC_SIGNAL_SEND, (_event, targetId, signal) => {
-    webServer.hostSendSignal(targetId, signal);
+    _sendPlayerSignal(targetId, signal);
   });
 }
 
