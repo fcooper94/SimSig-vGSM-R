@@ -1314,7 +1314,7 @@ function registerIpcHandlers() {
   });
 
   // Chatterbox cloud server URL
-  const CHATTERBOX_CLOUD_URL = 'https://tts.vgsm-r.com';
+  const CHATTERBOX_CLOUD_URL = 'http://171.101.230.39:55073';
 
   function getChatterboxUrl() {
     const provider = settings.get('tts.provider') || 'edge';
