@@ -191,6 +191,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (tab) tab.classList.remove('active');
       }
     }
+    // Close phonebook overlay when switching to any other tab
+    const pbOverlay = document.getElementById('phonebook-overlay');
+    if (pbOverlay && name !== 'phonebook') {
+      pbOverlay.classList.add('hidden');
+    }
   }
 
   tabs.incoming.tab.addEventListener('click', () => {

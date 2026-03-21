@@ -22,10 +22,9 @@ const http = require('http');
 
 const INSTALL_DIR = path.join(app.getPath('userData'), 'chatterbox');
 const PYTHON_DIR = path.join(INSTALL_DIR, 'python');
-const VENV_DIR = path.join(INSTALL_DIR, 'venv');
 const VOICES_DIR = path.join(INSTALL_DIR, 'voices');
 const SERVER_SCRIPT = path.join(INSTALL_DIR, 'server.py');
-const PYTHON_EXE = path.join(VENV_DIR, 'Scripts', 'python.exe');
+const PYTHON_EXE = path.join(PYTHON_DIR, 'python.exe');
 
 const PYTHON_EMBED_URL = 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip';
 const GET_PIP_URL = 'https://bootstrap.pypa.io/get-pip.py';
@@ -142,39 +141,33 @@ async function install() {
     progress('setup', 15, 'Installing pip...');
     const getPipPath = path.join(INSTALL_DIR, 'get-pip.py');
     await downloadFile(GET_PIP_URL, getPipPath);
-    await runCommand(embeddedPython, [getPipPath], { timeout: 120000 });
+    await runCommand(embeddedPython, [getPipPath, '--no-warn-script-location'], { timeout: 120000 });
     fs.unlinkSync(getPipPath);
   }
 
-  // Step 3: Create venv
-  if (!fs.existsSync(PYTHON_EXE)) {
-    progress('setup', 20, 'Creating virtual environment...');
-    await runCommand(embeddedPython, ['-m', 'venv', VENV_DIR]);
-  }
+  const pip = path.join(PYTHON_DIR, 'Scripts', 'pip.exe');
 
-  const pip = path.join(VENV_DIR, 'Scripts', 'pip.exe');
-
-  // Step 4: Install PyTorch with CUDA
-  progress('setup', 25, 'Installing PyTorch (this may take a few minutes)...');
+  // Step 3: Install PyTorch with CUDA
+  progress('setup', 20, 'Installing PyTorch (this may take a few minutes)...');
   await runCommand(pip, [
-    'install', ...PYTORCH_PACKAGES,
+    'install', '--no-warn-script-location', ...PYTORCH_PACKAGES,
     '--index-url', PYTORCH_INDEX,
   ], { timeout: 600000 });
 
-  // Step 5: Install other dependencies
-  progress('setup', 60, 'Installing AI voice engine...');
+  // Step 4: Install other dependencies
+  progress('setup', 55, 'Installing AI voice engine...');
   await runCommand(pip, [
-    'install', ...REQUIRED_PACKAGES,
+    'install', '--no-warn-script-location', ...REQUIRED_PACKAGES,
   ], { timeout: 600000 });
 
-  // Step 6: Copy server.py
+  // Step 5: Copy server.py
   progress('setup', 90, 'Finalizing...');
   const srcServer = path.join(__dirname, 'chatterbox-server.py');
   if (fs.existsSync(srcServer)) {
     fs.copyFileSync(srcServer, SERVER_SCRIPT);
   }
 
-  // Step 7: Copy voice samples if bundled
+  // Step 6: Copy voice samples if bundled
   const bundledVoices = path.join(__dirname, 'voices');
   if (fs.existsSync(bundledVoices)) {
     const files = fs.readdirSync(bundledVoices);

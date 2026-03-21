@@ -31,6 +31,9 @@ const AlertsFeed = {
     this._msgAudio = new Audio('../../sounds/msg.wav');
     this._msgAudio.volume = 0.5;
 
+    this._startWaitedCleanup();
+    this._startAlertBeep();
+
     // Left panel: clicking a train moves it to the right panel (selects it)
     this.feedEl.addEventListener('click', (e) => {
       const clearBtn = e.target.closest('.alert-clear-btn');
@@ -87,6 +90,47 @@ const AlertsFeed = {
         }
       });
     }
+  },
+
+  // Repeat alert beep every 30s for un-waited trains at red signals
+  _startAlertBeep() {
+    if (this._alertBeepId) return;
+    this._alertBeepId = setInterval(() => {
+      if (!this._activeRedSignals) return;
+      // Check if any un-waited trains exist
+      let hasUnwaited = false;
+      for (const [hc, data] of this._activeRedSignals) {
+        if (!data.waited) { hasUnwaited = true; break; }
+      }
+      if (hasUnwaited) {
+        this._playMsgSound();
+      }
+    }, 30000); // every 30 seconds
+  },
+
+  // Auto-remove waited trains after 2 minutes
+  _startWaitedCleanup() {
+    if (this._waitedCleanupId) return;
+    this._waitedCleanupId = setInterval(() => {
+      const WAITED_EXPIRE_MS = 2 * 60 * 1000; // 2 minutes
+      const now = Date.now();
+      let changed = false;
+      if (this._activeRedSignals) {
+        for (const [hc, data] of this._activeRedSignals) {
+          if (data.waited && data.waitedAt && (now - data.waitedAt) > WAITED_EXPIRE_MS) {
+            window.simsigAPI.phone.clearAutoWait(hc);
+            this._waitedPairs.delete(hc + '|' + data.signal);
+            this._activeRedSignals.delete(hc);
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        this._saveState();
+        this.render();
+        this.renderWaited();
+      }
+    }, 10000); // check every 10 seconds
   },
 
   _selectTrain(hc) {
