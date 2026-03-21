@@ -2,7 +2,8 @@ const { autoUpdater, app } = require('electron');
 
 const GITHUB_OWNER = 'fcooper94';
 const GITHUB_REPO = 'SimSig-vGSM-R';
-const UPDATE_URL = `https://update.electronjs.org/${GITHUB_OWNER}/${GITHUB_REPO}/win32/${app.getVersion()}`;
+// Squirrel expects a URL that returns RELEASES file content
+const UPDATE_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest/download`;
 
 /**
  * Check for updates using Squirrel's native updater.
