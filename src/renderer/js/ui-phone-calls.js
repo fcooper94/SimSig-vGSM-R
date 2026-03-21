@@ -350,10 +350,15 @@ const PhoneCallsUI = {
     this.bgCtx.suspend(); // keep suspended until a call starts, to avoid interfering with ringing
 
     // Unlock AudioContext on first user interaction (required by autoplay policy)
+    // Once unlocked, subsequent resume()/suspend() calls work freely
     const unlockAudio = () => {
-      if (this.bgCtx && this.bgCtx.state === 'suspended') {
-        this.bgCtx.resume();
-        this.bgCtx.suspend(); // re-suspend — startBgNoise will resume when needed
+      if (this.bgCtx) {
+        this.bgCtx.resume().then(() => {
+          // Successfully unlocked — now suspend until a call starts
+          this.bgCtx.suspend();
+          console.log('[Audio] Background AudioContext unlocked');
+          if (window.simsigAPI?.app?.log) window.simsigAPI.app.log('[Audio] Background AudioContext unlocked');
+        });
       }
       document.removeEventListener('click', unlockAudio);
       document.removeEventListener('keydown', unlockAudio);
@@ -371,35 +376,42 @@ const PhoneCallsUI = {
     this.bgCallerType = 'train'; // 'train' | 'signaller' | 'yard' | 'station' | 'trainrunning' | 'trackside'
     this.bgGain = this.bgCtx.createGain();
     this.bgGain.connect(this.bgCtx.destination);
-    this.bgGain.gain.value = 0.5;
+    this.bgGain.gain.value = 0.25;
     const bgFiles = ['../../sounds/background.wav', '../../sounds/background2.wav'];
     Promise.all(bgFiles.map((f) =>
       fetch(f).then((r) => r.arrayBuffer()).then((buf) => this.bgCtx.decodeAudioData(buf))
-    )).then((buffers) => { buffers.forEach((b) => this._crossfadeBuffer(b)); this.bgBuffers = buffers; }).catch(() => {});
+    )).then((buffers) => {
+      this.bgBuffers = buffers;
+      console.log(`[Audio] Loaded ${buffers.length} background buffers`);
+      if (window.simsigAPI?.app?.log) window.simsigAPI.app.log(`[Audio] Loaded ${buffers.length} background buffers`);
+    }).catch((e) => {
+      console.error('[Audio] Failed to load background buffers:', e);
+      if (window.simsigAPI?.app?.log) window.simsigAPI.app.log('[Audio] FAILED to load background buffers: ' + e.message);
+    });
     fetch('../../sounds/signaller-background.wav')
       .then((r) => r.arrayBuffer())
       .then((buf) => this.bgCtx.decodeAudioData(buf))
-      .then((buffer) => { this._crossfadeBuffer(buffer); this.bgSignallerBuffer = buffer; })
+      .then((buffer) => { this.bgSignallerBuffer = buffer; })
       .catch(() => {});
     fetch('../../sounds/yard-background.wav')
       .then((r) => r.arrayBuffer())
       .then((buf) => this.bgCtx.decodeAudioData(buf))
-      .then((buffer) => { this._crossfadeBuffer(buffer); this.bgYardBuffer = buffer; })
+      .then((buffer) => { this.bgYardBuffer = buffer; })
       .catch(() => {});
     fetch('../../sounds/station-background.wav')
       .then((r) => r.arrayBuffer())
       .then((buf) => this.bgCtx.decodeAudioData(buf))
-      .then((buffer) => { this._crossfadeBuffer(buffer); this.bgStationBuffer = buffer; })
+      .then((buffer) => { this.bgStationBuffer = buffer; })
       .catch(() => {});
     fetch('../../sounds/trainrunning-background.wav')
       .then((r) => r.arrayBuffer())
       .then((buf) => this.bgCtx.decodeAudioData(buf))
-      .then((buffer) => { this._crossfadeBuffer(buffer); this.bgTrainRunningBuffer = buffer; })
+      .then((buffer) => { this.bgTrainRunningBuffer = buffer; })
       .catch(() => {});
     fetch('../../sounds/trackside-background.wav')
       .then((r) => r.arrayBuffer())
       .then((buf) => this.bgCtx.decodeAudioData(buf))
-      .then((buffer) => { this._crossfadeBuffer(buffer); this.bgTracksideBuffer = buffer; })
+      .then((buffer) => { this.bgTracksideBuffer = buffer; })
       .catch(() => {});
 
     // Pre-warm local voices as fallback
@@ -678,8 +690,22 @@ const PhoneCallsUI = {
     return null;
   },
 
+  // Words that TTS mispronounces — replace with phonetic spellings
+  TTS_PRONUNCIATIONS: {
+    'signaller': 'sig-naller',
+    'Signaller': 'Sig-naller',
+    'signal': 'sig-nal',
+    'Signal': 'Sig-nal',
+    'November': 'No-vember',
+    'Niner': 'Nine-er',
+  },
+
   phoneticize(text) {
     text = this.naturalizeTimes(text);
+    // Fix mispronounced words
+    for (const [word, pron] of Object.entries(this.TTS_PRONUNCIATIONS)) {
+      text = text.replaceAll(word, pron);
+    }
     // Strip portion suffixes from headcodes (e.g. "2K12-1" → "2K12")
     text = text.replace(/\b([0-9][A-Za-z][0-9]{2})-\d+\b/g, '$1');
     return text.replace(/\b[A-Z0-9]{2,}\b/gi, (match) => {
@@ -744,7 +770,12 @@ const PhoneCallsUI = {
   // Start background noise (cab for trains, office for signallers, yard for shunters/CSD)
   startBgNoise() {
     if (!this.bgCtx) return; // no audio context on browser
-    if (this.bgCtx.state === 'suspended') this.bgCtx.resume();
+    if (this.bgCtx.state === 'suspended') {
+      this.bgCtx.resume().then(() => {
+        console.log('[Audio] Background context resumed, state:', this.bgCtx.state);
+        if (window.simsigAPI?.app?.log) window.simsigAPI.app.log('[Audio] Background context resumed, state: ' + this.bgCtx.state);
+      });
+    }
     let buffer;
     if (this.bgCallerType === 'yard' && this.bgYardBuffer) {
       buffer = this.bgYardBuffer;
@@ -764,7 +795,7 @@ const PhoneCallsUI = {
     }
     if (this.bgSource) { try { this.bgSource.stop(); } catch {} }
     this.bgGain.gain.cancelScheduledValues(this.bgCtx.currentTime);
-    this.bgGain.gain.value = this.bgCallerType === 'trackside' ? 0.25 : 0.5;
+    this.bgGain.gain.value = this.bgCallerType === 'trackside' ? 0.125 : 0.25;
     const source = this.bgCtx.createBufferSource();
     source.buffer = buffer;
     source.loop = true;
@@ -1241,7 +1272,7 @@ const PhoneCallsUI = {
 
       console.log('[STT] PTT pressed — recording audio...');
       const audioData = await this._recordPCMWhilePTT();
-      if (this.bgGain) this.bgGain.gain.value = 0.5;
+      if (this.bgGain) this.bgGain.gain.value = 0.25;
 
       if (!audioData || audioData.length === 0) {
         console.log('[STT] No audio recorded');
@@ -1260,7 +1291,7 @@ const PhoneCallsUI = {
       console.log(`[STT] Whisper result: "${text}"`);
       return text;
     } catch (err) {
-      if (this.bgGain) this.bgGain.gain.value = 0.5;
+      if (this.bgGain) this.bgGain.gain.value = 0.25;
       if (err.message === 'reply_clicked' || err.message === 'use_text') throw err;
       console.error('[STT] Recording error:', err);
       return '';
@@ -1984,17 +2015,34 @@ const PhoneCallsUI = {
     });
   },
 
-  // Speak as driver — phoneticizes codes, tries selected TTS provider, falls back to local
+  // Speak as driver — tries selected provider, then Edge TTS, then Windows TTS
   async speakAsDriver(text, caller) {
     if (this.isPaused()) return;
     const spoken = this.phoneticize(text);
+
+    // Try selected provider first
     const voices = await this.getTTSVoices();
     if (voices && voices.length > 0) {
       const voiceId = this.getTTSVoiceId(caller, voices);
       const ok = await this.speakTTS(spoken, voiceId);
       if (ok) return;
-      console.warn('[TTS] Speak failed, falling back to local TTS');
+      console.warn('[TTS] Primary provider failed');
     }
+
+    // Fallback to Edge TTS via dedicated fallback handler
+    try {
+      console.log('[TTS] Trying Edge TTS fallback...');
+      const audioData = await window.simsigAPI.tts.speakEdgeFallback(spoken);
+      if (audioData) {
+        const ok = await this.playAudioData(audioData);
+        if (ok) return;
+      }
+    } catch (e) {
+      console.warn('[TTS] Edge fallback failed:', e.message);
+    }
+
+    // Final fallback: Windows TTS (browser speechSynthesis)
+    console.warn('[TTS] Falling back to Windows TTS');
     await this.speakLocal(spoken, caller);
   },
 

@@ -731,6 +731,35 @@ function registerIpcHandlers() {
         });
       }
 
+      // Monitor cloud TTS connection (poll every 15s)
+      const currentTtsProvider = settings.get('tts.provider') || 'edge';
+      if (currentTtsProvider === 'chatterbox-cloud') {
+        let wasOnline = true;
+        const checkTtsConnection = async () => {
+          try {
+            const url = getChatterboxUrl();
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 5000);
+            const resp = await fetch(`${url}/health`, { signal: controller.signal });
+            clearTimeout(timer);
+            const online = resp.ok;
+            if (!wasOnline && online) {
+              sendToMainWindow(channels.TTS_CONNECTION_STATUS, { online: true });
+              console.log('[TTS] Cloud server reconnected');
+            }
+            wasOnline = online;
+          } catch {
+            if (wasOnline) {
+              sendToMainWindow(channels.TTS_CONNECTION_STATUS, { online: false });
+              console.log('[TTS] Cloud server disconnected');
+            }
+            wasOnline = false;
+          }
+        };
+        checkTtsConnection();
+        setInterval(checkTtsConnection, 15000);
+      }
+
       // Start Chatterbox server if selected as TTS provider
       if (settings.get('tts.provider') === 'chatterbox' && !chatterboxManager.isRunning()) {
         chatterboxManager.setProgressCallback((p) => {
@@ -1526,6 +1555,16 @@ function registerIpcHandlers() {
 
     // Default: Edge TTS
     return speakEdgeTTS(text, voiceId);
+  });
+
+  // Edge TTS fallback — always uses Edge regardless of selected provider
+  registerHandler(channels.TTS_SPEAK_EDGE_FALLBACK, async (_event, text) => {
+    if (!text) return null;
+    // Pick a random Edge voice for the fallback
+    if (!ttsVoicesCache) await prefetchVoices();
+    if (!ttsVoicesCache || ttsVoicesCache.length === 0) return null;
+    const voice = ttsVoicesCache[Math.floor(Math.random() * ttsVoicesCache.length)];
+    return speakEdgeTTS(text, voice.id);
   });
 
   // Chatterbox server health check

@@ -90,6 +90,17 @@ def get_model():
     if _model is None:
         print(f"[TTS] Loading Chatterbox Turbo on {DEVICE}...")
         t0 = time.time()
+        # Patch out Perth watermarker if it fails to load (missing native binaries)
+        try:
+            import resemble_perth as perth
+            if perth.PerthImplicitWatermarker is None:
+                raise ImportError("PerthImplicitWatermarker is None")
+        except (ImportError, TypeError, AttributeError):
+            import resemble_perth as perth
+            class _NoOpWatermarker:
+                def watermark(self, wav, sr): return wav
+            perth.PerthImplicitWatermarker = _NoOpWatermarker
+            print("[TTS] Perth watermarker not available - disabled")
         from chatterbox.tts_turbo import ChatterboxTurboTTS
         _model = ChatterboxTurboTTS.from_pretrained(device=DEVICE)
         print(f"[TTS] Model loaded in {time.time() - t0:.1f}s")

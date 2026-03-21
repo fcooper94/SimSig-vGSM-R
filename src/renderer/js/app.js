@@ -112,6 +112,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // TTS cloud connection status monitoring
+  if (window.simsigAPI.tts.onConnectionStatus) {
+    window.simsigAPI.tts.onConnectionStatus((data) => {
+      const toast = document.getElementById('tts-connection-toast');
+      if (!toast) return;
+      if (!data.online) {
+        toast.className = 'tts-toast offline';
+        toast.textContent = 'Internet connection lost — voices reverted to basic quality';
+        setTimeout(() => { toast.style.opacity = '0.7'; }, 5000);
+      } else {
+        toast.className = 'tts-toast online';
+        toast.textContent = 'Internet restored — enhanced voices active';
+        toast.style.opacity = '1';
+        setTimeout(() => { toast.classList.add('hidden'); }, 4000);
+      }
+    });
+  }
+
   // Failure dialog auto-suppression — show dismissed failures in alerts feed
   window.simsigAPI.sim.onFailure((dismissed) => {
     AlertsFeed.addFailure(dismissed);

@@ -705,6 +705,31 @@ body.dark-mode #confirm-yes:hover {
   background: #00ccee;
 }
 
+/* TTS connection toast */
+.tts-toast {
+  position: fixed;
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  z-index: 12000;
+  transition: opacity 0.3s;
+  pointer-events: none;
+  text-align: center;
+  max-width: 400px;
+}
+.tts-toast.hidden { display: none; }
+.tts-toast.offline {
+  background: #ef4444;
+  color: #fff;
+}
+.tts-toast.online {
+  background: #22c55e;
+  color: #fff;
+}
+
 /* Chatterbox install overlay */
 .chatterbox-install-content {
   background: var(--bg-panel);
