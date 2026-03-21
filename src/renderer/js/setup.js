@@ -10,6 +10,7 @@ const SetupWizard = {
     { id: 'initials', title: 'Your Initials' },
     { id: 'connection', title: 'SimSig Credentials' },
     { id: 'tts', title: 'Text-to-Speech' },
+    { id: 'chatterbox-install', title: 'Installing Voice Engine', skip: true },
     // { id: 'browser', title: 'Browser Access' },  // Hidden from setup — available in Settings after first launch
     { id: 'complete', title: 'Complete' },
   ],
@@ -99,6 +100,10 @@ const SetupWizard = {
     if (this.currentStep < this.steps.length - 1) {
       this.direction = 'forward';
       this.currentStep++;
+      // Skip the install step if local Chatterbox was not selected
+      if (this.steps[this.currentStep].id === 'chatterbox-install' && this.collectedSettings.ttsProvider !== 'chatterbox') {
+        this.currentStep++;
+      }
       this.renderStep(this.currentStep);
       this.updateProgress();
     }
@@ -110,6 +115,10 @@ const SetupWizard = {
     if (this.currentStep > minStep) {
       this.direction = 'backward';
       this.currentStep--;
+      // Skip the install step when going back
+      if (this.steps[this.currentStep].id === 'chatterbox-install') {
+        this.currentStep--;
+      }
       this.renderStep(this.currentStep);
       this.updateProgress();
     }
@@ -300,6 +309,37 @@ const SetupWizard = {
         input.focus();
       }
     }
+    if (stepId === 'chatterbox-install') {
+      // Start install and listen for progress
+      const detail = document.getElementById('setup-install-detail');
+      const fill = document.getElementById('setup-install-fill');
+
+      if (window.setupAPI?.tts?.onInstallProgress) {
+        window.setupAPI.tts.onInstallProgress((data) => {
+          if (detail) detail.textContent = data.detail || data.stage;
+          if (fill) fill.style.width = data.percent + '%';
+        });
+      }
+
+      if (window.setupAPI?.tts?.startInstall) {
+        window.setupAPI.tts.startInstall().then((result) => {
+          if (result && result.success) {
+            if (detail) detail.textContent = 'Installation complete!';
+            if (fill) fill.style.width = '100%';
+            setTimeout(() => this.nextStep(), 1500);
+          } else {
+            if (detail) detail.textContent = 'Installation failed: ' + (result?.error || 'Unknown error') + '. You can change your TTS provider in Settings.';
+            if (fill) fill.style.width = '0%';
+            // Show a continue button so user isn't stuck
+            const btnRow = document.createElement('div');
+            btnRow.className = 'btn-row center';
+            btnRow.innerHTML = '<button class="btn-primary" id="install-fail-continue">Continue</button>';
+            this.container.querySelector('.step-card.active')?.appendChild(btnRow);
+            document.getElementById('install-fail-continue')?.addEventListener('click', () => this.nextStep());
+          }
+        });
+      }
+    }
     if (stepId === 'tts') {
       this.bindTTSEvents();
     }
@@ -310,11 +350,41 @@ const SetupWizard = {
     const options = this.container.querySelectorAll('.provider-option');
     options.forEach((opt) => {
       opt.addEventListener('click', () => {
+        if (opt.classList.contains('disabled')) return;
         options.forEach((o) => o.classList.remove('selected'));
         opt.classList.add('selected');
         opt.querySelector('input[type="radio"]').checked = true;
       });
     });
+
+    // Check for GPU — disable Chatterbox if not available
+    if (window.setupAPI?.tts?.checkGpu) {
+      window.setupAPI.tts.checkGpu().then((gpu) => {
+        const cbOption = this.container.querySelector('[data-provider="chatterbox"]');
+        if (!cbOption) return;
+        if (!gpu.hasGpu) {
+          cbOption.classList.add('disabled');
+          cbOption.style.opacity = '0.4';
+          cbOption.style.pointerEvents = 'none';
+          const desc = cbOption.querySelector('.provider-desc');
+          if (desc) desc.innerHTML = 'Requires an NVIDIA GPU (GTX 1060 or better). No compatible GPU detected on this PC';
+          const ribbon = cbOption.querySelector('.recommended-ribbon');
+          if (ribbon) ribbon.style.display = 'none';
+          // If Chatterbox was selected, switch to Edge
+          if (cbOption.classList.contains('selected')) {
+            cbOption.classList.remove('selected');
+            const edgeOpt = this.container.querySelector('[data-provider="edge"]');
+            if (edgeOpt) {
+              edgeOpt.classList.add('selected');
+              edgeOpt.querySelector('input[type="radio"]').checked = true;
+            }
+          }
+        } else {
+          const desc = cbOption.querySelector('.provider-desc');
+          if (desc) desc.innerHTML = `Ultra-realistic cloned voices. Runs locally on your <strong>${gpu.gpuName}</strong>`;
+        }
+      });
+    }
   },
 
   bindBrowserEvents() {
@@ -525,20 +595,29 @@ const SetupWizard = {
 
   render_tts() {
     const s = this.collectedSettings;
-    const provider = s.ttsProvider || 'chatterbox';
+    const provider = s.ttsProvider || 'chatterbox-cloud';
     const sel = (p) => provider === p ? 'selected' : '';
     const chk = (p) => provider === p ? 'checked' : '';
     return `
         <div class="step-title">Text-to-Speech</div>
-        <div class="step-subtitle">vGSM-R uses text-to-speech to voice driver communications.</div>
+        <div class="step-subtitle">vGSM-R uses AI to voice driver communications. Choose how to run the voice engine:</div>
         <div class="provider-options">
-          <div class="provider-option has-ribbon ${sel('chatterbox')}" data-provider="chatterbox">
+          <div class="provider-option has-ribbon ${sel('chatterbox-cloud')}" data-provider="chatterbox-cloud">
             <div class="recommended-ribbon">Best</div>
+            <input type="radio" name="tts-provider" value="chatterbox-cloud" ${chk('chatterbox-cloud')}>
+            <div class="provider-radio"></div>
+            <div class="provider-info">
+              <div class="provider-name">Online Voice Server</div>
+              <div class="provider-desc">Ultra-realistic AI voices hosted online. Works on any PC, requires internet connection</div>
+            </div>
+            <span class="provider-badge badge-green">Excellent</span>
+          </div>
+          <div class="provider-option ${sel('chatterbox')}" data-provider="chatterbox">
             <input type="radio" name="tts-provider" value="chatterbox" ${chk('chatterbox')}>
             <div class="provider-radio"></div>
             <div class="provider-info">
-              <div class="provider-name">Chatterbox AI</div>
-              <div class="provider-desc">Ultra-realistic cloned voices. Runs locally on your GPU, no internet needed</div>
+              <div class="provider-name">Local Voice Server</div>
+              <div class="provider-desc">Same AI voices, downloaded and run locally. Works offline, requires NVIDIA GPU (~4GB download)</div>
             </div>
             <span class="provider-badge badge-green">Excellent</span>
           </div>
@@ -547,7 +626,7 @@ const SetupWizard = {
             <div class="provider-radio"></div>
             <div class="provider-info">
               <div class="provider-name">Edge TTS</div>
-              <div class="provider-desc">Microsoft neural voices. Requires internet connection</div>
+              <div class="provider-desc">Microsoft neural voices. Requires internet, no setup needed</div>
             </div>
             <span class="provider-badge badge-amber">Ok Quality</span>
           </div>
@@ -602,9 +681,23 @@ const SetupWizard = {
     `;
   },
 
+  render_chatterbox_install() {
+    return `
+        <div class="step-title">Installing Voice Engine</div>
+        <div class="step-subtitle">Downloading and setting up the AI voice engine. This is a one-time download of approximately 4GB.</div>
+        <div style="margin:30px 0;text-align:center">
+          <div id="setup-install-detail" style="font-size:13px;color:#aaa;margin-bottom:16px">Preparing...</div>
+          <div style="height:8px;background:#222;border-radius:4px;overflow:hidden;max-width:400px;margin:0 auto">
+            <div id="setup-install-fill" style="height:100%;background:var(--setup-accent);border-radius:4px;width:0%;transition:width 0.3s ease"></div>
+          </div>
+          <div style="font-size:11px;color:#666;margin-top:12px">Please do not close this window during installation.</div>
+        </div>
+    `;
+  },
+
   render_complete() {
     const s = this.collectedSettings;
-    const providerNames = { edge: 'Edge TTS', chatterbox: 'Chatterbox AI', windows: 'Windows TTS' };
+    const providerNames = { 'chatterbox-cloud': 'Online Voice Server', chatterbox: 'Local Voice Server', edge: 'Edge TTS', windows: 'Windows TTS' };
     const title = this.updateMode ? 'Settings Reviewed' : 'Setup Complete';
     const subtitle = this.updateMode
       ? 'Here\'s a summary of your updated configuration.'

@@ -186,6 +186,12 @@ contextBridge.exposeInMainWorld('simsigAPI', {
     getVoices: () => ipcRenderer.invoke(channels.TTS_GET_VOICES),
     speak: (text, voiceId) => ipcRenderer.invoke(channels.TTS_SPEAK, text, voiceId),
     checkChatterbox: (url) => ipcRenderer.invoke(channels.TTS_CHECK_CHATTERBOX, url),
+    checkGpu: () => ipcRenderer.invoke(channels.CHATTERBOX_GPU_CHECK),
+    onInstallProgress: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on(channels.CHATTERBOX_INSTALL_PROGRESS, listener);
+      return () => ipcRenderer.removeListener(channels.CHATTERBOX_INSTALL_PROGRESS, listener);
+    },
   },
 
   ptt: {

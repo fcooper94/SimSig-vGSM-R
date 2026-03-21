@@ -7,6 +7,7 @@ const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 const StompConnectionManager = require('./stomp-client');
 const PhoneReader = require('./phone-reader');
 const PeerDiscovery = require('./peer-discovery');
+const chatterboxManager = require('./chatterbox-manager');
 
 const SCRIPTS_DIR = __dirname.replace('app.asar', 'app.asar.unpacked');
 const ANSWER_SCRIPT = require('path').join(SCRIPTS_DIR, 'answer-phone-call.ps1');
@@ -730,6 +731,19 @@ function registerIpcHandlers() {
         });
       }
 
+      // Start Chatterbox server if selected as TTS provider
+      if (settings.get('tts.provider') === 'chatterbox' && !chatterboxManager.isRunning()) {
+        chatterboxManager.setProgressCallback((p) => {
+          sendToMainWindow(channels.CHATTERBOX_INSTALL_PROGRESS, p);
+        });
+        chatterboxManager.start().then((ok) => {
+          if (ok) console.log('[Chatterbox] Server started successfully');
+          else console.warn('[Chatterbox] Server failed to start — falling back to Edge TTS');
+        }).catch((err) => {
+          console.error('[Chatterbox] Start error:', err.message);
+        });
+      }
+
       // Ensure Telephone Calls dialog is open so PhoneReader can poll
       setTimeout(() => {
         execFile('powershell', [
@@ -1299,6 +1313,48 @@ function registerIpcHandlers() {
     win.setBounds({ x: bounds.x, y: bounds.y - dy, width: bounds.width, height });
   });
 
+  // Chatterbox cloud server URL
+  const CHATTERBOX_CLOUD_URL = 'https://tts.vgsm-r.com';
+
+  function getChatterboxUrl() {
+    const provider = settings.get('tts.provider') || 'edge';
+    if (provider === 'chatterbox-cloud') return CHATTERBOX_CLOUD_URL;
+    if (provider === 'chatterbox') {
+      return (settings.get('tts.chatterboxUrl') || 'http://localhost:8099').replace(/\/+$/, '').replace('localhost', '127.0.0.1');
+    }
+    return null;
+  }
+
+  // Start Chatterbox install/server (called from setup wizard)
+  registerHandler(channels.CHATTERBOX_START, async () => {
+    chatterboxManager.setProgressCallback((p) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send(channels.CHATTERBOX_INSTALL_PROGRESS, p);
+      }
+    });
+    try {
+      const ok = await chatterboxManager.start();
+      return { success: ok };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // GPU detection for Chatterbox
+  registerHandler(channels.CHATTERBOX_GPU_CHECK, async () => {
+    return new Promise((resolve) => {
+      execFile('nvidia-smi', ['--query-gpu=name,memory.total', '--format=csv,noheader,nounits'], { timeout: 5000 }, (err, stdout) => {
+        if (err || !stdout || !stdout.trim()) {
+          resolve({ hasGpu: false });
+        } else {
+          const line = stdout.trim().split('\n')[0];
+          const parts = line.split(',').map((s) => s.trim());
+          resolve({ hasGpu: true, gpuName: parts[0], vramMB: parseInt(parts[1], 10) || 0 });
+        }
+      });
+    });
+  });
+
   // TTS — Chatterbox (free local AI voices)
 
   async function fetchChatterboxVoices(baseUrl) {
@@ -1380,8 +1436,8 @@ function registerIpcHandlers() {
       return { provider: 'windows' };
     }
 
-    if (provider === 'chatterbox') {
-      const baseUrl = (settings.get('tts.chatterboxUrl') || 'http://localhost:8099').replace(/\/+$/, '');
+    if (provider === 'chatterbox' || provider === 'chatterbox-cloud') {
+      const baseUrl = getChatterboxUrl();
       try {
         return await fetchChatterboxVoices(baseUrl);
       } catch (err) {
@@ -1457,8 +1513,8 @@ function registerIpcHandlers() {
       return null; // Renderer handles Windows TTS directly
     }
 
-    if (provider === 'chatterbox') {
-      const baseUrl = (settings.get('tts.chatterboxUrl') || 'http://localhost:8099').replace(/\/+$/, '');
+    if (provider === 'chatterbox' || provider === 'chatterbox-cloud') {
+      const baseUrl = getChatterboxUrl();
       try {
         console.log(`[TTS] Chatterbox: voice=${voiceId} text="${text.substring(0, 60)}..."`);
         return await speakChatterbox(text, voiceId, baseUrl);
@@ -1495,7 +1551,7 @@ function registerIpcHandlers() {
   registerHandler(channels.STT_TRANSCRIBE, async (_event, audioData) => {
     if (!audioData || audioData.length === 0) return '';
 
-    const baseUrl = (settings.get('tts.chatterboxUrl') || 'http://localhost:8099').replace(/\/+$/, '').replace('localhost', '127.0.0.1');
+    const baseUrl = getChatterboxUrl() || 'http://127.0.0.1:8099';
     try {
       console.log(`[STT] Sending ${audioData.length} samples to Whisper...`);
       const wavBuffer = float32ToWav(new Float32Array(audioData), 16000);

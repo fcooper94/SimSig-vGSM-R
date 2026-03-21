@@ -341,7 +341,8 @@
           <legend>Text-to-Speech</legend>
           <label>Provider
             <select id="setting-tts-provider">
-              <option value="chatterbox">Chatterbox AI — Best Quality</option>
+              <option value="chatterbox-cloud">Online Voice Server — Best Quality</option>
+              <option value="chatterbox">Local Voice Server — Best Quality (NVIDIA GPU)</option>
               <option value="edge">Edge TTS — Good Quality</option>
               <option value="windows">Windows TTS — Basic Quality</option>
             </select>
@@ -368,6 +369,18 @@
           <button type="button" id="settings-cancel">Cancel</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- ── CHATTERBOX INSTALL OVERLAY ────────────────────────── -->
+  <div id="chatterbox-install-overlay" class="modal hidden">
+    <div class="chatterbox-install-content">
+      <h3 id="chatterbox-install-title">Setting up AI Voices</h3>
+      <p id="chatterbox-install-detail">Preparing...</p>
+      <div class="chatterbox-progress-bar">
+        <div id="chatterbox-progress-fill" class="chatterbox-progress-fill"></div>
+      </div>
+      <p class="chatterbox-install-hint">This is a one-time download. Please do not close the app.</p>
     </div>
   </div>
 

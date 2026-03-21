@@ -49,6 +49,9 @@ module.exports = {
   TTS_GET_VOICES: 'tts:get-voices',
   TTS_SPEAK: 'tts:speak',
   TTS_CHECK_CHATTERBOX: 'tts:check-chatterbox',
+  CHATTERBOX_INSTALL_PROGRESS: 'chatterbox:install-progress',
+  CHATTERBOX_START: 'chatterbox:start',
+  CHATTERBOX_GPU_CHECK: 'chatterbox:gpu-check',
 
   // Sim info
   SIM_NAME: 'sim:name',

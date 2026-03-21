@@ -84,7 +84,7 @@ function createWindow() {
 function createSetupWindow(updateMode = false) {
   setupWindow = new BrowserWindow({
     width: 750,
-    height: 630,
+    height: 700,
     resizable: false,
     title: 'vGSM-R Setup',
     icon: path.join(__dirname, '../../images/icon.png'),
@@ -387,6 +387,7 @@ app.on('before-quit', () => {
   restoreTelephoneWindow();
   try { webServer.stop(); removeFirewallRule(); } catch (_) {}
   try { require('./global-ptt').stop(); } catch (_) {}
+  try { require('./chatterbox-manager').stop(); } catch (_) {}
 });
 app.on('will-quit', restoreTelephoneWindow);
 

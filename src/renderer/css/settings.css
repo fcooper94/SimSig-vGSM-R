@@ -704,3 +704,62 @@ body.dark-mode #confirm-yes {
 body.dark-mode #confirm-yes:hover {
   background: #00ccee;
 }
+
+/* Chatterbox install overlay */
+.chatterbox-install-content {
+  background: var(--bg-panel);
+  border: 2px solid var(--border);
+  padding: 30px 40px;
+  text-align: center;
+  min-width: 350px;
+  max-width: 450px;
+}
+
+.chatterbox-install-content h3 {
+  margin-bottom: 12px;
+  font-size: 16px;
+}
+
+#chatterbox-install-detail {
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 16px;
+}
+
+.chatterbox-progress-bar {
+  height: 8px;
+  background: #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.chatterbox-progress-fill {
+  height: 100%;
+  background: var(--accent, #0078d4);
+  border-radius: 4px;
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+.chatterbox-install-hint {
+  font-size: 11px;
+  color: #999;
+}
+
+body.dark-mode .chatterbox-install-content {
+  background: #1a1a2e;
+  border-color: #333;
+}
+
+body.dark-mode #chatterbox-install-detail {
+  color: #aaa;
+}
+
+body.dark-mode .chatterbox-progress-bar {
+  background: #333;
+}
+
+body.dark-mode .chatterbox-install-hint {
+  color: #666;
+}

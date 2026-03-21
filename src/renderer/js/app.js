@@ -93,6 +93,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // Chatterbox install progress overlay
+  if (window.simsigAPI.tts.onInstallProgress) {
+    window.simsigAPI.tts.onInstallProgress((data) => {
+      const overlay = document.getElementById('chatterbox-install-overlay');
+      const detail = document.getElementById('chatterbox-install-detail');
+      const fill = document.getElementById('chatterbox-progress-fill');
+      if (!overlay) return;
+      if (data.percent < 100) {
+        overlay.classList.remove('hidden');
+        detail.textContent = data.detail || data.stage;
+        fill.style.width = data.percent + '%';
+      } else {
+        fill.style.width = '100%';
+        detail.textContent = 'Ready!';
+        setTimeout(() => overlay.classList.add('hidden'), 1000);
+      }
+    });
+  }
+
   // Failure dialog auto-suppression — show dismissed failures in alerts feed
   window.simsigAPI.sim.onFailure((dismissed) => {
     AlertsFeed.addFailure(dismissed);

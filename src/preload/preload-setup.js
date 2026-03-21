@@ -19,6 +19,13 @@ contextBridge.exposeInMainWorld('setupAPI', {
   complete: (allSettings) => ipcRenderer.invoke(channels.SETUP_COMPLETE, allSettings),
   keepSettings: () => ipcRenderer.invoke('setup:keep-settings'),
   tts: {
-    checkChatterbox: (url) => ipcRenderer.invoke(channels.TTS_CHECK_CHATTERBOX, url),
+    checkChatterbox: (url) => ipcRenderer.invoke('tts:check-chatterbox', url),
+    checkGpu: () => ipcRenderer.invoke('chatterbox:gpu-check'),
+    startInstall: () => ipcRenderer.invoke('chatterbox:start'),
+    onInstallProgress: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on('chatterbox:install-progress', listener);
+      return () => ipcRenderer.removeListener('chatterbox:install-progress', listener);
+    },
   },
 });

@@ -145,6 +145,21 @@ const SettingsUI = {
     document.getElementById('setting-tts-chatterbox-url').value = settings.tts?.chatterboxUrl || 'http://localhost:8099';
     this.toggleChatterboxRow(providerSelect.value);
 
+    // Check GPU for local Chatterbox option
+    if (window.simsigAPI.tts.checkGpu) {
+      window.simsigAPI.tts.checkGpu().then((gpu) => {
+        const localOption = providerSelect.querySelector('option[value="chatterbox"]');
+        if (localOption && !gpu.hasGpu) {
+          localOption.disabled = true;
+          localOption.textContent = 'Local Voice Server — Requires NVIDIA GPU (not detected)';
+          if (providerSelect.value === 'chatterbox') {
+            providerSelect.value = 'chatterbox-cloud';
+            this.toggleChatterboxRow('chatterbox-cloud');
+          }
+        }
+      });
+    }
+
     // Browser access
     document.getElementById('setting-web-enabled').checked = settings.web?.enabled || false;
     document.getElementById('setting-web-port').value = settings.web?.port || 3000;
@@ -334,7 +349,7 @@ const SettingsUI = {
 
   toggleChatterboxRow(provider) {
     const status = document.getElementById('tts-chatterbox-status');
-    if (provider === 'chatterbox') {
+    if (provider === 'chatterbox' || provider === 'chatterbox-cloud') {
       this.checkChatterboxServer();
     } else {
       status.textContent = '';
