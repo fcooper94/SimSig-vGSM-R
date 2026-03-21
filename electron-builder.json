@@ -23,7 +23,7 @@
   "win": {
     "target": "squirrel",
     "icon": "images/icon.png",
-    "requestedExecutionLevel": "requireAdministrator"
+    "requestedExecutionLevel": "asInvoker"
   },
   "squirrelWindows": {
     "iconUrl": "https://raw.githubusercontent.com/fcooper94/SimSig-vGSM-R/main/images/icon.png",
