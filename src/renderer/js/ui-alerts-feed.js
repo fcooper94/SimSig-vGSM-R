@@ -617,6 +617,21 @@ const AlertsFeed = {
     }
   },
 
+  // Called directly from STOMP CA_MSG (berth step) — headcode is the descr field
+  onTrainMovement(headcode) {
+    const hc = headcode.toUpperCase();
+    const entry = this._activeRedSignals.get(hc);
+    if (!entry) return;
+    if (entry.waited) {
+      window.simsigAPI.phone.clearAutoWait(hc);
+      this._waitedPairs.delete(hc + '|' + entry.signal);
+    }
+    if (this._selectedHc === hc) this._selectedHc = null;
+    this._activeRedSignals.delete(hc);
+    this._saveState();
+    this.render();
+  },
+
   // Extract headcode if a log line body represents train movement.
   // Handles: "2C09 something", "STEP 2C09 : 246 -> 250", "LOCATION 2C09 at S246"
   _extractMovementHeadcode(text) {

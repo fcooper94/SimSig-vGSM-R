@@ -84,7 +84,7 @@ function createWindow() {
 function createSetupWindow(updateMode = false) {
   setupWindow = new BrowserWindow({
     width: 750,
-    height: 600,
+    height: 630,
     resizable: false,
     title: 'vGSM-R Setup',
     icon: path.join(__dirname, '../../images/icon.png'),
@@ -258,6 +258,20 @@ app.whenReady().then(async () => {
   const { registerIpcHandlers } = require('./ipc-handlers');
 
   initSettings();
+
+  // Check if settings should be reset for this version
+  const pkg = require('../../package.json');
+  if (pkg.resetSettingsOnVersion) {
+    const lastReset = settings.get('_lastSettingsReset');
+    if (lastReset !== pkg.resetSettingsOnVersion) {
+      console.log(`[Settings] Resetting settings for version ${pkg.resetSettingsOnVersion}`);
+      const configPath = path.join(app.getPath('userData'), 'config.json');
+      try { require('fs').unlinkSync(configPath); } catch (_) {}
+      initSettings(); // re-init with defaults
+      settings.set('_lastSettingsReset', pkg.resetSettingsOnVersion);
+    }
+  }
+
   registerIpcHandlers();
 
   const initElapsed = Date.now() - initStart;
@@ -313,7 +327,7 @@ app.whenReady().then(async () => {
   // Web server IPC handlers
   ipcMain.handle(channels.WEB_START, (_event, port) => {
     if (webServer.isRunning()) stopWebServer();
-    const actualPort = port || 50507;
+    const actualPort = port || 3000;
     startWebServer(actualPort);
 
     // Get local network IP for the overlay URL

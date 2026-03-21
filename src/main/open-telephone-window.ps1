@@ -87,7 +87,7 @@ function Get-SimTitle {
 # Extract sim name from title like "SimSig - London Bridge ASC Mini Sim (server on port 50505)"
 function Get-SimName($title) {
     if ($title -match "^SimSig\s*-\s*(.+?)\s*\(") {
-        return $Matches[1].Trim()
+        return ($Matches[1].Trim() -replace '\s+Mini Sim\s*$', '')
     }
     if ($title -match "^SimSig\s*-\s*(.+)$") {
         return $Matches[1].Trim()

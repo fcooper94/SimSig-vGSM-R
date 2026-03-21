@@ -49,7 +49,7 @@ module.exports = {
     },
     tts: {
       provider: 'edge',
-      elevenLabsApiKey: '',
+      chatterboxUrl: 'http://localhost:8099',
     },
     web: {
       enabled: false,

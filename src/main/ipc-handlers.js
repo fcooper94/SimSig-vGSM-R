@@ -42,7 +42,7 @@ let legacyRelayPeers = []; // players seen on the legacy relay (SimSig host runn
 let stompManager = null;
 let phoneReader = null;
 let ttsVoicesCache = null;
-let elevenLabsVoicesCache = null;
+let chatterboxVoicesCache = null;
 let peerDiscovery = null;
 let workstationPanels = null; // { "Panel 1": "JO", "Panel 2": "FC", ... }
 let ourPanelName = ''; // our panel label (set at connect + workstation detection)
@@ -502,13 +502,13 @@ function registerIpcHandlers() {
   registerHandler(channels.SETTINGS_GET, (_event, key) => settings.get(key));
   registerHandler(channels.SETTINGS_SET, (_event, key, value) => {
     settings.set(key, value);
-    // Invalidate TTS caches when provider or API key changes
+    // Invalidate TTS caches when provider or server URL changes
     if (key === 'tts.provider') {
       ttsVoicesCache = null;
-      elevenLabsVoicesCache = null;
+      chatterboxVoicesCache = null;
     }
-    if (key === 'tts.elevenLabsApiKey') {
-      elevenLabsVoicesCache = null;
+    if (key === 'tts.chatterboxUrl') {
+      chatterboxVoicesCache = null;
     }
   });
   registerHandler(channels.SETTINGS_GET_ALL, () => settings.getAll());
@@ -713,6 +713,22 @@ function registerIpcHandlers() {
         }
       };
       phoneReader.startPolling(2000);
+
+      // Mute SimSig audio if user chose that option
+      if (settings.get('audio.muteSimsig') === true) {
+        execFile('powershell', [
+          '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+          '-File', path.join(SCRIPTS_DIR, 'mute-simsig.ps1'), '-Action', 'mute',
+        ], { timeout: 5000 }, (err, stdout) => {
+          if (stdout) {
+            try {
+              const r = JSON.parse(stdout.trim());
+              if (r.success) console.log(`[Audio] Muted SimSig (PID ${r.pid})`);
+              else console.warn('[Audio] Could not mute SimSig:', r.error);
+            } catch { /* ignore */ }
+          }
+        });
+      }
 
       // Ensure Telephone Calls dialog is open so PhoneReader can poll
       setTimeout(() => {
@@ -1283,221 +1299,35 @@ function registerIpcHandlers() {
     win.setBounds({ x: bounds.x, y: bounds.y - dy, width: bounds.width, height });
   });
 
-  // TTS — ElevenLabs (premium paid voices, requires API key)
-  const ELEVENLABS_API_BASE = 'https://api.elevenlabs.io';
+  // TTS — Chatterbox (free local AI voices)
 
-  // Reject voices that clearly don't fit a train driver profile
-  const REJECT_WORDS = [
-    // Posh / RP / formal
-    'velvety', 'velvet', 'elegant', 'refined', 'regal',
-    'posh', 'formal', 'sophisticated', 'polished', 'narrator', 'narration',
-    'newsreader', 'announcer', 'documentary', 'storyteller', 'captivating',
-    'broadcaster', 'authoritative', 'educator',
-    'meditation', 'asmr', 'soothing',
-    'princess', 'queen', 'king', 'royal', 'butler', 'professor',
-    'received pronunciation', 'upper class',
-    'lecture', 'audiobook',
-    // Wrong character type
-    'sexy', 'seductive', 'romantic', 'flirty', 'sensual',
-    'child', 'kid', 'toddler', 'baby', 'anime', 'cartoon',
-    'robot', 'alien', 'monster', 'villain', 'wizard', 'elf',
-    'customer support', 'customer care', 'corporate',
-    'perky', 'bubbly',
-    'whisper', 'whispery',
-  ];
-
-  // Prefer voices whose accent/description matches working-class regions
-  const WORKING_CLASS_KEYWORDS = [
-    'northern', 'yorkshire', 'manchester', 'lancashire', 'liverpool',
-    'scouse', 'geordie', 'newcastle', 'cockney', 'east london', 'essex',
-    'estuary', 'london', 'midlands', 'birmingham', 'brummie',
-    'working class', 'casual', 'bloke', 'lad', 'geezer', 'mate',
-    'rough', 'gruff', 'gritty', 'rugged', 'deep', 'husky',
-    'south london', 'south east', 'bristol', 'west country',
-    'welsh', 'nottingham', 'sheffield', 'leeds', 'hull', 'derby',
-    'irish', 'scottish', 'glasgow',
-  ];
-
-  // Search the ElevenLabs shared voice library for working-class voices
-  async function searchSharedVoices(apiKey) {
-    // Use manual URL construction — URLSearchParams causes 400 errors
-    const allVoices = [];
-    const seenIds = new Set();
-
-    async function doSearch(extraParams, label) {
-      try {
-        const url = `${ELEVENLABS_API_BASE}/v1/shared-voices?page_size=100&language=en${extraParams}&sort=trending&min_notice_period_days=0`;
-        const resp = await fetch(url, { headers: { 'xi-api-key': apiKey } });
-        if (!resp.ok) {
-          const errBody = await resp.text().catch(() => '');
-          console.warn(`[TTS] Shared search ${resp.status} for ${label}: ${errBody}`);
-          return;
-        }
-        const data = await resp.json();
-        let added = 0;
-        for (const v of (data.voices || [])) {
-          if (!seenIds.has(v.voice_id)) {
-            seenIds.add(v.voice_id);
-            allVoices.push(v);
-            added++;
-          }
-        }
-        console.log(`[TTS] Search "${label}" → ${(data.voices || []).length} results, ${added} new`);
-      } catch (err) {
-        console.warn(`[TTS] Shared search failed for ${label}:`, err.message);
-      }
-    }
-
-    // British/Irish/Scottish accents with conversational + character use cases
-    for (const accent of ['british', 'irish', 'scottish']) {
-      await doSearch(`&accent=${accent}&use_cases=conversational`, `${accent}/conversational`);
-      await doSearch(`&accent=${accent}&use_cases=characters`, `${accent}/characters`);
-    }
-
-    return allVoices;
-  }
-
-  async function fetchElevenLabsVoices(apiKey) {
-    if (elevenLabsVoicesCache) return elevenLabsVoicesCache;
-
-    // 1) Fetch shared/community voices (much bigger pool, more regional variety)
-    let sharedRaw = [];
-    try {
-      sharedRaw = await searchSharedVoices(apiKey);
-      console.log(`[TTS] Found ${sharedRaw.length} shared community voices`);
-    } catch (err) {
-      console.warn('[TTS] Shared voice search failed, falling back to library only:', err.message);
-    }
-
-    // 2) Also fetch user's own library voices
-    let libraryRaw = [];
-    try {
-      const resp = await fetch(`${ELEVENLABS_API_BASE}/v2/voices?page_size=100`, {
-        headers: { 'xi-api-key': apiKey },
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        libraryRaw = data.voices || [];
-        console.log(`[TTS] Found ${libraryRaw.length} library voices`);
-      }
-    } catch (err) {
-      console.warn('[TTS] Library voice fetch failed:', err.message);
-    }
-
-    // 3) Merge and deduplicate (shared format differs slightly from library)
-    const seenIds = new Set();
-    const merged = [];
-
-    // Shared voices: {voice_id, name, accent, gender, description, use_case, ...}
-    for (const v of sharedRaw) {
-      const id = v.voice_id || v.public_owner_id;
-      if (seenIds.has(id)) continue;
-      seenIds.add(id);
-      merged.push({
-        voiceId: v.voice_id,
-        name: v.name || '',
-        accent: (v.accent || '').toLowerCase(),
-        gender: (v.gender || '').toLowerCase(),
-        desc: `${v.name || ''} ${v.description || ''} ${v.use_case || ''}`.toLowerCase(),
-      });
-    }
-
-    // Library voices: {voice_id, name, labels: {accent, gender, description, use_case, ...}}
-    for (const v of libraryRaw) {
-      if (seenIds.has(v.voice_id)) continue;
-      seenIds.add(v.voice_id);
-      const lang = (v.labels?.language || '').toLowerCase();
-      if (lang && lang !== 'english' && !lang.startsWith('en')) continue;
-      merged.push({
-        voiceId: v.voice_id,
-        name: v.name || '',
-        accent: (v.labels?.accent || '').toLowerCase(),
-        gender: (v.labels?.gender || '').toLowerCase(),
-        desc: `${v.name || ''} ${v.labels?.description || ''} ${v.labels?.use_case || ''}`.toLowerCase(),
-      });
-    }
-
-    // Only allow British Isles accents
-    const ALLOWED_ACCENTS = [
-      'british', 'english', 'irish', 'scottish', 'welsh',
-      'cockney', 'northern', 'yorkshire', 'manchester', 'london',
-      'estuary', 'midlands', 'geordie', 'scouse', 'brummie',
-      'essex', 'west country', 'south east',
-    ];
-
-    // 4) Filter: reject posh, reject non-British accents
-    const filtered = merged
-      .filter((v) => {
-        // Reject posh-sounding voices
-        if (REJECT_WORDS.some((kw) => v.desc.includes(kw))) return false;
-        // Reject non-British accents (american, indian, etc.)
-        if (v.accent && !ALLOWED_ACCENTS.some((a) => v.accent.includes(a))) return false;
-        return true;
-      })
-      .map((v) => {
-        // Score working-class affinity
-        const wcScore = WORKING_CLASS_KEYWORDS.reduce((s, kw) =>
-          s + (v.desc.includes(kw) || v.accent.includes(kw) ? 1 : 0), 0);
-        return {
-          id: `el-${v.voiceId}`,
-          name: v.name,
-          accent: v.accent,
-          gender: v.gender || 'male',
-          wcScore,
-        };
-      });
-
-    // Sort: working-class voices first, then by name for stability
-    filtered.sort((a, b) => b.wcScore - a.wcScore || a.name.localeCompare(b.name));
-
-    // Ensure ~90% male: keep all males, limit females to ~10% of total
-    const males = filtered.filter((v) => v.gender === 'male');
-    const females = filtered.filter((v) => v.gender !== 'male');
-    const maxFemales = Math.max(1, Math.ceil(males.length * 0.1));
-    const voices = [...males, ...females.slice(0, maxFemales)];
-
-    // Log what we got
-    const accentCounts = {};
-    voices.forEach((v) => { accentCounts[v.accent] = (accentCounts[v.accent] || 0) + 1; });
-    console.log('[TTS] ElevenLabs voice accent breakdown:', JSON.stringify(accentCounts));
-    voices.forEach((v) => {
-      console.log(`[TTS]   ${v.name} (${v.accent}, ${v.gender})`);
-    });
-    console.log(`[TTS] ${voices.length} ElevenLabs voices loaded (from ${merged.length} merged)`);
-    elevenLabsVoicesCache = voices;
+  async function fetchChatterboxVoices(baseUrl) {
+    if (chatterboxVoicesCache) return chatterboxVoicesCache;
+    const url = baseUrl.replace('localhost', '127.0.0.1');
+    const resp = await fetch(`${url}/voices`);
+    if (!resp.ok) throw new Error(`Chatterbox voices error: ${resp.status}`);
+    const data = await resp.json();
+    const voices = data.map((v) => ({
+      id: `cb-${v.id}`,
+      name: v.name,
+      accent: v.accent || 'british',
+      gender: v.gender || 'male',
+    }));
+    if (voices.length > 0) chatterboxVoicesCache = voices;
+    console.log(`[TTS] ${voices.length} Chatterbox voices loaded`);
     return voices;
   }
 
-  async function speakElevenLabs(text, voiceId, apiKey) {
-    const realVoiceId = voiceId.startsWith('el-') ? voiceId.slice(3) : voiceId;
-
-    const response = await fetch(
-      `${ELEVENLABS_API_BASE}/v1/text-to-speech/${realVoiceId}?output_format=mp3_44100_128`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'xi-api-key': apiKey,
-        },
-        body: JSON.stringify({
-          text,
-          model_id: 'eleven_turbo_v2_5',
-          voice_settings: {
-            stability: 0.35,
-            similarity_boost: 0.5,
-            style: 0.6,
-            speed: 1.2,
-          },
-        }),
-      },
-    );
-
-    if (!response.ok) {
-      const errBody = await response.text().catch(() => '');
-      throw new Error(`ElevenLabs TTS error: ${response.status} ${errBody}`);
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
+  async function speakChatterbox(text, voiceId, baseUrl) {
+    const realId = voiceId.startsWith('cb-') ? voiceId.slice(3) : voiceId;
+    const url = baseUrl.replace('localhost', '127.0.0.1');
+    const resp = await fetch(`${url}/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice_id: realId }),
+    });
+    if (!resp.ok) throw new Error(`Chatterbox TTS error: ${resp.status}`);
+    const arrayBuffer = await resp.arrayBuffer();
     return Array.from(new Uint8Array(arrayBuffer));
   }
 
@@ -1550,16 +1380,12 @@ function registerIpcHandlers() {
       return { provider: 'windows' };
     }
 
-    if (provider === 'elevenlabs') {
-      const apiKey = (settings.get('tts.elevenLabsApiKey') || '').trim();
-      if (!apiKey) {
-        console.warn('[TTS] No ElevenLabs API key configured');
-        return [];
-      }
+    if (provider === 'chatterbox') {
+      const baseUrl = (settings.get('tts.chatterboxUrl') || 'http://localhost:8099').replace(/\/+$/, '');
       try {
-        return await fetchElevenLabsVoices(apiKey);
+        return await fetchChatterboxVoices(baseUrl);
       } catch (err) {
-        console.error('[TTS] ElevenLabs voices fetch failed:', err.message);
+        console.error('[TTS] Chatterbox voices fetch failed:', err.message);
         return [];
       }
     }
@@ -1631,13 +1457,13 @@ function registerIpcHandlers() {
       return null; // Renderer handles Windows TTS directly
     }
 
-    if (provider === 'elevenlabs') {
-      const apiKey = (settings.get('tts.elevenLabsApiKey') || '').trim();
-      if (!apiKey) return null;
+    if (provider === 'chatterbox') {
+      const baseUrl = (settings.get('tts.chatterboxUrl') || 'http://localhost:8099').replace(/\/+$/, '');
       try {
-        return await speakElevenLabs(text, voiceId, apiKey);
+        console.log(`[TTS] Chatterbox: voice=${voiceId} text="${text.substring(0, 60)}..."`);
+        return await speakChatterbox(text, voiceId, baseUrl);
       } catch (err) {
-        console.error('[TTS] ElevenLabs speak error:', err.message);
+        console.error('[TTS] Chatterbox speak error:', err.message);
         return null;
       }
     }
@@ -1646,146 +1472,64 @@ function registerIpcHandlers() {
     return speakEdgeTTS(text, voiceId);
   });
 
-  // ElevenLabs credit check — returns { remaining, total } or { error }
-  registerHandler(channels.TTS_CHECK_CREDITS, async (_event, apiKey) => {
-    const trimmedKey = (apiKey || '').trim();
-    if (!trimmedKey) return { error: 'No API key provided' };
+  // Chatterbox server health check
+  registerHandler(channels.TTS_CHECK_CHATTERBOX, async (_event, url) => {
+    const baseUrl = (url || 'http://localhost:8099').trim().replace(/\/+$/, '').replace('localhost', '127.0.0.1');
+    console.log(`[TTS] Chatterbox health check: ${baseUrl}`);
     try {
-      console.log(`[TTS] Checking ElevenLabs credits (key length: ${trimmedKey.length}, starts: ${trimmedKey.slice(0, 4)}...)`);
-      const response = await fetch(`${ELEVENLABS_API_BASE}/v1/user/subscription`, {
-        headers: { 'xi-api-key': trimmedKey },
-      });
-      if (response.status === 401) {
-        const body = await response.text();
-        console.error('[TTS] Credit check 401:', body);
-        return { error: 'Invalid API key' };
-      }
-      if (!response.ok) {
-        const body = await response.text();
-        console.error(`[TTS] Credit check ${response.status}:`, body);
-        return { error: `API error: ${response.status}` };
-      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
+      const response = await fetch(`${baseUrl}/health`, { signal: controller.signal });
+      clearTimeout(timer);
+      if (!response.ok) return { error: `Server returned ${response.status}` };
       const data = await response.json();
-      const used = data.character_count || 0;
-      const limit = data.character_limit || 0;
-      const remaining = limit - used;
-      console.log(`[TTS] ElevenLabs credits: ${remaining}/${limit} remaining (tier: ${data.tier})`);
-      return { remaining, total: limit, tier: data.tier || 'unknown' };
+      console.log('[TTS] Chatterbox health:', JSON.stringify(data));
+      return data;
     } catch (err) {
-      console.error('[TTS] Credit check error:', err.message);
-      return { error: err.message };
+      console.error('[TTS] Chatterbox health error:', err.message);
+      return { error: err.name === 'AbortError' ? 'Connection timed out' : err.message };
     }
   });
 
-  // STT — ElevenLabs Scribe (cloud, premium) or Vosk (handled in renderer)
-  // When ElevenLabs is the TTS provider, audio is sent here for Scribe transcription.
-  // When Edge/Windows TTS is selected, Vosk runs entirely in the renderer (no IPC).
+  // STT — Whisper via Chatterbox server (or fallback to empty)
   registerHandler(channels.STT_TRANSCRIBE, async (_event, audioData) => {
-    const provider = settings.get('tts.provider') || 'edge';
+    if (!audioData || audioData.length === 0) return '';
 
-    if (provider === 'elevenlabs' && audioData) {
-      const apiKey = (settings.get('tts.elevenLabsApiKey') || '').trim();
-      if (!apiKey) {
-        console.error('[STT] No ElevenLabs API key for Scribe');
-        return { error: 'No API key' };
-      }
+    const baseUrl = (settings.get('tts.chatterboxUrl') || 'http://localhost:8099').replace(/\/+$/, '').replace('localhost', '127.0.0.1');
+    try {
+      console.log(`[STT] Sending ${audioData.length} samples to Whisper...`);
+      const wavBuffer = float32ToWav(new Float32Array(audioData), 16000);
 
-      try {
-        console.log(`[STT] Using ElevenLabs Scribe (${audioData.length} samples)...`);
+      // Build multipart form data
+      const boundary = '----WhisperSTT' + Date.now();
+      const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="audio.wav"\r\nContent-Type: audio/wav\r\n\r\n`;
+      const footer = `\r\n--${boundary}--\r\n`;
 
-        // Convert Float32 PCM samples to 16-bit WAV
-        const wavBuffer = float32ToWav(audioData, 16000);
+      const body = Buffer.concat([
+        Buffer.from(header, 'utf-8'),
+        wavBuffer,
+        Buffer.from(footer, 'utf-8'),
+      ]);
 
-        // Build multipart form data manually (Node.js built-in)
-        const boundary = '----ElevenLabsScribe' + Date.now();
-        const formParts = [];
-
-        // model_id field
-        formParts.push(
-          `--${boundary}\r\n` +
-          'Content-Disposition: form-data; name="model_id"\r\n\r\n' +
-          'scribe_v1\r\n'
-        );
-
-        // language_code field
-        formParts.push(
-          `--${boundary}\r\n` +
-          'Content-Disposition: form-data; name="language_code"\r\n\r\n' +
-          'en\r\n'
-        );
-
-        // file field
-        formParts.push(
-          `--${boundary}\r\n` +
-          'Content-Disposition: form-data; name="file"; filename="audio.wav"\r\n' +
-          'Content-Type: audio/wav\r\n\r\n'
-        );
-
-        // Assemble body
-        const preParts = formParts.slice(0, 2).join('');
-        const fileHeader = formParts[2];
-        const closing = `\r\n--${boundary}--\r\n`;
-
-        const preBuffer = Buffer.from(preParts, 'utf-8');
-        const fileHeaderBuffer = Buffer.from(fileHeader, 'utf-8');
-        const closingBuffer = Buffer.from(closing, 'utf-8');
-        const body = Buffer.concat([preBuffer, fileHeaderBuffer, wavBuffer, closingBuffer]);
-
-        const response = await fetch(`${ELEVENLABS_API_BASE}/v1/speech-to-text`, {
-          method: 'POST',
-          headers: {
-            'xi-api-key': apiKey,
-            'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          },
-          body,
-        });
-
-        if (!response.ok) {
-          const errText = await response.text();
-          console.error(`[STT] Scribe error ${response.status}:`, errText);
-          return { error: `Scribe API error: ${response.status}` };
-        }
-
-        const result = await response.json();
-        const text = (result.text || '').trim();
-        console.log(`[STT] Scribe result: "${text}"`);
-        return text;
-      } catch (err) {
-        console.error('[STT] Scribe error:', err.message);
-        return { error: err.message };
-      }
-    }
-
-    // Fallback: PowerShell Windows Speech Recognition (if called without audio data)
-    return new Promise((resolve) => {
-      console.log('[STT] Using Windows Speech Recognition fallback...');
-      execFile('powershell', [
-        '-NoProfile', '-ExecutionPolicy', 'Bypass',
-        '-File', RECOGNIZE_SCRIPT, '-TimeoutSeconds', '15',
-      ], { timeout: 20000 }, (err, stdout) => {
-        if (err) {
-          console.error('[STT] PowerShell error:', err.message);
-          resolve({ error: err.message });
-          return;
-        }
-        try {
-          const result = JSON.parse((stdout || '').trim());
-          if (result.error) {
-            console.error('[STT] Recognition error:', result.error);
-            resolve({ error: result.error });
-          } else if (result.text) {
-            console.log(`[STT] Recognized: "${result.text}" (confidence: ${result.confidence})`);
-            resolve(result.text);
-          } else {
-            console.log('[STT] No speech detected');
-            resolve('');
-          }
-        } catch (parseErr) {
-          console.error('[STT] Parse error:', parseErr.message, stdout);
-          resolve({ error: 'Failed to parse recognition result' });
-        }
+      const response = await fetch(`${baseUrl}/stt`, {
+        method: 'POST',
+        headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+        body,
       });
-    });
+
+      if (!response.ok) {
+        console.error(`[STT] Whisper HTTP ${response.status}`);
+        return '';
+      }
+
+      const result = await response.json();
+      const text = (result.text || '').trim();
+      console.log(`[STT] Whisper result: "${text}"`);
+      return text;
+    } catch (err) {
+      console.error('[STT] Whisper error:', err.message);
+      return '';
+    }
   });
 
   // ── Player-to-player calls (WebRTC relay) ─────────────────────────────────

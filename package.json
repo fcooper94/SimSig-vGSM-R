@@ -18,6 +18,7 @@
   "author": "fcooper94",
   "license": "ISC",
   "type": "commonjs",
+  "resetSettingsOnVersion": "1.0.43",
   "bugs": {
     "url": "https://github.com/fcooper94/SimSig-vGSM-R/issues"
   },

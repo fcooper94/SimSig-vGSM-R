@@ -22,6 +22,9 @@ public class Win32Suppress {
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
+    [DllImport("user32.dll", CharSet = CharSet.Auto, EntryPoint = "SendMessage")]
+    public static extern IntPtr SendMessageText(IntPtr hWnd, int msg, IntPtr wParam, StringBuilder lParam);
+
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
@@ -54,7 +57,7 @@ public class Win32Suppress {
         int len = (int)SendMessage(hWnd, WM_GETTEXTLENGTH, IntPtr.Zero, IntPtr.Zero);
         if (len <= 0) return "";
         var sb = new StringBuilder(len + 1);
-        SendMessage(hWnd, WM_GETTEXT, (IntPtr)(len + 1), sb);
+        SendMessageText(hWnd, WM_GETTEXT, (IntPtr)(len + 1), sb);
         return sb.ToString();
     }
 
@@ -81,23 +84,18 @@ public class Win32Suppress {
         return string.Join(" | ", texts);
     }
 
-    // Find OK/Yes/Close button in a dialog
+    // Find OK/Yes/Close button in a dialog (matches by text, no class filter)
     public static IntPtr FindOkButton(IntPtr parent) {
-        string[] texts = new string[] { "OK", "Ok", "&OK", "Yes", "&Yes", "Close" };
+        string[] texts = new string[] { "OK", "Ok", "&OK", "Yes", "&Yes", "Close", "&Close" };
         IntPtr result = IntPtr.Zero;
         EnumChildWindows(parent, (hWnd, lParam) => {
             var sb = new StringBuilder(256);
-            GetClassName(hWnd, sb, 256);
-            string cls = sb.ToString();
-            if (cls == "TButton" || cls == "Button") {
-                sb.Clear();
-                GetWindowText(hWnd, sb, 256);
-                string btnText = sb.ToString();
-                foreach (string t in texts) {
-                    if (btnText == t) {
-                        result = hWnd;
-                        return false;
-                    }
+            GetWindowText(hWnd, sb, 256);
+            string btnText = sb.ToString();
+            foreach (string t in texts) {
+                if (btnText == t) {
+                    result = hWnd;
+                    return false;
                 }
             }
             return true;
@@ -105,13 +103,20 @@ public class Win32Suppress {
         return result;
     }
 
-    // Check if text contains failure-related keywords
+    // Check if text contains failure/message-related keywords
     public static bool IsFailureDialog(string text) {
         string lower = text.ToLower();
         return lower.Contains("failure") || lower.Contains("trts")
             || lower.Contains("track circuit") || lower.Contains("track section")
             || lower.Contains("points fail") || lower.Contains("signal fail")
-            || lower.Contains("lamp fail");
+            || lower.Contains("lamp fail")
+            || lower.Contains("bug report") || lower.Contains("exception")
+            || lower.Contains("access violation");
+    }
+
+    // Check if window is a SimSig Message/Confirmation dialog (dismiss any with OK button)
+    public static bool IsMessageDialog(string title) {
+        return title == "Message" || title == "Confirmation";
     }
 
     // Find all visible failure dialogs and dismiss them
@@ -130,15 +135,27 @@ public class Win32Suppress {
         // Check each dialog
         foreach (var dlg in dialogs) {
             if (!IsWindow(dlg) || !IsWindowVisible(dlg)) continue;
-            string text = ReadDialogText(dlg);
-            if (string.IsNullOrWhiteSpace(text)) continue;
-            if (!IsFailureDialog(text)) continue;
 
-            // Found a failure dialog — find OK button and click it
+            // Get window title
+            var titleSb = new StringBuilder(256);
+            GetWindowText(dlg, titleSb, 256);
+            string title = titleSb.ToString();
+
+            // Read child text content
+            string text = ReadDialogText(dlg);
+
+            // Dismiss if: title is "Message"/"Confirmation", OR text contains failure keywords
+            bool isMessage = IsMessageDialog(title);
+            bool isFailure = !string.IsNullOrWhiteSpace(text) && IsFailureDialog(text);
+
+            if (!isMessage && !isFailure) continue;
+
+            // Found a dialog to dismiss — find OK button and click it
             IntPtr btn = FindOkButton(dlg);
             if (btn != IntPtr.Zero) {
-                PostMessage(btn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
-                dismissed.Add(text);
+                SendMessage(btn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                string label = isMessage ? text : title + " | " + text;
+                if (!string.IsNullOrWhiteSpace(label)) dismissed.Add(label);
             }
         }
 

@@ -185,7 +185,7 @@ contextBridge.exposeInMainWorld('simsigAPI', {
   tts: {
     getVoices: () => ipcRenderer.invoke(channels.TTS_GET_VOICES),
     speak: (text, voiceId) => ipcRenderer.invoke(channels.TTS_SPEAK, text, voiceId),
-    checkCredits: (apiKey) => ipcRenderer.invoke(channels.TTS_CHECK_CREDITS, apiKey),
+    checkChatterbox: (url) => ipcRenderer.invoke(channels.TTS_CHECK_CHATTERBOX, url),
   },
 
   ptt: {

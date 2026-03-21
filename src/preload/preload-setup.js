@@ -19,6 +19,6 @@ contextBridge.exposeInMainWorld('setupAPI', {
   complete: (allSettings) => ipcRenderer.invoke(channels.SETUP_COMPLETE, allSettings),
   keepSettings: () => ipcRenderer.invoke('setup:keep-settings'),
   tts: {
-    checkCredits: (apiKey) => ipcRenderer.invoke(channels.TTS_CHECK_CREDITS, apiKey),
+    checkChatterbox: (url) => ipcRenderer.invoke(channels.TTS_CHECK_CHATTERBOX, url),
   },
 });

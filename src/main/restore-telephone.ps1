@@ -2,7 +2,15 @@
 # Runs as a detached process after Electron exits
 # Finds every off-screen SimSig-owned window and moves it back
 
-Start-Sleep -Milliseconds 500
+Start-Sleep -Milliseconds 150
+
+# Unmute SimSig audio first
+try {
+    $muteScript = Join-Path $PSScriptRoot "mute-simsig.ps1"
+    if (Test-Path $muteScript) {
+        & $muteScript -Action unmute | Out-Null
+    }
+} catch { }
 
 try {
     Add-Type @"
@@ -198,6 +206,195 @@ try {
         }
     }
 
+    # Clean up leftover SimSig dialogs using C# for reliable button finding
+    # Strips & accelerator prefixes from button text before matching
+    Add-Type -TypeDefinition @"
+    using System;
+    using System.Runtime.InteropServices;
+    using System.Text;
+    public class DialogCleanup {
+        [DllImport("user32.dll")] public static extern bool EnumWindows(EnumCb cb, IntPtr lp);
+        [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr parent, EnumCb cb, IntPtr lp);
+        [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+        [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+        [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+        public delegate bool EnumCb(IntPtr h, IntPtr l);
+        public const uint BM_CLICK = 0x00F5;
+
+        public static IntPtr FindVisibleWindow(string title) {
+            IntPtr result = IntPtr.Zero;
+            EnumWindows((h, l) => {
+                if (!IsWindowVisible(h)) return true;
+                var sb = new StringBuilder(256);
+                GetWindowText(h, sb, 256);
+                if (sb.ToString() == title) { result = h; return false; }
+                return true;
+            }, IntPtr.Zero);
+            return result;
+        }
+
+        public static IntPtr FindChildButton(IntPtr parent, string text) {
+            IntPtr result = IntPtr.Zero;
+            EnumChildWindows(parent, (h, l) => {
+                var sb = new StringBuilder(256);
+                GetWindowText(h, sb, 256);
+                if (sb.ToString().Replace("&", "") == text) { result = h; return false; }
+                return true;
+            }, IntPtr.Zero);
+            return result;
+        }
+
+        public static IntPtr FindChildByClass(IntPtr parent, string cls) {
+            IntPtr result = IntPtr.Zero;
+            EnumChildWindows(parent, (h, l) => {
+                var sb = new StringBuilder(256);
+                GetClassName(h, sb, 256);
+                if (sb.ToString() == cls) { result = h; return false; }
+                return true;
+            }, IntPtr.Zero);
+            return result;
+        }
+
+        [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+        public const int LB_GETCOUNT = 0x018B;
+    }
+"@ -ErrorAction SilentlyContinue
+
+    # Clean up dialogs - different paths for outstanding calls vs no calls
+    $telHwnd2 = [DialogCleanup]::FindVisibleWindow("Telephone Calls")
+    if ($telHwnd2 -ne [IntPtr]::Zero) {
+        $listBox = [DialogCleanup]::FindChildByClass($telHwnd2, "TListBox")
+        $callCount = 0
+        if ($listBox -ne [IntPtr]::Zero) {
+            $callCount = [int][DialogCleanup]::SendMessage($listBox, [DialogCleanup]::LB_GETCOUNT, [IntPtr]::Zero, [IntPtr]::Zero)
+            $log += "Outstanding calls: $callCount"
+        }
+
+        if ($callCount -gt 0) {
+            # Outstanding call - answer it, then close the Answer Call dialog
+            $answerBtn = [DialogCleanup]::FindChildButton($telHwnd2, "Answer call")
+            if ($answerBtn -ne [IntPtr]::Zero) {
+                $listBox2 = [DialogCleanup]::FindChildByClass($telHwnd2, "TListBox")
+                if ($listBox2 -ne [IntPtr]::Zero) {
+                    [DialogCleanup]::SendMessage($listBox2, 0x0186, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+                    Start-Sleep -Milliseconds 50
+                }
+                [DialogCleanup]::SendMessage($answerBtn, [DialogCleanup]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+                $log += "Clicked 'Answer call' to consume outstanding call"
+                Start-Sleep -Milliseconds 150
+
+                # Close the Answer Call dialog via physical X button click
+                Add-Type -AssemblyName UIAutomationClient -ErrorAction SilentlyContinue | Out-Null
+                Add-Type -AssemblyName UIAutomationTypes -ErrorAction SilentlyContinue | Out-Null
+                $root = [System.Windows.Automation.AutomationElement]::RootElement
+                $cond = New-Object System.Windows.Automation.PropertyCondition(
+                    [System.Windows.Automation.AutomationElement]::ClassNameProperty, "TAnswerCallForm"
+                )
+                $answerDlg = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $cond)
+                if ($null -ne $answerDlg) {
+                    $dlgHwnd = [IntPtr]$answerDlg.Current.NativeWindowHandle
+                    [WinRestore2]::ShowWindow($dlgHwnd, 9) | Out-Null
+                    [WinRestore2]::SetForegroundWindow($dlgHwnd) | Out-Null
+                    Start-Sleep -Milliseconds 100
+                    $rect = New-Object WinRestore2+RECT
+                    [WinRestore2]::GetWindowRect($dlgHwnd, [ref]$rect) | Out-Null
+                    $xBtnX = $rect.Right - 20
+                    $xBtnY = $rect.Top + 15
+                    [WinRestore2]::ClickAt($xBtnX, $xBtnY)
+                    $log += "Closed Answer Call dialog via X button"
+                    Start-Sleep -Milliseconds 100
+                }
+            }
+        } else {
+            # No outstanding calls - minimize stale TAnswerCallForm, press F6 for fresh
+            # Telephone Calls dialog, then launch ghost watcher
+
+            # Minimize the stale TAnswerCallForm
+            $answerHwnd = [IntPtr]::Zero
+            [DialogCleanup]::EnumWindows([DialogCleanup+EnumCb]{
+                param($h,$l)
+                $sb = New-Object System.Text.StringBuilder 256
+                [DialogCleanup]::GetClassName($h, $sb, 256)
+                if ($sb.ToString() -eq "TAnswerCallForm") { $script:answerHwnd = $h; return $false }
+                return $true
+            }, [IntPtr]::Zero) | Out-Null
+            if ($answerHwnd -ne [IntPtr]::Zero) {
+                [WinRestore2]::ShowWindow($answerHwnd, 6) | Out-Null
+                $log += "Minimized stale TAnswerCallForm"
+            }
+
+            # Press F6 on SimSig to close and reopen Telephone Calls (non-stale)
+            if ($simsigHwnd -ne [IntPtr]::Zero) {
+                # F6 toggles the Telephone Calls window - press twice: close stale, open fresh
+                [void][WinRestore2]::PostMessage($simsigHwnd, 0x0100, [IntPtr]0x75, [IntPtr]::Zero)
+                Start-Sleep -Milliseconds 50
+                [void][WinRestore2]::PostMessage($simsigHwnd, 0x0101, [IntPtr]0x75, [IntPtr]::Zero)
+                Start-Sleep -Milliseconds 100
+                [void][WinRestore2]::PostMessage($simsigHwnd, 0x0100, [IntPtr]0x75, [IntPtr]::Zero)
+                Start-Sleep -Milliseconds 50
+                [void][WinRestore2]::PostMessage($simsigHwnd, 0x0101, [IntPtr]0x75, [IntPtr]::Zero)
+                Start-Sleep -Milliseconds 150
+                $log += "Pressed F6 twice to reopen fresh Telephone Calls"
+            }
+
+            # Launch ghost watcher to restore TAnswerCallForm when next call appears
+            $ghostScript = Join-Path $PSScriptRoot "ghost-watcher.ps1"
+            if (Test-Path $ghostScript) {
+                Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ghostScript`"" -WindowStyle Hidden
+                $log += "Launched ghost watcher"
+            }
+        }
+
+        # Click "Place call..." then "Hang up and close" to clean up
+        # If SimSig is paused, this will pop a message box — dismiss it and skip
+        $placeBtn = [DialogCleanup]::FindChildButton($telHwnd2, "Place call...")
+        if ($placeBtn -ne [IntPtr]::Zero) {
+            [DialogCleanup]::SendMessage($placeBtn, [DialogCleanup]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+            $log += "Clicked 'Place call...'"
+            Start-Sleep -Milliseconds 150
+
+            # Check if a "paused" message box appeared — dismiss it
+            $pausedHandled = $false
+            [DialogCleanup]::EnumWindows([DialogCleanup+EnumCb]{
+                param($h,$l)
+                if (![DialogCleanup]::IsWindowVisible($h)) { return $true }
+                $sb = New-Object System.Text.StringBuilder 256
+                [DialogCleanup]::GetWindowText($h, $sb, 256)
+                $t = $sb.ToString()
+                if ($t -like "*SimSig" -and $t -ne "") {
+                    # Check if it has an OK button (message dialog, not main window)
+                    $okBtn = [DialogCleanup]::FindChildButton($h, "OK")
+                    if ($okBtn -eq [IntPtr]::Zero) { $okBtn = [DialogCleanup]::FindChildButton($h, "Ok") }
+                    if ($okBtn -ne [IntPtr]::Zero) {
+                        [DialogCleanup]::SendMessage($okBtn, [DialogCleanup]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+                        $script:pausedHandled = $true
+                        return $false
+                    }
+                }
+                return $true
+            }, [IntPtr]::Zero) | Out-Null
+
+            if ($pausedHandled) {
+                $log += "Dismissed paused dialog - skipping Place Call cleanup"
+            } else {
+                $placeDlg = [DialogCleanup]::FindVisibleWindow("Place Call")
+                if ($placeDlg -ne [IntPtr]::Zero) {
+                    $hangBtn = [DialogCleanup]::FindChildButton($placeDlg, "Hang up and close")
+                    if ($hangBtn -ne [IntPtr]::Zero) {
+                        [DialogCleanup]::SendMessage($hangBtn, [DialogCleanup]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+                        $log += "Clicked 'Hang up and close' - dialogs cleaned up"
+                    } else {
+                        $log += "Could not find 'Hang up and close' button"
+                    }
+                } else {
+                    $log += "Place Call dialog did not open"
+                }
+            }
+        } else {
+            $log += "Could not find 'Place call...' button"
+        }
+    }
+
     # Only send F6 to open TTelephoneForm if we did NOT already restore it
     if (-not $restoredTelephone) {
         $hwnd = [WinRestore2]::FindWindow("TTelephoneForm", $null)
@@ -206,7 +403,7 @@ try {
             [void][WinRestore2]::PostMessage($simsigHwnd, 0x0100, [IntPtr]0x75, [IntPtr]::Zero)
             Start-Sleep -Milliseconds 50
             [void][WinRestore2]::PostMessage($simsigHwnd, 0x0101, [IntPtr]0x75, [IntPtr]::Zero)
-            Start-Sleep -Milliseconds 500
+            Start-Sleep -Milliseconds 150
             $hwnd = [WinRestore2]::FindWindow("TTelephoneForm", $null)
             if ($hwnd -ne [IntPtr]::Zero) {
                 [void][WinRestore2]::ShowWindow($hwnd, 9)
@@ -218,6 +415,16 @@ try {
             }
         } else {
             $log += "TTelephoneForm already on-screen"
+        }
+    }
+
+    # Final cleanup: close the Telephone Calls dialog if still visible
+    $telFinal = [DialogCleanup]::FindVisibleWindow("Telephone Calls")
+    if ($telFinal -ne [IntPtr]::Zero) {
+        $closeBtn = [DialogCleanup]::FindChildButton($telFinal, "Close")
+        if ($closeBtn -ne [IntPtr]::Zero) {
+            [DialogCleanup]::SendMessage($closeBtn, [DialogCleanup]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+            $log += "Closed Telephone Calls dialog"
         }
     }
 

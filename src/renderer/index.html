@@ -297,9 +297,22 @@
           <label>Port <input type="number" id="setting-port"></label>
         </fieldset>
         <fieldset>
-          <legend>Credentials</legend>
-          <label>Username <input type="text" id="setting-username"></label>
-          <label>Password <input type="password" id="setting-password"></label>
+          <legend>Signaller</legend>
+          <label>Initials <input type="text" id="setting-initials" maxlength="4" style="width:5em;text-transform:uppercase" placeholder="e.g. FC" autocomplete="off" spellcheck="false"></label>
+          <span class="field-hint">Your commonly used SimSig initials. Pre-filled when connecting.</span>
+        </fieldset>
+        <fieldset>
+          <legend>SimSig Credentials</legend>
+          <label>Username <input type="text" id="setting-username" autocomplete="off"></label>
+          <label>Password <input type="password" id="setting-password" autocomplete="off"></label>
+        </fieldset>
+        <fieldset>
+          <legend>SimSig Audio</legend>
+          <div class="radio-group">
+            <div><input type="radio" name="simsig-audio" id="setting-simsig-keep" value="keep"> <span>Keep SimSig sounds</span></div>
+            <div><input type="radio" name="simsig-audio" id="setting-simsig-mute" value="mute"> <span>Mute all SimSig audio</span></div>
+          </div>
+          <span class="field-hint">If keeping sounds, untick 'Play Sound' for Train Waiting at Red Signal and General Telephone Message in SimSig Options (F3) &rarr; Messages</span>
         </fieldset>
         <fieldset>
           <legend>Audio Devices</legend>
@@ -328,34 +341,18 @@
           <legend>Text-to-Speech</legend>
           <label>Provider
             <select id="setting-tts-provider">
-              <option value="edge">Edge TTS (Free)</option>
-              <option value="elevenlabs">ElevenLabs (Premium)</option>
-              <option value="windows">Windows TTS (Offline)</option>
+              <option value="chatterbox">Chatterbox AI — Best Quality</option>
+              <option value="edge">Edge TTS — Good Quality</option>
+              <option value="windows">Windows TTS — Basic Quality</option>
             </select>
           </label>
-          <label id="tts-apikey-row">API Key
-            <span class="input-with-info">
-              <input type="password" id="setting-tts-apikey" placeholder="Enter ElevenLabs API key" disabled>
-              <span class="info-icon" id="tts-apikey-info">i
-                <span class="info-tooltip">
-                  <a href="https://elevenlabs.io" target="_blank">elevenlabs.io</a>
-                  <ol>
-                    <li>Create account</li>
-                    <li>Go to Dashboard</li>
-                    <li>Create API key (Edit)</li>
-                    <li>Don't restrict key</li>
-                    <li>Copy Key ID</li>
-                  </ol>
-                </span>
-              </span>
-            </span>
-          </label>
-          <div id="tts-credit-status" class="hidden"></div>
+          <input type="hidden" id="setting-tts-chatterbox-url" value="http://localhost:8099">
+          <div id="tts-chatterbox-status" class="hidden"></div>
         </fieldset>
         <fieldset>
           <legend>Browser Access</legend>
           <label><input type="checkbox" id="setting-web-enabled"> Enable browser access</label>
-          <label>Port <input type="number" id="setting-web-port" value="50507" min="1024" max="65535"></label>
+          <label>Port <input type="number" id="setting-web-port" value="3000" min="1024" max="65535"></label>
         </fieldset>
         <fieldset>
           <legend>Keybinds</legend>
@@ -391,8 +388,8 @@
     <div class="initials-content">
       <div class="initials-icon">📡</div>
       <h3>Session Initials</h3>
-      <p>Enter your initials used to start/join this session.<br><span class="initials-hint">Used to identify your panel for telephone calling.</span></p>
-      <input type="text" id="initials-input" maxlength="4" placeholder="JO" autocomplete="off" spellcheck="false" />
+      <p>Enter your initials (1-4 characters) used to start/join this session.<br><span class="initials-hint">Used to identify your panel for telephone calling.</span></p>
+      <input type="text" id="initials-input" maxlength="4" minlength="1" autocomplete="off" spellcheck="false" required style="width:3em;text-transform:uppercase" />
       <div class="confirm-actions">
         <button id="initials-ok" class="initials-connect-btn">Connect</button>
         <button id="initials-cancel">Cancel</button>
@@ -417,6 +414,7 @@
       <h3>Simulate Incoming Call</h3>
       <div class="test-call-buttons">
         <button class="test-call-btn" data-type="red_signal">Driver at Red Signal</button>
+        <button class="test-call-btn" data-type="red_signal_early">Red Signal (Early)</button>
         <button class="test-call-btn" data-type="delay">Driver Delayed</button>
         <button class="test-call-btn" data-type="csd">CSD Entry Permission</button>
         <button class="test-call-btn" data-type="csd_entry">Shunter Entry Point</button>

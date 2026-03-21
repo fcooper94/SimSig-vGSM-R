@@ -425,19 +425,19 @@ input, select, button, label, a {
   letter-spacing: 0.05em;
 }
 
-.badge-free {
+.badge-green {
   background: rgba(34, 197, 94, 0.15);
-  color: var(--setup-success);
+  color: #22c55e;
 }
 
-.badge-premium {
+.badge-amber {
   background: rgba(245, 158, 11, 0.15);
-  color: var(--setup-warning);
+  color: #f59e0b;
 }
 
-.badge-offline {
-  background: rgba(119, 119, 119, 0.15);
-  color: var(--setup-text-dim);
+.badge-red {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
 }
 
 /* API key section */
@@ -799,6 +799,24 @@ input, select, button, label, a {
 }
 
 /* Warning note */
+.setup-validation-msg {
+  color: #ef4444;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.setup-input.invalid {
+  border-color: #ef4444;
+}
+
+.setup-privacy-note {
+  font-size: 11px;
+  color: #888;
+  text-align: center;
+  margin-top: 16px;
+  line-height: 1.5;
+}
+
 .setup-warning {
   background: rgba(245, 158, 11, 0.08);
   border: 1px solid rgba(245, 158, 11, 0.2);

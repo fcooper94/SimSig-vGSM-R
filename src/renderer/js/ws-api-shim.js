@@ -346,7 +346,7 @@
     tts: {
       getVoices: () => invoke('tts:get-voices'),
       speak: (text, voiceId) => invoke('tts:speak', text, voiceId),
-      checkCredits: (apiKey) => invoke('tts:check-credits', apiKey),
+      checkChatterbox: (url) => invoke('tts:check-chatterbox', url),
     },
 
     ptt: {

@@ -587,7 +587,6 @@ const PhoneCallsUI = {
     'Liverpool Street Station': 'Anglia Control',
     'Llangollen': 'Wales Control',
     'London Bridge ASC': 'Kent Control',
-    'London Bridge ASC Mini Sim': 'Kent Control',
     'LTS': 'Anglia Control',
     'LUL Victoria line': 'Victoria Line Service Control',
     'Maidstone East SB': 'Kent Control',
@@ -1060,6 +1059,7 @@ const PhoneCallsUI = {
     { pattern: /(?:15|fifteen|one[\s-]*five|1[\s-]*5)\s*min/, fragment: '15 minute' },
     { pattern: /(?<!\d)(?:0?2|two|to)\s*min/, fragment: '2 minute' },
     { pattern: /(?<!\d)(?:0?5|five)\s*min/, fragment: '5 minute' },
+    { pattern: /booked\s*time|running\s*early|hold.*until/, fragment: 'booked' },
     { pattern: /wait/, fragment: '2 minute' },  // bare "wait" defaults to 2 min
     { pattern: /pass.*unlit|unlit.*pass/, fragment: 'pass unlit signal' },
     { pattern: /authoris[ez].*pass|pass.*signal|pass\s*at\s*(?:stop|danger)|let\s*him\s*pass|pass\s*it/, fragment: 'authorise driver to pass' },
@@ -1114,6 +1114,11 @@ const PhoneCallsUI = {
       train: '1L33', title: 'Answer call from Exeter Signaller',
       message: 'I have 1L33 waiting at Honiton',
       replies: ['Ok', 'Wait 5 minutes', 'Wait 15 minutes'],
+    },
+    red_signal_early: {
+      train: '4Q08', title: 'Answer call from Train 4Q08 (Panel 4)',
+      message: 'Driver of 4Q08 waiting at red signal VC833',
+      replies: ['Wait 2 minutes for signal to show proceed before phoning back', 'Wait 5 minutes for signal to show proceed before phoning back', 'Wait 15 minutes for signal to show proceed before phoning back', 'Authorise driver to pass signal at stop', 'Ask driver to examine the line', 'Ask driver to pass signal at stop and examine the line', 'Wait for booked 05:07 for signal to show proceed before phoning back'],
     },
     early_run: {
       train: '4022', title: 'Answer call from Aynho Signaller',
@@ -1216,58 +1221,35 @@ const PhoneCallsUI = {
     return bestScore >= 1 ? bestIdx : -1;
   },
 
-  // Wait for PTT press, record audio, then transcribe using the configured provider:
-  //   ElevenLabs → record PCM, send to main process → ElevenLabs Scribe API
-  //   Edge/Windows → record via Vosk in-browser (WASM, no network needed)
+  // Wait for PTT press, record audio, then transcribe via Whisper (Chatterbox server)
   async recordAndTranscribe() {
     try {
-      // Wait for PTT press to start
       await this.waitForPTTPress();
-
-      // Mute background noise during recording for cleaner audio
       if (this.bgGain) this.bgGain.gain.value = 0;
 
-      const settings = await window.simsigAPI.settings.getAll();
-      const provider = settings.tts?.provider || 'edge';
+      console.log('[STT] PTT pressed — recording audio...');
+      const audioData = await this._recordPCMWhilePTT();
+      if (this.bgGain) this.bgGain.gain.value = 0.5;
 
-      if (provider === 'elevenlabs') {
-        // --- ElevenLabs Scribe: record PCM, send to main process ---
-        console.log('[STT] PTT pressed — recording audio for ElevenLabs Scribe...');
-        const audioData = await this._recordPCMWhilePTT();
-        if (this.bgGain) this.bgGain.gain.value = 0.5;
-
-        if (!audioData || audioData.length === 0) {
-          console.log('[STT] No audio recorded');
-          return '';
-        }
-
-        console.log(`[STT] Sending ${audioData.length} samples to Scribe...`);
-        // Send as regular array (Electron IPC structured clone handles it)
-        const result = await window.simsigAPI.stt.transcribe([...audioData]);
-
-        if (result && typeof result === 'object' && result.error) {
-          console.error('[STT] Scribe error:', result.error);
-          return '';
-        }
-        console.log(`[STT] Scribe result: "${result}"`);
-        return result || '';
-      } else {
-        // --- Vosk: in-browser WASM recognition ---
-        console.log('[STT] PTT pressed — using Vosk in-browser STT...');
-        try {
-          const isPTTActive = () => typeof PTTUI !== 'undefined' && PTTUI.isActive;
-          const result = await VoskSTT.transcribe(isPTTActive);
-          if (this.bgGain) this.bgGain.gain.value = 0.5;
-          console.log(`[STT] Vosk result: "${result}"`);
-          return result || '';
-        } catch (voskErr) {
-          console.error('[STT] Vosk error:', voskErr.message);
-          if (this.bgGain) this.bgGain.gain.value = 0.5;
-          return '';
-        }
+      if (!audioData || audioData.length === 0) {
+        console.log('[STT] No audio recorded');
+        return '';
       }
+
+      // Send to Whisper via main process
+      console.log(`[STT] Sending ${audioData.length} samples to Whisper...`);
+      const result = await window.simsigAPI.stt.transcribe([...audioData]);
+
+      if (result && typeof result === 'object' && result.error) {
+        console.error('[STT] Whisper error:', result.error);
+        return '';
+      }
+      const text = (typeof result === 'string' ? result : result?.text || '').trim();
+      console.log(`[STT] Whisper result: "${text}"`);
+      return text;
     } catch (err) {
       if (this.bgGain) this.bgGain.gain.value = 0.5;
+      if (err.message === 'reply_clicked' || err.message === 'use_text') throw err;
       console.error('[STT] Recording error:', err);
       return '';
     }
@@ -1326,11 +1308,13 @@ const PhoneCallsUI = {
     return new Promise((resolve, reject) => {
       if (this._replyClicked || (this._outgoingCall && this._outgoingReplyProcessing)) { reject(new Error('reply_clicked')); return; }
       if (this._useTextInput) { reject(new Error('use_text')); return; }
-      if (typeof PTTUI !== 'undefined' && PTTUI.isActive) { resolve(); return; }
+      if (typeof PTTUI !== 'undefined' && PTTUI.isActive) { console.log('[PTT] Already active — resolving immediately'); resolve(); return; }
+      console.log(`[PTT] Waiting for PTT press... (keybind=${typeof PTTUI !== 'undefined' ? PTTUI.keybind : 'N/A'}, inCall=${this.inCall})`);
       const check = () => {
         if (this._replyClicked || (this._outgoingCall && this._outgoingReplyProcessing)) { reject(new Error('reply_clicked')); return; }
         if (this._useTextInput) { reject(new Error('use_text')); return; }
         if (typeof PTTUI !== 'undefined' && PTTUI.isActive) {
+          console.log('[PTT] PTT detected!');
           resolve();
         } else {
           requestAnimationFrame(check);
@@ -1390,7 +1374,7 @@ const PhoneCallsUI = {
 
     // Technician fixed report — failure resolved
     if (/(?:signal|points|track\s*section)\s*failure.*fixed/i.test(raw)) {
-      return 'Good news. Thanks for your help. I shall commence normal running';
+      return 'Good news. Thanks for your help. I shall commence normal working';
     }
 
     // Third-party calls (token hut, ground frame, etc.) — talk about the driver, not to them
@@ -1511,7 +1495,7 @@ const PhoneCallsUI = {
     // "Permission granted for 5A20 to enter"
     const permMatch = raw.match(/permission\s+granted\s+for\s+(\w+)\s+to\s+enter/i);
     if (permMatch) {
-      if (this.isShunterCall) return `Hello Shunter, ${permMatch[1]} has permission to enter`;
+      if (this.isShunterCall) return `Ok, ${permMatch[1]} has permission to enter. Thank you Signaller`;
       return `Permission granted, ${permMatch[1]} can enter`;
     }
     // "No, let 4022 run early" — allow early running train to continue
@@ -1646,6 +1630,11 @@ const PhoneCallsUI = {
         return `Understood, I shall bypass ${bp[1]} and continue with the remainder of the timetable${trainRef}`;
       }
     }
+    // Wait for booked time — train is early, hold at signal until booked departure
+    const bookedMatch = lower.match(/wait\s+(?:for\s+)?booked\s+(\d{2}:\d{2})/);
+    if (bookedMatch) {
+      return `Ok, I will wait here at${sigRef} until booked time and call you back if no change of aspect`;
+    }
     // Wait N minutes — no formal readback required, just acknowledge
     const waitMatch = lower.match(/wait\s+(\d+)\s*min/);
     if (waitMatch) {
@@ -1675,7 +1664,7 @@ const PhoneCallsUI = {
     }
     // Permission granted to enter
     if (/permission\s+granted/i.test(lower) || /has\s+permission\s+to\s+enter/i.test(lower)) {
-      if (this.isShunterCall) return `Ok, I shall instruct ${hc} that they have permission to enter`;
+      if (this.isShunterCall) return `Ok, ${hc} has permission to enter. I will let them know`;
       return `Permission granted, ${hc} can enter`;
     }
     // Ready to depart — driver says goodbye and ends call
@@ -1735,12 +1724,8 @@ const PhoneCallsUI = {
     this.messages = this.messages.filter((m) => m.type !== 'loading');
 
     if (skipReadback) {
-      // No readback needed — driver acknowledges, then we sign off
-      const goodbye = 'Ok, thanks.';
-      this.addMessage({ type: 'driver', caller: this.shortenCaller(caller), text: goodbye });
-      await this.speakAsDriver(goodbye, caller);
-      if (myCallId !== this._callSeq) return;
-      this.addMessage({ type: 'signaller', text: 'Signaller Out' });
+      // No readback needed — sign off directly
+      this.addMessage({ type: 'greeting', text: 'Signaller Out' });
       this._hangUpLocked = false;
       this.hangUp();
       return;
@@ -1770,15 +1755,17 @@ const PhoneCallsUI = {
       await this.speakLocal(this.phoneticize(confirmation), caller);
       if (myCallId !== this._callSeq) return;
     }
+    // After driver readback, show sign-off prompt
     this._hangUpLocked = false;
-    await this.showHangUpInChat(myCallId);
+    this.addMessage({ type: 'greeting', text: 'Signaller Out' });
+    this.hangUp();
   },
 
-  // Send "Ok" reply to SimSig, show "Ok, Thanks", driver says "Ok, Bye", then hang up
+  // Send "Ok" reply to SimSig, show "Ok, Thanks", then sign off
   async sendOkAndHangUp(caller) {
     const myCallId = this._callSeq;
     this._replyClicked = true;
-    this._hangUpLocked = true; // prevent hangup keybind/click during reply flow
+    this._hangUpLocked = true;
     this.addMessage({ type: 'loading', text: 'Replying...' });
     await window.simsigAPI.phone.replyCall(0, this.currentHeadCode);
     if (myCallId !== this._callSeq) return;
@@ -1786,13 +1773,7 @@ const PhoneCallsUI = {
     this.messages = this.messages.filter((m) => m.type !== 'loading');
     const okText = this.isSignallerCall ? 'Ok, Thanks. I will take a look now' : 'Ok, Thanks';
     this.addMessage({ type: 'signaller', text: okText });
-    this.renderChat();
-    // Caller acknowledges, then we sign off
-    const ack = this.isSignallerCall ? 'Ok, Thanks' : 'Ok';
-    this.addMessage({ type: 'driver', caller: this.shortenCaller(caller), text: ack });
-    await this.speakAsDriver(ack, caller);
-    if (myCallId !== this._callSeq) return;
-    this.addMessage({ type: 'signaller', text: 'Signaller Out' });
+    this.addMessage({ type: 'greeting', text: 'Signaller Out' });
     this._hangUpLocked = false;
     this.hangUp();
   },
@@ -1879,24 +1860,26 @@ const PhoneCallsUI = {
       }
       if (this._replyClicked || callId !== this._callSeq) return;
 
+      // Ok-only reply: any PTT press+release sends it (no transcript needed)
+      if (okOnly) {
+        await this.sendOkAndHangUp(caller);
+        return;
+      }
+
       if (transcript) {
         const replyIndex = this.matchReply(transcript, replies);
         if (replyIndex >= 0) {
-          if (okOnly) {
-            await this.sendOkAndHangUp(caller);
-            return;
-          }
           await this.sendReply(replyIndex, replies, caller);
           return;
         }
+        // Transcript didn't match any reply — ask again
+        if (callId !== this._callSeq) return;
+        const sorry = "Can you say again please";
+        this.addMessage({ type: 'driver', caller, text: sorry });
+        await this.speakAsDriver(sorry, caller);
+        if (callId !== this._callSeq) return;
       }
-
-      // Not understood
-      if (callId !== this._callSeq) return;
-      const sorry = "Can you say again please";
-      this.addMessage({ type: 'driver', caller, text: sorry });
-      await this.speakAsDriver(sorry, caller);
-      if (callId !== this._callSeq) return;
+      // Empty transcript (STT failed) — loop silently, keep click handlers active
     }
 
     if (this._replyClicked || callId !== this._callSeq) return;
@@ -1915,33 +1898,12 @@ const PhoneCallsUI = {
       this.addMessage({ type: 'greeting', text: 'Hold PTT to sign off...' });
 
       try {
-        const transcript = await this.recordAndTranscribe();
+        await this.recordAndTranscribe();
         if (!this.inCall || callId !== this._callSeq) return;
-        if (transcript) {
-          // User spoke — show "Signaller Out" as the signaller's sign-off
-          this.addMessage({ type: 'signaller', text: 'Signaller Out' });
-          // Caller acknowledges and hangs up
-          const voiceKey = this._activeCallVoiceKey || this._activeCallTrain || '';
-          const goodbyes = this.isSignallerCall ? [
-            'Ok, Thanks. Bye.',
-            'Right, thanks for letting me know. Bye.',
-            'Ok, cheers. Bye.',
-            'Thanks. Bye.',
-          ] : [
-            'Right, cheers, bye.',
-            'Ta, bye now.',
-            'Cheers, bye bye.',
-            'Nice one, ta, bye.',
-            'Alright, cheers, bye.',
-            'Right oh, cheers, bye.',
-          ];
-          const reply = goodbyes[Math.floor(Math.random() * goodbyes.length)];
-          this.addMessage({ type: 'driver', caller: this.shortenCaller(voiceKey), text: reply });
-          await this.speakAsDriver(reply, voiceKey);
-          if (callId !== this._callSeq) return;
-          this.hangUp();
-          return;
-        }
+        // PTT was pressed and released — signaller signs off, then hang up
+        this.addMessage({ type: 'signaller', text: 'Signaller Out' });
+        this.hangUp();
+        return;
       } catch (e) {
         // PTT cancelled or error — loop back and try again
       }
@@ -2272,7 +2234,7 @@ const PhoneCallsUI = {
       this.stopBgNoise();
       this.startBgNoise();
       const failLower = fixedReport.type.toLowerCase();
-      spokenMsg = `Hello Signaller, this is the MOM down at the ${failLower} in the ${fixedReport.location} area. Good news, the team have been able to fix the issue and you may resume normal running`;
+      spokenMsg = `Hello Signaller, this is the MOM down at the ${failLower} in the ${fixedReport.location} area. Good news, the team have been able to fix the issue and you may resume normal working`;
       displayMsg = spokenMsg;
     } else if (isExamineResult && this.currentHeadCode) {
       // Examine line result — driver is moving, use train running background
@@ -3635,11 +3597,15 @@ const PhoneCallsUI = {
         const waitMins = [];
         const callBackIndices = [];
         const callBackMins = [];
+        let bookedReply = null;
         const otherReplies = [];
         replies.forEach((r, i) => {
           const wm = r.match(/wait\s+(\d+)\s*min/i);
           const cbm = r.match(/call\s*back\s+in\s+(\d+)\s*min/i);
-          if (wm) {
+          const bm = r.match(/wait\s+(?:for\s+)?booked\s+(\d{2}:\d{2})/i);
+          if (bm) {
+            bookedReply = { index: i, time: bm[1] };
+          } else if (wm) {
             waitIndices.push(i);
             waitMins.push(wm[1]);
           } else if (cbm) {
@@ -3663,6 +3629,9 @@ const PhoneCallsUI = {
             const waitWho = this.isShunterCall ? 'Shunter' : 'Driver';
             items.push({ html: `${waitWho}, Correct. Remain at${this.escapeHtml(sigRef)} and wait ${timeParts} minutes before phoning back.`, replyIndex: -1 });
           }
+        }
+        if (bookedReply) {
+          items.push({ html: `Driver, as you are running early, wait at${this.escapeHtml(sigRef)} until your booked time of ${bookedReply.time}, before calling back`, replyIndex: bookedReply.index });
         }
         if (callBackMins.length > 0) {
           const timeParts = callBackMins.map((m) =>

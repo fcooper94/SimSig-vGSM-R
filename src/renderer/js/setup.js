@@ -5,10 +5,12 @@ const SetupWizard = {
 
   steps: [
     { id: 'welcome', title: 'Welcome' },
+    { id: 'simsig-audio', title: 'SimSig Audio' },
     { id: 'port-guide', title: 'Port Forwarding' },
+    { id: 'initials', title: 'Your Initials' },
     { id: 'connection', title: 'SimSig Credentials' },
     { id: 'tts', title: 'Text-to-Speech' },
-    { id: 'browser', title: 'Browser Access' },
+    // { id: 'browser', title: 'Browser Access' },  // Hidden from setup — available in Settings after first launch
     { id: 'complete', title: 'Complete' },
   ],
 
@@ -27,9 +29,8 @@ const SetupWizard = {
         username: all.credentials?.username || '',
         password: all.credentials?.password || '',
         ttsProvider: all.tts?.provider || 'edge',
-        elevenLabsApiKey: all.tts?.elevenLabsApiKey || '',
         webEnabled: all.web?.enabled || false,
-        webPort: String(all.web?.port || '50507'),
+        webPort: String(all.web?.port || '3000'),
       };
     }
 
@@ -131,16 +132,24 @@ const SetupWizard = {
         s.password = this.val('setup-password') || '';
         break;
       }
+      case 'simsig-audio': {
+        const selected = this.container.querySelector('.provider-option.selected');
+        s.muteSimsig = selected ? selected.dataset.option === 'mute' : true;
+        break;
+      }
+      case 'initials': {
+        s.initials = (this.val('setup-initials') || '').toUpperCase();
+        break;
+      }
       case 'tts': {
         const selected = this.container.querySelector('.provider-option.selected');
         s.ttsProvider = selected ? selected.dataset.provider : 'edge';
-        s.elevenLabsApiKey = this.val('setup-api-key') || '';
         break;
       }
       case 'browser': {
         const checkbox = document.getElementById('setup-web-enabled');
         s.webEnabled = checkbox ? checkbox.checked : false;
-        s.webPort = this.val('setup-web-port') || '50507';
+        s.webPort = this.val('setup-web-port') || '3000';
         break;
       }
     }
@@ -149,13 +158,35 @@ const SetupWizard = {
   validateCurrentStep() {
     const stepId = this.steps[this.currentStep].id;
 
+    if (stepId === 'initials') {
+      const initials = (this.val('setup-initials') || '').trim();
+      if (!initials) {
+        this._showValidationError('setup-initials', 'Please enter your initials (1-4 characters)');
+        return false;
+      }
+    }
+
+    if (stepId === 'connection') {
+      const username = (this.val('setup-username') || '').trim();
+      const password = (this.val('setup-password') || '').trim();
+      if (!username && !password) {
+        this._showValidationError('setup-username', 'Please enter your SimSig username and password');
+        return false;
+      }
+      if (!username) {
+        this._showValidationError('setup-username', 'Please enter your SimSig username');
+        return false;
+      }
+      if (!password) {
+        this._showValidationError('setup-password', 'Please enter your SimSig password');
+        return false;
+      }
+    }
+
     if (stepId === 'tts') {
       const selected = this.container.querySelector('.provider-option.selected');
       const provider = selected ? selected.dataset.provider : 'edge';
-      if (provider === 'elevenlabs' && !this.val('setup-api-key')) {
-        this.showApiKeyWarning();
-        return false;
-      }
+      // No validation needed for Chatterbox (server check happens at runtime)
     }
 
     if (stepId === 'browser') {
@@ -183,15 +214,37 @@ const SetupWizard = {
     return el ? el.value.trim() : '';
   },
 
+  _showValidationError(inputId, message) {
+    const input = document.getElementById(inputId);
+    if (input) {
+      input.focus();
+      input.classList.add('invalid');
+      input.addEventListener('input', () => {
+        input.classList.remove('invalid');
+        const err = input.parentElement.querySelector('.setup-validation-msg');
+        if (err) err.remove();
+      }, { once: true });
+    }
+    // Remove any existing error message
+    const existing = input?.parentElement?.querySelector('.setup-validation-msg');
+    if (existing) existing.remove();
+    // Add error message below the input
+    const msg = document.createElement('div');
+    msg.className = 'setup-validation-msg';
+    msg.textContent = message;
+    if (input?.parentElement) input.parentElement.appendChild(msg);
+  },
+
   async finish() {
     const s = this.collectedSettings;
     const payload = {
+      'signaller.initials': s.initials || '',
+      'audio.muteSimsig': s.muteSimsig === true,
       'credentials.username': s.username || '',
       'credentials.password': s.password || '',
-      'tts.provider': s.ttsProvider || 'edge',
-      'tts.elevenLabsApiKey': s.elevenLabsApiKey || '',
+      'tts.provider': s.ttsProvider || 'chatterbox',
       'web.enabled': !!s.webEnabled,
-      'web.port': parseInt(s.webPort, 10) || 50507,
+      'web.port': parseInt(s.webPort, 10) || 3000,
     };
     await window.setupAPI.complete(payload);
   },
@@ -217,43 +270,51 @@ const SetupWizard = {
       btn.addEventListener('click', () => this.goToStep(2));
     });
 
+    this.container.querySelectorAll('[data-action="skip-credentials"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.collectCurrentStepData();
+        if (this.currentStep < this.steps.length - 1) {
+          this.direction = 'forward';
+          this.currentStep++;
+          this.renderStep(this.currentStep);
+          this.updateProgress();
+        }
+      });
+    });
+
     // Step-specific bindings
+    if (stepId === 'simsig-audio') {
+      const options = this.container.querySelectorAll('.provider-option');
+      options.forEach((opt) => {
+        opt.addEventListener('click', () => {
+          options.forEach((o) => o.classList.remove('selected'));
+          opt.classList.add('selected');
+          opt.querySelector('input[type="radio"]').checked = true;
+        });
+      });
+    }
+    if (stepId === 'initials') {
+      const input = document.getElementById('setup-initials');
+      if (input) {
+        input.addEventListener('input', () => { input.value = input.value.toUpperCase(); });
+        input.focus();
+      }
+    }
     if (stepId === 'tts') {
       this.bindTTSEvents();
-      this.bindElevenLabsModal();
     }
     if (stepId === 'browser') this.bindBrowserEvents();
   },
 
   bindTTSEvents() {
     const options = this.container.querySelectorAll('.provider-option');
-    const apiSection = document.getElementById('api-key-section');
-
     options.forEach((opt) => {
       opt.addEventListener('click', () => {
         options.forEach((o) => o.classList.remove('selected'));
         opt.classList.add('selected');
         opt.querySelector('input[type="radio"]').checked = true;
-
-        if (apiSection) {
-          if (opt.dataset.provider === 'elevenlabs') {
-            apiSection.classList.add('visible');
-          } else {
-            apiSection.classList.remove('visible');
-          }
-        }
       });
     });
-
-    // API key credit check
-    const apiKeyInput = document.getElementById('setup-api-key');
-    if (apiKeyInput) {
-      let timer = null;
-      apiKeyInput.addEventListener('input', () => {
-        clearTimeout(timer);
-        timer = setTimeout(() => this.checkCredits(), 600);
-      });
-    }
   },
 
   bindBrowserEvents() {
@@ -266,147 +327,6 @@ const SetupWizard = {
         if (warning) warning.classList.toggle('visible', toggle.checked);
       });
     }
-  },
-
-  async checkCredits() {
-    const status = document.getElementById('credit-status');
-    const apiKey = this.val('setup-api-key');
-    if (!status) return;
-
-    if (!apiKey) {
-      status.className = 'credit-status status-error';
-      status.textContent = 'Enter an API key to use ElevenLabs voices';
-      return;
-    }
-
-    status.className = 'credit-status status-loading';
-    status.textContent = 'Checking credits...';
-
-    const result = await window.setupAPI.tts.checkCredits(apiKey);
-    if (result.error) {
-      status.className = 'credit-status status-error';
-      status.textContent = result.error === 'Invalid API key'
-        ? 'Invalid API key'
-        : `Error: ${result.error}`;
-    } else if (result.remaining <= 0) {
-      status.className = 'credit-status status-error';
-      status.textContent = `No credits remaining (${result.total.toLocaleString()} used)`;
-    } else if (result.remaining < 1000) {
-      status.className = 'credit-status status-low';
-      status.textContent = `Low: ${result.remaining.toLocaleString()} / ${result.total.toLocaleString()} chars`;
-    } else {
-      status.className = 'credit-status status-ok';
-      status.textContent = `${result.remaining.toLocaleString()} / ${result.total.toLocaleString()} chars remaining`;
-    }
-  },
-
-  bindElevenLabsModal() {
-    const link = document.getElementById('elevenlabs-setup-link');
-    if (!link) return;
-
-    link.addEventListener('click', (e) => {
-      e.stopPropagation(); // Don't trigger provider selection
-      this.showElevenLabsModal();
-    });
-  },
-
-  showApiKeyWarning() {
-    const overlay = document.createElement('div');
-    overlay.className = 'setup-modal-overlay';
-    overlay.innerHTML = `
-      <div class="setup-modal" style="text-align:center">
-        <div class="modal-title">API Key Required</div>
-        <div class="modal-subtitle">
-          ElevenLabs requires an API key to work.<br>
-          Enter one now, or add it later.
-        </div>
-        <div class="btn-row center" style="gap:10px;margin-top:20px">
-          <button class="btn-primary" id="apikey-warn-enter">Enter Now</button>
-          <button class="btn-secondary" id="apikey-warn-later">Add Later</button>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(overlay);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => overlay.classList.add('visible'));
-    });
-
-    const close = () => {
-      overlay.classList.remove('visible');
-      setTimeout(() => overlay.remove(), 200);
-    };
-
-    overlay.querySelector('#apikey-warn-enter').addEventListener('click', () => {
-      close();
-      const input = document.getElementById('setup-api-key');
-      if (input) input.focus();
-    });
-
-    overlay.querySelector('#apikey-warn-later').addEventListener('click', () => {
-      close();
-      // Fall back to Edge TTS and proceed
-      const edgeOption = this.container.querySelector('.provider-option[data-provider="edge"]');
-      if (edgeOption) edgeOption.click();
-      this.collectedSettings.ttsProvider = 'edge';
-      this.collectedSettings.elevenLabsApiKey = '';
-      this.nextStep();
-    });
-  },
-
-  showElevenLabsModal() {
-    const overlay = document.createElement('div');
-    overlay.className = 'setup-modal-overlay';
-    overlay.innerHTML = `
-      <div class="setup-modal">
-        <div class="modal-title">ElevenLabs Setup</div>
-        <div class="modal-subtitle">Follow these steps to get your free API key.</div>
-        <ol class="modal-steps">
-          <li>
-            <span class="modal-step-num">1</span>
-            <span>Go to <strong style="color:#fff">elevenlabs.io</strong> and click <strong style="color:#fff">Sign Up</strong>. You can register with Google or create an account with your email.</span>
-          </li>
-          <li>
-            <span class="modal-step-num">2</span>
-            <span>Once logged in, click your profile icon in the bottom-left corner and select <strong style="color:#fff">API Keys</strong> from the menu.</span>
-          </li>
-          <li>
-            <span class="modal-step-num">3</span>
-            <span>Click <strong style="color:#fff">Create API Key</strong>, give it a name (e.g. "vGSM-R"), and copy the key.</span>
-          </li>
-          <li>
-            <span class="modal-step-num">4</span>
-            <span>Paste the API key into the field on this page and you're all set.</span>
-          </li>
-        </ol>
-        <div class="modal-note">
-          <strong>Free tier:</strong> ElevenLabs gives you <strong>10,000 characters per month</strong> for free.
-          A typical driver message is around 50–80 characters, so you'll get roughly
-          <strong>125–200 messages per month</strong> at no cost. For most SimSig sessions
-          that's plenty — a busy 2–3 hour session might use 30–60 messages. You'd likely get
-          through several full sessions before hitting the limit. If you need more, paid plans
-          start at around $5/month for 30,000 characters.
-        </div>
-        <div class="btn-row center">
-          <button class="btn-primary" id="modal-close-btn">Got it</button>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(overlay);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => overlay.classList.add('visible'));
-    });
-
-    const close = () => {
-      overlay.classList.remove('visible');
-      setTimeout(() => overlay.remove(), 200);
-    };
-
-    overlay.querySelector('#modal-close-btn').addEventListener('click', close);
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) close();
-    });
   },
 
   // === Step Renderers ===
@@ -439,12 +359,89 @@ const SetupWizard = {
     `;
   },
 
+  render_simsig_audio() {
+    const s = this.collectedSettings;
+    const muteAll = s.muteSimsig === true; // default false (keep sounds)
+    return `
+        <div class="step-title">SimSig Audio</div>
+        <div class="step-subtitle">
+          vGSM-R provides its own audio for incoming calls and train alerts.
+          Choose how to handle SimSig's built-in sounds:
+        </div>
+        <div class="provider-options">
+          <div class="provider-option has-ribbon ${!muteAll ? 'selected' : ''}" data-option="keep">
+            <div class="recommended-ribbon">Best</div>
+            <input type="radio" name="simsig-audio" value="keep" ${!muteAll ? 'checked' : ''}>
+            <div class="provider-radio"></div>
+            <div class="provider-info">
+              <div class="provider-name">Keep SimSig Sounds</div>
+              <div class="provider-desc" style="line-height:1.8">
+                Keep SimSig audio enabled, but untick <strong>Play Sound</strong> for:<br><br>
+                &bull; <strong>Train Waiting at Red Signal</strong><br>
+                &bull; <strong>General Telephone Message</strong><br><br>
+                <span style="color:#777;font-size:11px">Found in SimSig &rarr; Options (F3) &rarr; Messages tab</span>
+              </div>
+            </div>
+          </div>
+          <div class="provider-option ${muteAll ? 'selected' : ''}" data-option="mute">
+            <input type="radio" name="simsig-audio" value="mute" ${muteAll ? 'checked' : ''}>
+            <div class="provider-radio"></div>
+            <div class="provider-info">
+              <div class="provider-name">Mute All SimSig Audio</div>
+              <div class="provider-desc">Automatically mute all SimSig sounds. vGSM-R becomes the sole source for call notifications and train alerts. No manual setup needed.</div>
+            </div>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn-secondary" data-action="prev">Back</button>
+          <button class="btn-primary" data-action="next">Next</button>
+        </div>
+    `;
+  },
+
+  render_simsig_settings() {
+    return `
+        <div class="step-title">SimSig Settings</div>
+        <div class="step-subtitle">
+          vGSM-R handles telephone calls and train alerts for you. To avoid duplicate sounds,
+          please disable the following in SimSig:
+        </div>
+        <ol class="guide-steps">
+          <li>
+            <span class="guide-step-num">1</span>
+            <span>In SimSig, press <strong style="color:#fff">F3</strong> to open <strong style="color:#fff">Options</strong></span>
+          </li>
+          <li>
+            <span class="guide-step-num">2</span>
+            <span>Go to the <strong style="color:#fff">Messages</strong> tab</span>
+          </li>
+          <li>
+            <span class="guide-step-num">3</span>
+            <span>Remove the sound for <strong style="color:#fff">Train Waiting at Red Signal</strong></span>
+          </li>
+          <li>
+            <span class="guide-step-num">4</span>
+            <span>Remove the sound for <strong style="color:#fff">General Telephone Message</strong></span>
+          </li>
+        </ol>
+        <div class="setup-privacy-note">
+          These sounds are replaced by vGSM-R's telephone ringing and alert system.
+          You can restore them in SimSig at any time if you stop using vGSM-R.
+        </div>
+        <div class="btn-row center">
+          <button class="btn-primary" data-action="next">Ok, I understand</button>
+        </div>
+    `;
+  },
+
   render_port_guide() {
     return `
         <div class="step-title">Port Forwarding</div>
         <div class="step-subtitle">
-          vGSM-R needs to connect to SimSig's gateway. You'll need to set up port forwarding
-          on your router so the connection can reach the SimSig host.
+          This step is only needed if you are <strong>hosting a multiplayer session</strong> and other players
+          need to connect to your SimSig gateway over the internet.<br><br>
+          If you are playing <strong>singleplayer</strong> or <strong>joining someone else's multiplayer session</strong>,
+          you can skip this step.
         </div>
         <div class="guide-diagram">
           <div class="guide-box">vGSM-R</div>
@@ -477,8 +474,25 @@ const SetupWizard = {
           </li>
         </ol>
         <div class="btn-row">
-          <button class="btn-secondary" data-action="next">Skip for now</button>
-          <button class="btn-primary" data-action="next">I've done this</button>
+          <button class="btn-secondary" data-action="prev">Back</button>
+          <button class="btn-primary" data-action="next">Ok, I understand</button>
+        </div>
+    `;
+  },
+
+  render_initials() {
+    const s = this.collectedSettings;
+    return `
+        <div class="step-title">Your Initials</div>
+        <div class="step-subtitle">Enter the initials you use when starting or joining a SimSig session. This is used to identify your panel for telephone calling.</div>
+        <div class="form-group" style="text-align:center;margin:30px 0">
+          <input type="text" id="setup-initials" class="setup-input" maxlength="4"
+                 value="${s.initials || ''}" placeholder="" autocomplete="off" spellcheck="false"
+                 style="font-size:28px;text-align:center;width:5em;text-transform:uppercase;letter-spacing:0.1em">
+        </div>
+        <div class="btn-row">
+          <button class="btn-secondary" data-action="prev">Back</button>
+          <button class="btn-primary" data-action="next">Next</button>
         </div>
     `;
   },
@@ -487,19 +501,23 @@ const SetupWizard = {
     const s = this.collectedSettings;
     return `
       <div class="step-title">SimSig Credentials</div>
-      <div class="step-subtitle">For vGSM-R to work on paid panels, we require you to enter your SimSig credentials to authenticate with SimSig.</div>
+      <div class="step-subtitle">Enter your SimSig account credentials. These are used to connect to SimSig's data gateway for train and signalling information.</div>
       <div class="form-group">
         <label for="setup-username">Username</label>
         <input type="text" id="setup-username" class="setup-input"
-               value="${s.username || ''}" placeholder="Your SimSig username">
+               value="${s.username || ''}" placeholder="Your SimSig username" autocomplete="off">
       </div>
       <div class="form-group">
         <label for="setup-password">Password</label>
         <input type="password" id="setup-password" class="setup-input"
-               value="${s.password || ''}" placeholder="Your SimSig password">
+               value="${s.password || ''}" placeholder="Your SimSig password" autocomplete="off">
+      </div>
+      <div class="setup-privacy-note">
+        Your credentials are stored locally on this PC only and your password is encrypted using Windows Data Protection. We do not send or store your data anywhere else.
       </div>
       <div class="btn-row">
         <button class="btn-secondary" data-action="prev">Back</button>
+        <button class="btn-ghost" data-action="skip-credentials">Skip</button>
         <button class="btn-primary" data-action="next">Next</button>
       </div>
     `;
@@ -507,49 +525,40 @@ const SetupWizard = {
 
   render_tts() {
     const s = this.collectedSettings;
-    const provider = s.ttsProvider || 'elevenlabs';
+    const provider = s.ttsProvider || 'chatterbox';
     const sel = (p) => provider === p ? 'selected' : '';
     const chk = (p) => provider === p ? 'checked' : '';
     return `
         <div class="step-title">Text-to-Speech</div>
         <div class="step-subtitle">vGSM-R uses text-to-speech to voice driver communications.</div>
         <div class="provider-options">
-          <div class="provider-option has-ribbon ${sel('elevenlabs')}" data-provider="elevenlabs">
-            <div class="recommended-ribbon">Recommended</div>
-            <input type="radio" name="tts-provider" value="elevenlabs" ${chk('elevenlabs')}>
+          <div class="provider-option has-ribbon ${sel('chatterbox')}" data-provider="chatterbox">
+            <div class="recommended-ribbon">Best</div>
+            <input type="radio" name="tts-provider" value="chatterbox" ${chk('chatterbox')}>
             <div class="provider-radio"></div>
             <div class="provider-info">
-              <div class="provider-name">ElevenLabs</div>
-              <div class="provider-desc">Ultra-realistic AI voices, requires API key</div>
-              <div class="provider-link" id="elevenlabs-setup-link">Setup Instructions</div>
+              <div class="provider-name">Chatterbox AI</div>
+              <div class="provider-desc">Ultra-realistic cloned voices. Runs locally on your GPU, no internet needed</div>
             </div>
-            <span class="provider-badge badge-premium">Premium</span>
+            <span class="provider-badge badge-green">Excellent</span>
           </div>
           <div class="provider-option ${sel('edge')}" data-provider="edge">
             <input type="radio" name="tts-provider" value="edge" ${chk('edge')}>
             <div class="provider-radio"></div>
             <div class="provider-info">
               <div class="provider-name">Edge TTS</div>
-              <div class="provider-desc">High quality voices, requires internet</div>
+              <div class="provider-desc">Microsoft neural voices. Requires internet connection</div>
             </div>
-            <span class="provider-badge badge-free">Free</span>
+            <span class="provider-badge badge-amber">Ok Quality</span>
           </div>
           <div class="provider-option ${sel('windows')}" data-provider="windows">
             <input type="radio" name="tts-provider" value="windows" ${chk('windows')}>
             <div class="provider-radio"></div>
             <div class="provider-info">
               <div class="provider-name">Windows TTS</div>
-              <div class="provider-desc">Built-in voices, works offline</div>
+              <div class="provider-desc">Built-in system voices. Works offline, no setup needed</div>
             </div>
-            <span class="provider-badge badge-offline">Offline</span>
-          </div>
-        </div>
-        <div id="api-key-section" class="api-key-section ${provider === 'elevenlabs' ? 'visible' : ''}">
-          <div class="form-group">
-            <label for="setup-api-key">ElevenLabs API Key</label>
-            <input type="text" id="setup-api-key" class="setup-input"
-                   value="${s.elevenLabsApiKey || ''}" placeholder="Enter your API key">
-            <div id="credit-status" class="credit-status"></div>
+            <span class="provider-badge badge-red">Basic</span>
           </div>
         </div>
         <div class="btn-row">
@@ -582,9 +591,9 @@ const SetupWizard = {
       <div id="web-port-group" class="form-group setup-hidden ${enabled ? 'visible' : ''}"
         <label for="setup-web-port">Web Server Port</label>
         <input type="number" id="setup-web-port" class="setup-input"
-               value="${s.webPort || '50507'}" min="1024" max="65535">
+               value="${s.webPort || '3000'}" min="1024" max="65535">
         <div id="web-port-error" class="validation-error">Port must be 1024-65535</div>
-        <div class="form-hint">Accessible at http://&lt;your-ip&gt;:${s.webPort || '50507'} on your network</div>
+        <div class="form-hint">Accessible at http://&lt;your-ip&gt;:${s.webPort || '3000'} on your network</div>
       </div>
       <div class="btn-row">
         <button class="btn-secondary" data-action="prev">Back</button>
@@ -595,7 +604,7 @@ const SetupWizard = {
 
   render_complete() {
     const s = this.collectedSettings;
-    const providerNames = { edge: 'Edge TTS', elevenlabs: 'ElevenLabs', windows: 'Windows TTS' };
+    const providerNames = { edge: 'Edge TTS', chatterbox: 'Chatterbox AI', windows: 'Windows TTS' };
     const title = this.updateMode ? 'Settings Reviewed' : 'Setup Complete';
     const subtitle = this.updateMode
       ? 'Here\'s a summary of your updated configuration.'
@@ -606,16 +615,20 @@ const SetupWizard = {
         <div class="step-subtitle" style="text-align:center">${subtitle}</div>
         <ul class="summary-list">
           <li>
+            <span class="summary-label">Initials</span>
+            <span class="summary-value">${s.initials || 'Not set'}</span>
+          </li>
+          <li>
             <span class="summary-label">SimSig Account</span>
-            <span class="summary-value">${s.username ? s.username : 'Not set'}</span>
+            <span class="summary-value">${s.username || 'Skipped'}</span>
+          </li>
+          <li>
+            <span class="summary-label">SimSig Audio</span>
+            <span class="summary-value">${s.muteSimsig ? 'Muted' : 'Keep sounds (manual setup)'}</span>
           </li>
           <li>
             <span class="summary-label">TTS Provider</span>
             <span class="summary-value">${providerNames[s.ttsProvider] || 'Edge TTS'}</span>
-          </li>
-          <li>
-            <span class="summary-label">Browser Access</span>
-            <span class="summary-value">${s.webEnabled ? 'Port ' + (s.webPort || '50507') : 'Disabled'}</span>
           </li>
         </ul>
         <div class="btn-row center stacked">

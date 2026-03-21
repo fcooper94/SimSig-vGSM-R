@@ -48,7 +48,7 @@ module.exports = {
   // TTS
   TTS_GET_VOICES: 'tts:get-voices',
   TTS_SPEAK: 'tts:speak',
-  TTS_CHECK_CREDITS: 'tts:check-credits',
+  TTS_CHECK_CHATTERBOX: 'tts:check-chatterbox',
 
   // Sim info
   SIM_NAME: 'sim:name',

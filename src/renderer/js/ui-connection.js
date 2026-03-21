@@ -48,25 +48,34 @@ const ConnectionUI = {
     if (winClose) winClose.addEventListener('click', () => window.simsigAPI.window.close());
   },
 
-  promptInitials(onConnect) {
+  async promptInitials(onConnect) {
     const modal = document.getElementById('initials-modal');
     const input = document.getElementById('initials-input');
     const okBtn = document.getElementById('initials-ok');
     const cancelBtn = document.getElementById('initials-cancel');
 
-    // Pre-fill with last used initials
-    window.simsigAPI.settings.get('signaller.initials').then((saved) => {
-      input.value = saved || '';
-    });
+    // Pre-fill with last saved initials
+    const saved = await window.simsigAPI.settings.get('signaller.initials');
+    const resizeInput = () => {
+      const len = Math.max(1, input.value.length || 1);
+      input.style.width = (len * 1.2 + 0.6) + 'em';
+    };
+    if (saved) {
+      input.value = saved;
+    }
+    resizeInput();
+    input.addEventListener('input', resizeInput);
 
     modal.classList.remove('hidden');
     input.focus();
+    input.select();
 
     const cleanup = () => {
       modal.classList.add('hidden');
       okBtn.removeEventListener('click', onOk);
       cancelBtn.removeEventListener('click', onCancel);
       input.removeEventListener('keydown', onKey);
+      input.removeEventListener('input', resizeInput);
     };
     const onOk = () => {
       const val = input.value.trim().toUpperCase();

@@ -10,6 +10,7 @@ const PTTUI = {
 
     const settings = await window.simsigAPI.settings.getAll();
     this.keybind = settings.ptt?.keybind || 'Space';
+    console.log(`[PTT] init() — keybind=${this.keybind}`);
 
     // Mouse hold-to-talk
     this.pttBtn.addEventListener('mousedown', (e) => {
@@ -42,6 +43,7 @@ const PTTUI = {
 
     // Global PTT from main process (works even when app is not focused)
     window.simsigAPI.ptt.onStateChange((active) => {
+      console.log(`[PTT] state=${active}`);
       // Don't trigger PTT when settings modal is open or keybind listening
       if (typeof SettingsUI !== 'undefined' && SettingsUI.isListeningForKeybind) return;
       if (typeof SettingsUI !== 'undefined' && !SettingsUI.modal.classList.contains('hidden')) return;
@@ -59,10 +61,6 @@ const PTTUI = {
     this.pttBtn.classList.add('active');
     this.pttStatus.textContent = 'ON';
     this.pttStatus.classList.add('active');
-
-    if (typeof AudioPipeline !== 'undefined') {
-      AudioPipeline.startCapture();
-    }
   },
 
   deactivate() {
@@ -70,9 +68,5 @@ const PTTUI = {
     this.pttBtn.classList.remove('active');
     this.pttStatus.textContent = 'OFF';
     this.pttStatus.classList.remove('active');
-
-    if (typeof AudioPipeline !== 'undefined') {
-      AudioPipeline.stopCapture();
-    }
   },
 };

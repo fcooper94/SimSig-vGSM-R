@@ -43,16 +43,9 @@ const SettingsUI = {
       micSlider.dispatchEvent(new Event('input'));
     });
 
-    // Show/hide ElevenLabs API key row and check credits on provider change
+    // Show/hide Chatterbox URL row on provider change
     document.getElementById('setting-tts-provider').addEventListener('change', (e) => {
-      this.toggleApiKeyRow(e.target.value);
-    });
-
-    // Check credits when API key is changed (debounced)
-    let apiKeyTimer = null;
-    document.getElementById('setting-tts-apikey').addEventListener('input', () => {
-      clearTimeout(apiKeyTimer);
-      apiKeyTimer = setTimeout(() => this.checkElevenLabsCredits(), 500);
+      this.toggleChatterboxRow(e.target.value);
     });
 
     // Detect gateway host button
@@ -127,6 +120,8 @@ const SettingsUI = {
   populate(settings) {
     document.getElementById('setting-host').value = settings.gateway?.host || 'localhost';
     document.getElementById('setting-port').value = settings.gateway?.port || 51515;
+    document.getElementById('setting-initials').value = settings.signaller?.initials || '';
+    document.getElementById(settings.audio?.muteSimsig ? 'setting-simsig-mute' : 'setting-simsig-keep').checked = true;
     document.getElementById('setting-username').value = settings.credentials?.username || '';
     document.getElementById('setting-password').value = settings.credentials?.password || '';
     document.getElementById('setting-ptt-keybind').value = settings.ptt?.keybind || 'ControlLeft';
@@ -144,13 +139,15 @@ const SettingsUI = {
 
     // TTS provider
     const providerSelect = document.getElementById('setting-tts-provider');
-    providerSelect.value = settings.tts?.provider || 'edge';
-    document.getElementById('setting-tts-apikey').value = settings.tts?.elevenLabsApiKey || '';
-    this.toggleApiKeyRow(providerSelect.value);
+    const savedProvider = settings.tts?.provider || 'edge';
+    // Migrate old elevenlabs setting to edge
+    providerSelect.value = savedProvider === 'elevenlabs' ? 'edge' : savedProvider;
+    document.getElementById('setting-tts-chatterbox-url').value = settings.tts?.chatterboxUrl || 'http://localhost:8099';
+    this.toggleChatterboxRow(providerSelect.value);
 
     // Browser access
     document.getElementById('setting-web-enabled').checked = settings.web?.enabled || false;
-    document.getElementById('setting-web-port').value = settings.web?.port || 50507;
+    document.getElementById('setting-web-port').value = settings.web?.port || 3000;
 
     // Appearance
     const darkCheckbox = document.getElementById('setting-dark-mode');
@@ -164,11 +161,16 @@ const SettingsUI = {
     const prevSettings = await window.simsigAPI.settings.getAll();
     const prevHost = prevSettings?.gateway?.host;
     const prevPort = prevSettings?.gateway?.port;
+    const prevUsername = prevSettings?.credentials?.username || '';
+    const prevPassword = prevSettings?.credentials?.password || '';
 
     const newHost = document.getElementById('setting-host').value;
     const newPort = parseInt(document.getElementById('setting-port').value, 10);
     await window.simsigAPI.settings.set('gateway.host', newHost);
     await window.simsigAPI.settings.set('gateway.port', newPort);
+    const initials = document.getElementById('setting-initials').value.trim().toUpperCase();
+    if (initials) await window.simsigAPI.settings.set('signaller.initials', initials);
+    await window.simsigAPI.settings.set('audio.muteSimsig', document.getElementById('setting-simsig-mute').checked);
     await window.simsigAPI.settings.set('credentials.username', document.getElementById('setting-username').value);
     await window.simsigAPI.settings.set('credentials.password', document.getElementById('setting-password').value);
 
@@ -217,7 +219,7 @@ const SettingsUI = {
     // TTS provider settings
     const ttsProvider = document.getElementById('setting-tts-provider').value;
     await window.simsigAPI.settings.set('tts.provider', ttsProvider);
-    await window.simsigAPI.settings.set('tts.elevenLabsApiKey', document.getElementById('setting-tts-apikey').value.trim());
+    await window.simsigAPI.settings.set('tts.chatterboxUrl', document.getElementById('setting-tts-chatterbox-url').value.trim());
 
     // Invalidate cached TTS voices so next speak uses the new provider
     if (typeof PhoneCallsUI !== 'undefined') {
@@ -232,7 +234,7 @@ const SettingsUI = {
 
     // Browser access
     const webEnabled = document.getElementById('setting-web-enabled').checked;
-    const webPort = parseInt(document.getElementById('setting-web-port').value, 10) || 50507;
+    const webPort = parseInt(document.getElementById('setting-web-port').value, 10) || 3000;
     await window.simsigAPI.settings.set('web.enabled', webEnabled);
     await window.simsigAPI.settings.set('web.port', webPort);
     if (typeof PhoneCallsUI !== 'undefined') PhoneCallsUI._browserModeActive = webEnabled;
@@ -256,8 +258,12 @@ const SettingsUI = {
     document.body.classList.toggle('dark-mode', theme === 'dark');
     this._savedTheme = theme; // prevent close() from reverting
 
-    // If the gateway host/port changed, force a disconnect and reconnect so new settings take effect
-    if (gatewayChanged && window.simsigAPI.connection) {
+    // If gateway, credentials, or detect changed, force a disconnect and reconnect
+    const newUsername = document.getElementById('setting-username').value;
+    const newPassword = document.getElementById('setting-password').value;
+    const credentialsChanged = newUsername !== prevUsername || newPassword !== prevPassword;
+    if ((gatewayChanged || credentialsChanged || this._detectedHost) && window.simsigAPI.connection) {
+      this._detectedHost = false;
       window.simsigAPI.connection.disconnect();
       setTimeout(() => window.simsigAPI.connection.connect(), 500);
     }
@@ -326,47 +332,33 @@ const SettingsUI = {
     document.addEventListener('keydown', this._keybindHandler, true);
   },
 
-  toggleApiKeyRow(provider) {
-    const input = document.getElementById('setting-tts-apikey');
-    const status = document.getElementById('tts-credit-status');
-    const isEL = provider === 'elevenlabs';
-    input.disabled = !isEL;
-    if (isEL) {
-      this.checkElevenLabsCredits();
+  toggleChatterboxRow(provider) {
+    const status = document.getElementById('tts-chatterbox-status');
+    if (provider === 'chatterbox') {
+      this.checkChatterboxServer();
     } else {
+      status.textContent = '';
       status.classList.add('hidden');
     }
   },
 
-  async checkElevenLabsCredits() {
-    const status = document.getElementById('tts-credit-status');
-    const apiKey = document.getElementById('setting-tts-apikey').value.trim();
-    if (!apiKey) {
-      status.className = 'status-error';
-      status.textContent = 'Enter an API key to use ElevenLabs voices';
-      status.classList.remove('hidden');
-      return;
-    }
-
-    status.className = 'status-loading';
-    status.textContent = 'Checking credits...';
+  async checkChatterboxServer() {
+    const status = document.getElementById('tts-chatterbox-status');
     status.classList.remove('hidden');
 
-    const result = await window.simsigAPI.tts.checkCredits(apiKey);
-    if (result.error) {
+    // Test by fetching voices — this already works via TTS_GET_VOICES
+    try {
+      const voices = await window.simsigAPI.tts.getVoices();
+      if (voices && voices.length > 0) {
+        status.className = 'status-ok';
+        status.textContent = `Connected — ${voices.length} voices`;
+      } else {
+        status.className = 'status-error';
+        status.textContent = 'Server not running';
+      }
+    } catch (e) {
       status.className = 'status-error';
-      status.textContent = result.error === 'Invalid API key'
-        ? 'Invalid API key - please check and try again'
-        : `Error: ${result.error}`;
-    } else if (result.remaining <= 0) {
-      status.className = 'status-error';
-      status.textContent = `No credits remaining (${result.total.toLocaleString()} used). Please select another provider.`;
-    } else if (result.remaining < 1000) {
-      status.className = 'status-low';
-      status.textContent = `Low credits: ${result.remaining.toLocaleString()} / ${result.total.toLocaleString()} characters remaining`;
-    } else {
-      status.className = 'status-ok';
-      status.textContent = `${result.remaining.toLocaleString()} / ${result.total.toLocaleString()} characters remaining`;
+      status.textContent = 'Server not running';
     }
   },
 
@@ -385,6 +377,7 @@ const SettingsUI = {
       } else if (result.host) {
         hostInput.value = result.host;
         btn.textContent = result.type === 'server' ? 'Localhost' : result.host;
+        this._detectedHost = true;
       }
     } catch (err) {
       btn.textContent = 'Error';

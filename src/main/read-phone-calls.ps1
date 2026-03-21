@@ -248,7 +248,7 @@ try {
         # MainWindowTitle is "Waterloo SimSig" — extract sim name from that
         $title = $simsigProc.MainWindowTitle
         if ($title -match "^(.+?)\s+SimSig$") {
-            $simName = $Matches[1].Trim()
+            $simName = $Matches[1].Trim() -replace '\s+Mini Sim\s*$', ''
         }
         # Get the game window handle (the one titled "SimSig - ...")
         $simsigProcId = $simsigProc.Id
