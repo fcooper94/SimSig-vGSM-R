@@ -348,6 +348,18 @@ const PhoneCallsUI = {
     // Gapless background noise via Web Audio API — alternate between two clips
     this.bgCtx = new AudioContext();
     this.bgCtx.suspend(); // keep suspended until a call starts, to avoid interfering with ringing
+
+    // Unlock AudioContext on first user interaction (required by autoplay policy)
+    const unlockAudio = () => {
+      if (this.bgCtx && this.bgCtx.state === 'suspended') {
+        this.bgCtx.resume();
+        this.bgCtx.suspend(); // re-suspend — startBgNoise will resume when needed
+      }
+      document.removeEventListener('click', unlockAudio);
+      document.removeEventListener('keydown', unlockAudio);
+    };
+    document.addEventListener('click', unlockAudio);
+    document.addEventListener('keydown', unlockAudio);
     this.bgBuffers = [];
     this.bgBufferIndex = 0;
     this.bgSignallerBuffer = null;

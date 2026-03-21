@@ -113,7 +113,7 @@ def scan_voices():
 VOICES = scan_voices()
 
 # Gender tags — female voice samples
-FEMALE_VOICES = {'signaller3', 'signaller4'}
+FEMALE_VOICES = {'signaller3', 'signaller4', 'signaller20'}
 
 
 
