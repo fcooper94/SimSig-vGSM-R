@@ -1,18 +1,12 @@
-const { autoUpdater } = require('electron-updater');
-const { app } = require('electron');
+const { autoUpdater, app } = require('electron');
 
-autoUpdater.autoDownload = false;
-autoUpdater.autoInstallOnAppQuit = false;
+const GITHUB_OWNER = 'fcooper94';
+const GITHUB_REPO = 'SimSig-vGSM-R';
+const UPDATE_URL = `https://update.electronjs.org/${GITHUB_OWNER}/${GITHUB_REPO}/win32/${app.getVersion()}`;
 
 /**
- * Check for updates.
- *
- * @param {object} callbacks
- * @param {function} callbacks.onStatus  - (message, detail) status text
- * @param {function} callbacks.onProgress - (percent) download progress
- *
- * Returns a Promise that resolves when the app should continue.
- * If an update is downloaded it calls quitAndInstall (Promise never resolves).
+ * Check for updates using Squirrel's native updater.
+ * Uses update.electronjs.org which reads GitHub Releases automatically.
  */
 function checkForUpdates({ onStatus, onProgress } = {}) {
   if (!app.isPackaged) {
@@ -21,14 +15,11 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
   }
 
   return new Promise((resolve) => {
-    // Timeout for the initial update check (network request to GitHub).
-    // Once an update is found the timeout is cleared so the download can
-    // take as long as it needs on slow connections.
     const timeout = setTimeout(() => {
       console.log('[Updater] Update check timed out, proceeding');
       cleanup();
       resolve();
-    }, 10000);
+    }, 15000);
 
     function cleanup() {
       clearTimeout(timeout);
@@ -40,11 +31,10 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
       if (onStatus) onStatus('Checking for updates...');
     });
 
-    autoUpdater.on('update-available', (info) => {
-      console.log(`[Updater] Update available: v${info.version}`);
-      if (onStatus) onStatus('Update available', `Downloading v${info.version}...`);
-      clearTimeout(timeout); // let the download run without a timeout
-      autoUpdater.downloadUpdate();
+    autoUpdater.on('update-available', () => {
+      console.log('[Updater] Update available, downloading...');
+      if (onStatus) onStatus('Downloading update...');
+      clearTimeout(timeout);
     });
 
     autoUpdater.on('update-not-available', () => {
@@ -53,17 +43,11 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
       resolve();
     });
 
-    autoUpdater.on('download-progress', (progress) => {
-      const percent = Math.round(progress.percent);
-      if (onProgress) onProgress(percent);
-      if (onStatus) onStatus('Downloading update...', `${percent}%`);
-    });
-
-    autoUpdater.on('update-downloaded', () => {
-      console.log('[Updater] Update downloaded, installing...');
+    autoUpdater.on('update-downloaded', (_event, releaseNotes, releaseName) => {
+      console.log(`[Updater] Update downloaded: ${releaseName}`);
       if (onStatus) onStatus('Installing update...', 'The app will restart');
       setTimeout(() => {
-        autoUpdater.quitAndInstall(false, true);
+        autoUpdater.quitAndInstall();
       }, 1500);
     });
 
@@ -73,11 +57,15 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
       resolve();
     });
 
-    autoUpdater.checkForUpdates().catch((err) => {
+    try {
+      console.log(`[Updater] Feed URL: ${UPDATE_URL}`);
+      autoUpdater.setFeedURL({ url: UPDATE_URL });
+      autoUpdater.checkForUpdates();
+    } catch (err) {
       console.error('[Updater] checkForUpdates failed:', err.message);
       cleanup();
       resolve();
-    });
+    }
   });
 }
 
