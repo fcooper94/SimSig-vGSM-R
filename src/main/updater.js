@@ -1,4 +1,6 @@
 const { autoUpdater } = require('electron-updater');
+const path = require('path');
+const fs = require('fs');
 
 /**
  * Check for updates using electron-updater (reads latest.yml from GitHub Releases).
@@ -11,9 +13,17 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
     return Promise.resolve();
   }
 
+  // Write updater log to file for debugging
+  const logFile = path.join(app.getPath('userData'), 'updater.log');
+  function log(msg) {
+    const line = `[${new Date().toISOString()}] ${msg}`;
+    console.log('[Updater]', msg);
+    try { fs.appendFileSync(logFile, line + '\n'); } catch (_) {}
+  }
+
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
-      console.log('[Updater] Update check timed out, proceeding');
+      log('Update check timed out, proceeding');
       cleanup();
       resolve();
     }, 15000);
@@ -23,39 +33,50 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
       autoUpdater.removeAllListeners();
     }
 
+    log(`Current version: ${app.getVersion()}`);
+    log(`Resources path: ${process.resourcesPath}`);
+
+    // Check if app-update.yml exists (electron-updater needs this)
+    const updateYml = path.join(process.resourcesPath, 'app-update.yml');
+    if (fs.existsSync(updateYml)) {
+      log(`app-update.yml found: ${fs.readFileSync(updateYml, 'utf8').trim()}`);
+    } else {
+      log('WARNING: app-update.yml NOT FOUND — electron-updater cannot determine update source');
+    }
+
     autoUpdater.logger = {
-      info: (...args) => console.log('[Updater]', ...args),
-      warn: (...args) => console.warn('[Updater]', ...args),
-      error: (...args) => console.error('[Updater]', ...args),
+      info: (...args) => log(args.join(' ')),
+      warn: (...args) => log('WARN: ' + args.join(' ')),
+      error: (...args) => log('ERROR: ' + args.join(' ')),
     };
 
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
 
     autoUpdater.on('checking-for-update', () => {
-      console.log('[Updater] Checking for updates...');
+      log('Checking for updates...');
       if (onStatus) onStatus('Checking for updates...');
     });
 
     autoUpdater.on('update-available', (info) => {
-      console.log(`[Updater] Update available: ${info.version}`);
+      log(`Update available: ${info.version}`);
       if (onStatus) onStatus('Downloading update...');
     });
 
-    autoUpdater.on('update-not-available', () => {
-      console.log('[Updater] App is up to date');
+    autoUpdater.on('update-not-available', (info) => {
+      log(`App is up to date (latest: ${info?.version})`);
       cleanup();
       resolve();
     });
 
     autoUpdater.on('download-progress', (progress) => {
-      console.log(`[Updater] Download: ${Math.round(progress.percent)}%`);
+      log(`Download: ${Math.round(progress.percent)}%`);
       if (onProgress) onProgress(progress.percent);
       if (onStatus) onStatus(`Downloading update... ${Math.round(progress.percent)}%`);
     });
 
     autoUpdater.on('update-downloaded', (info) => {
-      console.log(`[Updater] Update downloaded: ${info.version}`);
+      log(`Update downloaded: ${info.version}`);
       if (onStatus) onStatus('Installing update...', 'The app will restart');
       setTimeout(() => {
         autoUpdater.quitAndInstall();
@@ -63,7 +84,7 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
     });
 
     autoUpdater.on('error', (err) => {
-      console.error('[Updater] Error:', err.message);
+      log(`Error: ${err.message}\n${err.stack}`);
       cleanup();
       resolve();
     });
@@ -71,7 +92,7 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
     try {
       autoUpdater.checkForUpdates();
     } catch (err) {
-      console.error('[Updater] checkForUpdates failed:', err.message);
+      log(`checkForUpdates failed: ${err.message}\n${err.stack}`);
       cleanup();
       resolve();
     }
