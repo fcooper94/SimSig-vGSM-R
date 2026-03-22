@@ -22,11 +22,12 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
   }
 
   return new Promise((resolve) => {
+    // 5 minutes — full exe download can be 120MB+
     const timeout = setTimeout(() => {
       log('Update check timed out, proceeding');
       cleanup();
       resolve();
-    }, 15000);
+    }, 300000);
 
     function cleanup() {
       clearTimeout(timeout);
@@ -34,15 +35,6 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
     }
 
     log(`Current version: ${app.getVersion()}`);
-    log(`Resources path: ${process.resourcesPath}`);
-
-    // Check if app-update.yml exists (electron-updater needs this)
-    const updateYml = path.join(process.resourcesPath, 'app-update.yml');
-    if (fs.existsSync(updateYml)) {
-      log(`app-update.yml found: ${fs.readFileSync(updateYml, 'utf8').trim()}`);
-    } else {
-      log('WARNING: app-update.yml NOT FOUND — electron-updater cannot determine update source');
-    }
 
     autoUpdater.logger = {
       info: (...args) => log(args.join(' ')),
@@ -52,6 +44,12 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
 
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.disableWebInstaller = true;
+
+    // Disable differential downloads — GitHub's redirect-based CDN
+    // causes sha512 mismatches on range requests
+    autoUpdater.requestHeaders = { accept: '*/*' };
+    autoUpdater.disableDifferentialDownload = true;
 
     autoUpdater.on('checking-for-update', () => {
       log('Checking for updates...');
@@ -70,9 +68,9 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
     });
 
     autoUpdater.on('download-progress', (progress) => {
-      log(`Download: ${Math.round(progress.percent)}%`);
+      const pct = Math.round(progress.percent);
       if (onProgress) onProgress(progress.percent);
-      if (onStatus) onStatus(`Downloading update... ${Math.round(progress.percent)}%`);
+      if (onStatus) onStatus(`Downloading update... ${pct}%`);
     });
 
     autoUpdater.on('update-downloaded', (info) => {
@@ -84,7 +82,7 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
     });
 
     autoUpdater.on('error', (err) => {
-      log(`Error: ${err.message}\n${err.stack}`);
+      log(`Error: ${err.message}`);
       cleanup();
       resolve();
     });
@@ -92,7 +90,7 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
     try {
       autoUpdater.checkForUpdates();
     } catch (err) {
-      log(`checkForUpdates failed: ${err.message}\n${err.stack}`);
+      log(`checkForUpdates failed: ${err.message}`);
       cleanup();
       resolve();
     }
