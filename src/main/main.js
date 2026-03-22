@@ -240,7 +240,7 @@ app.whenReady().then(async () => {
   const updateStart = Date.now();
   const { checkForUpdates } = require('./updater');
   await checkForUpdates({
-    onStatus: (message, detail) => sendSplashStatus('checking', detail),
+    onStatus: (phase, detail) => sendSplashStatus(phase, detail),
     onProgress: (percent) => sendSplashProgress(percent),
   });
   const elapsed = Date.now() - updateStart;

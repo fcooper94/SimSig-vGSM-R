@@ -49,15 +49,18 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
     autoUpdater.disableWebInstaller = true;
     autoUpdater.disableDifferentialDownload = true;
 
+    let updateVersion = '';
+
     autoUpdater.on('checking-for-update', () => {
       log('Checking for updates...');
-      if (onStatus) onStatus('Checking for updates...');
+      if (onStatus) onStatus('checking');
     });
 
     autoUpdater.on('update-available', (info) => {
-      log(`Update available: ${info.version} — downloading (timeout cleared)`);
-      clearTimeout(timeout); // Don't time out while downloading
-      if (onStatus) onStatus('Downloading update...');
+      updateVersion = info.version;
+      log(`Update available: ${updateVersion} — downloading (timeout cleared)`);
+      clearTimeout(timeout);
+      if (onStatus) onStatus('downloading', `Downloading v${updateVersion}...`);
     });
 
     autoUpdater.on('update-not-available', (info) => {
@@ -69,12 +72,12 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
     autoUpdater.on('download-progress', (progress) => {
       const pct = Math.round(progress.percent);
       if (onProgress) onProgress(progress.percent);
-      if (onStatus) onStatus(`Downloading update... ${pct}%`);
+      if (onStatus) onStatus('downloading', `Downloading v${updateVersion}... ${pct}%`);
     });
 
     autoUpdater.on('update-downloaded', (info) => {
       log(`Update downloaded: ${info.version} — quitting and installing`);
-      if (onStatus) onStatus('Installing update...', 'The app will restart');
+      if (onStatus) onStatus('installing', `Installing v${info.version}...`);
       cleanup();
       // Don't resolve — quit and install immediately
       setTimeout(() => {
