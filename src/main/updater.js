@@ -29,7 +29,7 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
       log('Update check timed out (no response from GitHub), proceeding');
       cleanup();
       resolve();
-    }, 15000);
+    }, 30000);
 
     function cleanup() {
       clearTimeout(timeout);
