@@ -54,6 +54,7 @@ module.exports = {
   CHATTERBOX_INSTALL_PROGRESS: 'chatterbox:install-progress',
   CHATTERBOX_START: 'chatterbox:start',
   CHATTERBOX_GPU_CHECK: 'chatterbox:gpu-check',
+  CHATTERBOX_IS_INSTALLED: 'chatterbox:is-installed',
 
   // Sim info
   SIM_NAME: 'sim:name',

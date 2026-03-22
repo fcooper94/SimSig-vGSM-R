@@ -1384,6 +1384,11 @@ function registerIpcHandlers() {
     });
   });
 
+  // Check if local Chatterbox is installed
+  registerHandler(channels.CHATTERBOX_IS_INSTALLED, () => {
+    return chatterboxManager.isInstalled();
+  });
+
   // TTS — Chatterbox (free local AI voices)
 
   async function fetchChatterboxVoices(baseUrl) {

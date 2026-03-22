@@ -145,17 +145,24 @@ const SettingsUI = {
     document.getElementById('setting-tts-chatterbox-url').value = settings.tts?.chatterboxUrl || 'http://localhost:8099';
     this.toggleChatterboxRow(providerSelect.value);
 
-    // Check GPU for local Chatterbox option
+    // Check GPU and installation status for local Chatterbox option
     if (window.simsigAPI.tts.checkGpu) {
-      window.simsigAPI.tts.checkGpu().then((gpu) => {
+      Promise.all([
+        window.simsigAPI.tts.checkGpu(),
+        window.simsigAPI.tts.isInstalled ? window.simsigAPI.tts.isInstalled() : Promise.resolve(true),
+      ]).then(([gpu, installed]) => {
         const localOption = providerSelect.querySelector('option[value="chatterbox"]');
-        if (localOption && !gpu.hasGpu) {
+        if (!localOption) return;
+        if (!gpu.hasGpu) {
           localOption.disabled = true;
           localOption.textContent = 'Local Voice Server — Requires NVIDIA GPU (not detected)';
-          if (providerSelect.value === 'chatterbox') {
-            providerSelect.value = 'chatterbox-cloud';
-            this.toggleChatterboxRow('chatterbox-cloud');
-          }
+        } else if (!installed) {
+          localOption.disabled = true;
+          localOption.textContent = 'Local Voice Server — Not installed (select during setup)';
+        }
+        if (localOption.disabled && providerSelect.value === 'chatterbox') {
+          providerSelect.value = 'chatterbox-cloud';
+          this.toggleChatterboxRow('chatterbox-cloud');
         }
       });
     }

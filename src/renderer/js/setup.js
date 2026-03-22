@@ -306,7 +306,21 @@ const SetupWizard = {
       const input = document.getElementById('setup-initials');
       if (input) {
         input.addEventListener('input', () => { input.value = input.value.toUpperCase(); });
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.nextStep(); });
         input.focus();
+      }
+    }
+    if (stepId === 'connection') {
+      const usernameInput = document.getElementById('setup-username');
+      const passwordInput = document.getElementById('setup-password');
+      if (usernameInput) {
+        usernameInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { passwordInput?.focus(); }
+        });
+        usernameInput.focus();
+      }
+      if (passwordInput) {
+        passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.nextStep(); });
       }
     }
     if (stepId === 'chatterbox-install') {

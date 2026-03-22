@@ -70,6 +70,14 @@ const channels = {
   PLAYER_WEBRTC_SIGNAL: 'player:webrtc-signal',
   PLAYER_WEBRTC_SIGNAL_SEND: 'player:webrtc-signal-send',
   PLAYER_CALL_REJECTED: 'player:call-rejected',
+  PLAYER_RESCAN: 'player:rescan',
+  TTS_CHECK_CHATTERBOX: 'tts:check-chatterbox',
+  TTS_SPEAK_EDGE_FALLBACK: 'tts:speak-edge-fallback',
+  TTS_CONNECTION_STATUS: 'tts:connection-status',
+  CHATTERBOX_INSTALL_PROGRESS: 'chatterbox:install-progress',
+  CHATTERBOX_START: 'chatterbox:start',
+  CHATTERBOX_GPU_CHECK: 'chatterbox:gpu-check',
+  CHATTERBOX_IS_INSTALLED: 'chatterbox:is-installed',
 };
 
 contextBridge.exposeInMainWorld('simsigAPI', {
@@ -193,6 +201,7 @@ contextBridge.exposeInMainWorld('simsigAPI', {
       return () => ipcRenderer.removeListener(channels.TTS_CONNECTION_STATUS, listener);
     },
     checkGpu: () => ipcRenderer.invoke(channels.CHATTERBOX_GPU_CHECK),
+    isInstalled: () => ipcRenderer.invoke(channels.CHATTERBOX_IS_INSTALLED),
     onInstallProgress: (callback) => {
       const listener = (_event, data) => callback(data);
       ipcRenderer.on(channels.CHATTERBOX_INSTALL_PROGRESS, listener);

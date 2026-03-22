@@ -21,12 +21,14 @@
     "repo": "SimSig-vGSM-R"
   },
   "win": {
-    "target": "squirrel",
+    "target": "nsis",
     "icon": "images/icon.png",
     "requestedExecutionLevel": "asInvoker"
   },
-  "squirrelWindows": {
-    "iconUrl": "https://raw.githubusercontent.com/fcooper94/SimSig-vGSM-R/main/images/icon.png",
+  "nsis": {
+    "oneClick": true,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": false,
     "artifactName": "vGSM-R-Setup-${version}.${ext}"
   }
 }

@@ -1,15 +1,11 @@
-const { autoUpdater, app } = require('electron');
-
-const GITHUB_OWNER = 'fcooper94';
-const GITHUB_REPO = 'SimSig-vGSM-R';
-// Squirrel expects a URL that returns RELEASES file content
-const UPDATE_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest/download`;
+const { autoUpdater } = require('electron-updater');
 
 /**
- * Check for updates using Squirrel's native updater.
- * Uses update.electronjs.org which reads GitHub Releases automatically.
+ * Check for updates using electron-updater (reads latest.yml from GitHub Releases).
  */
 function checkForUpdates({ onStatus, onProgress } = {}) {
+  const { app } = require('electron');
+
   if (!app.isPackaged) {
     console.log('[Updater] Skipping update check in development mode');
     return Promise.resolve();
@@ -27,15 +23,23 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
       autoUpdater.removeAllListeners();
     }
 
+    autoUpdater.logger = {
+      info: (...args) => console.log('[Updater]', ...args),
+      warn: (...args) => console.warn('[Updater]', ...args),
+      error: (...args) => console.error('[Updater]', ...args),
+    };
+
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+
     autoUpdater.on('checking-for-update', () => {
       console.log('[Updater] Checking for updates...');
       if (onStatus) onStatus('Checking for updates...');
     });
 
-    autoUpdater.on('update-available', () => {
-      console.log('[Updater] Update available, downloading...');
+    autoUpdater.on('update-available', (info) => {
+      console.log(`[Updater] Update available: ${info.version}`);
       if (onStatus) onStatus('Downloading update...');
-      clearTimeout(timeout);
     });
 
     autoUpdater.on('update-not-available', () => {
@@ -44,8 +48,14 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
       resolve();
     });
 
-    autoUpdater.on('update-downloaded', (_event, releaseNotes, releaseName) => {
-      console.log(`[Updater] Update downloaded: ${releaseName}`);
+    autoUpdater.on('download-progress', (progress) => {
+      console.log(`[Updater] Download: ${Math.round(progress.percent)}%`);
+      if (onProgress) onProgress(progress.percent);
+      if (onStatus) onStatus(`Downloading update... ${Math.round(progress.percent)}%`);
+    });
+
+    autoUpdater.on('update-downloaded', (info) => {
+      console.log(`[Updater] Update downloaded: ${info.version}`);
       if (onStatus) onStatus('Installing update...', 'The app will restart');
       setTimeout(() => {
         autoUpdater.quitAndInstall();
@@ -59,8 +69,6 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
     });
 
     try {
-      console.log(`[Updater] Feed URL: ${UPDATE_URL}`);
-      autoUpdater.setFeedURL({ url: UPDATE_URL });
       autoUpdater.checkForUpdates();
     } catch (err) {
       console.error('[Updater] checkForUpdates failed:', err.message);

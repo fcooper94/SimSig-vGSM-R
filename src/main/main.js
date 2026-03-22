@@ -1,6 +1,3 @@
-// Handle Squirrel install/update/uninstall events — must be first
-if (require('electron-squirrel-startup')) process.exit(0);
-
 const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron');
 const path = require('path');
 const webServer = require('./web-server');
