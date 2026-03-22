@@ -22,12 +22,14 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
   }
 
   return new Promise((resolve) => {
-    // 5 minutes — full exe download can be 120MB+
+    // 15s timeout for the initial update CHECK only — if we can't reach
+    // GitHub in 15s, proceed with the app. Once a download starts,
+    // the timeout is cleared and we wait for it to finish.
     const timeout = setTimeout(() => {
-      log('Update check timed out, proceeding');
+      log('Update check timed out (no response from GitHub), proceeding');
       cleanup();
       resolve();
-    }, 300000);
+    }, 15000);
 
     function cleanup() {
       clearTimeout(timeout);
@@ -45,10 +47,6 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.disableWebInstaller = true;
-
-    // Disable differential downloads — GitHub's redirect-based CDN
-    // causes sha512 mismatches on range requests
-    autoUpdater.requestHeaders = { accept: '*/*' };
     autoUpdater.disableDifferentialDownload = true;
 
     autoUpdater.on('checking-for-update', () => {
@@ -57,7 +55,8 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
     });
 
     autoUpdater.on('update-available', (info) => {
-      log(`Update available: ${info.version}`);
+      log(`Update available: ${info.version} — downloading (timeout cleared)`);
+      clearTimeout(timeout); // Don't time out while downloading
       if (onStatus) onStatus('Downloading update...');
     });
 
@@ -74,17 +73,19 @@ function checkForUpdates({ onStatus, onProgress } = {}) {
     });
 
     autoUpdater.on('update-downloaded', (info) => {
-      log(`Update downloaded: ${info.version}`);
+      log(`Update downloaded: ${info.version} — quitting and installing`);
       if (onStatus) onStatus('Installing update...', 'The app will restart');
+      cleanup();
+      // Don't resolve — quit and install immediately
       setTimeout(() => {
-        autoUpdater.quitAndInstall();
+        autoUpdater.quitAndInstall(false, true); // isSilent=false, isForceRunAfter=true
       }, 1500);
     });
 
     autoUpdater.on('error', (err) => {
       log(`Error: ${err.message}`);
       cleanup();
-      resolve();
+      resolve(); // Proceed with app on error
     });
 
     try {
